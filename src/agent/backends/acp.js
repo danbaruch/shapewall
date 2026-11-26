@@ -140,7 +140,11 @@ const CLAUDE_ACTING_TOOLS = [
   'Skill',
 ]
 // What goes with session/new.
-export function readOnlySession(kind) {
+// `exec`: the session has Shapewall's own tool server (exec-mcp.js) for the
+// read-style commands and the browser a turn may get (hosted chat on a solo
+// turn, comment pickup): each of its tools checks, and asks where it must,
+// inside Shapewall, so it needs no permission request of its own.
+export function readOnlySession(kind, { exec = false } = {}) {
   if (kind !== 'claude') return {}
   return {
     _meta: {
@@ -152,6 +156,7 @@ export function readOnlySession(kind) {
           // No MCP servers from .mcp.json, settings or plugins.
           strictMcpConfig: true,
           tools: CLAUDE_READ_TOOLS,
+          ...(exec ? { allowedTools: ['mcp__' + EXEC_MCP_NAME] } : {}),
           disallowedTools: CLAUDE_ACTING_TOOLS,
           allowDangerouslySkipPermissions: false,
           // Claude Code's auto memory off (see connectedEnv).
@@ -227,6 +232,36 @@ export function remoteEditSession(kind, { exec = false } = {}) {
     },
   }
 }
+// ---- A local board's restricted session (1.4.0) ------------------------------
+// A local board's chat (plan 3.3): the same restricted session a connected
+// agent gets, with the person at the board answering its edit cards. No
+// settings files (so no ~/.claude allow rules, hooks, plugins or .mcp.json),
+// no auto memory, no shell of its own: commands, the shell (in the OS
+// sandbox) and the browser come from Shapewall's tool server (exec-mcp.js),
+// the board's own tools from the owner MCP server. `agent.localSession:
+// "own"` in the config keeps the 1.2.0 session (the agent's own full tool
+// set) for one minor, with a deprecation line. Claude Code only: other
+// adapters take no such options (spike S1) and keep their own session.
+export function localRestrictedSession(kind, { exec = false } = {}) {
+  if (kind !== 'claude') return {}
+  const tools = [...CLAUDE_READ_TOOLS, ...CLAUDE_EDIT_TOOLS]
+  return {
+    _meta: {
+      claudeCode: {
+        options: {
+          settingSources: [],
+          strictMcpConfig: true,
+          tools,
+          ...(exec ? { allowedTools: ['mcp__' + EXEC_MCP_NAME] } : {}),
+          disallowedTools: CLAUDE_ACTING_TOOLS.filter((tool) => !tools.includes(tool)),
+          allowDangerouslySkipPermissions: false,
+          settings: NO_AUTO_MEMORY,
+        },
+      },
+    },
+  }
+}
+
 // The two answers a card from a hosted board has.
 export const REMOTE_OPTIONS = [
   { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
@@ -596,13 +631,19 @@ export function authError(label, argv) {
 // `instructions`: the instruction files (src/agent/instructions.js) when the
 // agent could not take them as a system prompt: the owner's and the project's
 // text, after the preamble, not quoted as board data.
-export function promptBlocks({ messages, fresh, image, thread, preamble = null, instructions = '' }) {
+// `capabilities`: what this turn may do (capability-render.js toPrompt), in
+// every prompt, after the instruction files: it can change from turn to turn.
+export function promptBlocks({ messages, fresh, image, thread, preamble = null, instructions = '', capabilities = '' }) {
   const blocks = []
   const last = messages.at(-1)
+  const capabilityBlock = capabilities
+    ? { type: 'text', text: `<shapewall-capabilities source="shapewall">\n${capabilities}\n</shapewall-capabilities>` }
+    : null
   if (fresh) {
     blocks.push({ type: 'text', text: preamble || ACP_PREAMBLE })
     if (instructions)
       blocks.push({ type: 'text', text: `<shapewall-instructions source="instructions">\n${instructions}\n</shapewall-instructions>` })
+    if (capabilityBlock) blocks.push(capabilityBlock)
     const earlier = messages
       .slice(0, -1)
       .map((message) => ({
@@ -625,6 +666,7 @@ export function promptBlocks({ messages, fresh, image, thread, preamble = null, 
     // Suggested next steps (context.js): its own block, after the thread so far.
     blocks.push({ type: 'text', text: NEXT_STEPS_PROMPT })
   } else {
+    if (capabilityBlock) blocks.push(capabilityBlock)
     // A session that goes on: what people wrote in the thread since the
     // agent's last answer, when it was not for the agent (a shared thread
     // answers an @mention only, src/agent/triggers.js). The session never
@@ -707,12 +749,16 @@ class AcpProcess {
     extraEnv = {},
     readOnly = false,
     remoteEdit = null,
+    restricted = false,
+    extraServers = '[]',
     preamble = null,
     instructions = null,
   }) {
-    Object.assign(this, { argv, label, sandbox, limits, log, thread, onGone, mcpServers, readOnly, remoteEdit, preamble })
-    // A connected agent's instruction files: { mode, configDir, onLoad } (src/agent/instructions.js).
-    this.instructions = readOnly || remoteEdit ? instructions : null
+    Object.assign(this, { argv, label, sandbox, limits, log, thread, onGone, mcpServers, readOnly, remoteEdit, preamble, extraServers })
+    // A local board's restricted session (localRestrictedSession): Claude Code only.
+    this.restricted = Boolean(restricted) && !readOnly && !remoteEdit && acpAgentKind(argv) === 'claude'
+    // A connected agent's (or a restricted local session's) instruction files: { mode, configDir, onLoad } (src/agent/instructions.js).
+    this.instructions = readOnly || remoteEdit || this.restricted ? instructions : null
     // The files' text for the first prompt, when the agent takes no system prompt.
     this.instructionsBlock = ''
     // Edits from a hosted board: the project's rule files, read when the session starts.
@@ -725,7 +771,7 @@ class AcpProcess {
       ...agentEnv(env),
       ...extraEnv,
       ...(readOnly ? readOnlyEnv(acpAgentKind(argv)) : {}),
-      ...(readOnly || remoteEdit ? connectedEnv(acpAgentKind(argv)) : {}),
+      ...(readOnly || remoteEdit || this.restricted ? connectedEnv(acpAgentKind(argv)) : {}),
       // The agent and every command it runs are an agent's (src/agent-run.js).
       ...agentRunEnv(),
     }
@@ -743,6 +789,10 @@ class AcpProcess {
 
   get pid() {
     return this.child?.pid ?? null
+  }
+
+  get hasExec() {
+    return this.mcpServers.some((server) => server?.name === EXEC_MCP_NAME)
   }
 
   // A connected agent (read only, or taking edits from a hosted board): its
@@ -823,7 +873,8 @@ class AcpProcess {
         clientCapabilities: {
           fs: { readTextFile: true, writeTextFile: !this.readOnly },
           // Edits from a hosted board: a terminal only when the machine lists commands.
-          terminal: !this.readOnly && !(this.remoteEdit && !this.remoteEdit.commands.length),
+          // A restricted local session: none (commands come from Shapewall's tool server).
+          terminal: !this.readOnly && !this.restricted && !(this.remoteEdit && !this.remoteEdit.commands.length),
         },
         clientInfo: { name: 'shapewall', title: 'Shapewall', version: VERSION },
       })
@@ -842,10 +893,12 @@ class AcpProcess {
         ...(appended && takesSystemPrompt ? { systemPrompt: { mode: 'append', content: [{ type: 'text', text: appended }] } } : {}),
         // Read only: the agent's own controls are set so that it cannot act (readOnlySession).
         ...(this.readOnly
-          ? readOnlySession(acpAgentKind(this.argv))
+          ? readOnlySession(acpAgentKind(this.argv), { exec: this.hasExec })
           : this.remoteEdit
-            ? remoteEditSession(acpAgentKind(this.argv), { exec: this.mcpServers.some((server) => server?.name === EXEC_MCP_NAME) })
-            : {}),
+            ? remoteEditSession(acpAgentKind(this.argv), { exec: this.hasExec })
+            : this.restricted
+              ? localRestrictedSession(acpAgentKind(this.argv), { exec: this.hasExec })
+              : {}),
       })
       this.sessionId = session.sessionId
       this.choices = sessionChoices(session)
@@ -2000,6 +2053,9 @@ function sandboxRefusal(error) {
   return new RequestError(-32000, `refused: ${cut(error?.code || error?.message, 100)}`)
 }
 
+// What makes a turn's extra tool servers the same ones (a reused session keeps them).
+const serverKey = (list) => JSON.stringify((Array.isArray(list) ? list : []).map((item) => [item?.name, item?.command, item?.args]))
+
 // createAcpBackend(settings, { env, root, protect, limits, log })
 export function createAcpBackend(
   settings,
@@ -2036,7 +2092,7 @@ export function createAcpBackend(
     idle[0].kill('evicted')
   }
 
-  const start = async (thread, signal, { evict = true, workdir = null } = {}) => {
+  const start = async (thread, signal, { evict = true, workdir = null, mcpServers = null } = {}) => {
     evictFor(evict)
     const agent = new AcpProcess({
       argv: settings.acp.argv,
@@ -2051,10 +2107,14 @@ export function createAcpBackend(
       readOnly: settings.readOnly === true,
       // Edits from a hosted board (settings.remoteEdit: { commands, allowPaths }).
       remoteEdit: settings.readOnly !== true && settings.remoteEdit ? settings.remoteEdit : null,
+      // A local board's restricted session (settings.localSession "restricted", Claude Code only).
+      restricted: settings.localSession === 'restricted',
       // A connected agent's instruction files (agent connect): read when the session starts.
       instructions: settings.instructions || null,
-      // A turn's own tools (exec-mcp, for a fix) come with its working folder.
-      mcpServers: workdir?.mcpServers || mcpServersFor?.(thread) || [],
+      // A turn's own tools (exec-mcp, for a fix) come with its working folder;
+      // a thread's exec relay (exec-mcp.js createThreadRelay) with the turn.
+      mcpServers: [...(workdir?.mcpServers || mcpServersFor?.(thread) || []), ...(mcpServers || [])],
+      extraServers: serverKey(mcpServers),
       onGone: (item) => {
         if (item.stopped || !item.pid) processPool?.agents.delete(item)
         if (processes.get(item.thread) === item) processes.delete(item.thread)
@@ -2112,20 +2172,21 @@ export function createAcpBackend(
     return pending
   }
 
-  const sessionFor = async (thread, signal, { evict, workdir = null }) => {
+  const sessionFor = async (thread, signal, { evict, workdir = null, mcpServers = null }) => {
     if (signal?.aborted) throw new AgentError('agent_stopped', 'The agent start was cancelled.', 409)
     let agent = processes.get(thread)
     if (evict && agent?.turn) {
       await agent.settled()
       agent = processes.get(thread)
     }
-    if (evict && agent?.state === 'ready' && agent.root !== rootOf(workdir)) {
+    // Started in another folder, or with other tools of Shapewall's: started afresh.
+    if (evict && agent?.state === 'ready' && (agent.root !== rootOf(workdir) || agent.extraServers !== serverKey(mcpServers))) {
       agent.kill('workdir')
       await agent.stoppingPromise
       agent = null
     }
     if (agent?.state === 'ready') return agent
-    agent = await start(thread, signal, { evict, workdir })
+    agent = await start(thread, signal, { evict, workdir, mcpServers })
     agent.idle()
     return agent
   }
@@ -2157,12 +2218,25 @@ export function createAcpBackend(
     // started afresh when its session was in another folder.
     // `gate`: { decide, approved, expected } for a turn that takes edits
     // from a hosted board (AcpProcess.remoteRequest).
-    async *stream({ messages, signal, thread = 'default', choices = null, workdir = null, gate = null, preamble = null }) {
+    // `mcpServers`: Shapewall's tool servers for this turn (a thread's exec relay).
+    // `capabilities`: what this turn may do, as the prompt says it (toPrompt).
+    async *stream({
+      messages,
+      signal,
+      thread = 'default',
+      choices = null,
+      workdir = null,
+      gate = null,
+      preamble = null,
+      mcpServers = null,
+      capabilities = '',
+    }) {
       if (signal?.aborted) return
       const existing = processes.get(thread)
-      if (existing?.state !== 'ready' || existing.root !== rootOf(workdir)) yield { type: 'status', text: `Starting ${settings.label}` }
+      if (existing?.state !== 'ready' || existing.root !== rootOf(workdir) || existing.extraServers !== serverKey(mcpServers))
+        yield { type: 'status', text: `Starting ${settings.label}` }
       const prepared = await onThread(thread, async () => {
-        const agent = await sessionFor(thread, signal, { evict: true, workdir })
+        const agent = await sessionFor(thread, signal, { evict: true, workdir, mcpServers })
         await agent.applyChoices(choices)
         if (signal?.aborted) return null
         const used = usedOptions(agent.options())
@@ -2175,6 +2249,7 @@ export function createAcpBackend(
             thread,
             preamble: preamble || settings.preamble || null,
             instructions: agent.instructionsBlock,
+            capabilities,
           }),
           signal,
           gate,
@@ -2225,10 +2300,10 @@ export function createAcpBackend(
     // or the one already running. Never evicts another thread's session; an
     // unused one stops after `idleMs` like any idle session. `choices` are
     // applied to it as they would be before a turn.
-    async prepare(thread, { choices = null, signal = null } = {}) {
+    async prepare(thread, { choices = null, signal = null, mcpServers = null } = {}) {
       if (closed) throw new AgentError('agent_start', 'The server is stopping.')
       return onThread(thread, async () => {
-        const agent = await sessionFor(thread, signal, { evict: false })
+        const agent = await sessionFor(thread, signal, { evict: false, mcpServers })
         if (!agent.turn) await agent.applyChoices(choices)
         return agent.options()
       })

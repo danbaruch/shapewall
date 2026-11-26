@@ -478,10 +478,15 @@ What an agent's tools may reach (1.4.0, see [what each turn may do](agent-harden
   of the config, its boards and environments). Up to 40 exact http(s) origins, such as `"https://staging.example.com"`: no path, no
   user or password. The machine has the last word: its own `browser` setting switches the browser off whatever the config says, and
   these extra origins count only on solo turns of a machine without a login for the browser (`browserAuth` or `browserProfile`).
-  On every other turn an origin here counts only if the machine's own `browserAllow` names it too. The config is read from your
+  On every other turn an origin here counts only if the machine's own `browserAllow` names it too, and so does an address on
+  your machine (loopback, `localhost`, a local name such as `app.test`) that a `baseUrl` or `publicUrl` names. The config is read
+  from your
   checkout, never from the fix copy an agent writes in.
 - `fixIn`: `"copy"` (the default, every fix in a fix copy of its own) or `"checkout"`, which lets a local board's owner keep solo
   fixes in this checkout. Every other tier and every hosted path still uses a fix copy.
+- `localSession`: `"restricted"` (the default since 1.4.0: a local board's Claude Code session gets read and edit tools plus
+  Shapewall's own tools for commands, the sandboxed shell and the browser, and never its own shell or your `~/.claude` settings)
+  or `"own"`, the 1.2.0 session with the agent's own full tool set. `"own"` is deprecated and goes in 2.0.
 
 ```json
 { "agent": { "browser": { "allow": ["https://staging.example.com"] }, "fixIn": "copy" } }
@@ -509,7 +514,7 @@ digits and dashes. A string is short for `{ "run": "..." }`. Each takes:
 | `inputs`   | string[] | manifests, lockfiles, configs, named files | More project-relative paths or globs an approval covers, on top of the manifests, lockfiles and `.npmrc` (always). Up to 50.        |
 | `mutating` | boolean  | `true`                                     | `false`: the command only reads (a linter, a type check). Hosted chat runs only these, and only on its owner's turns.               |
 | `args`     | boolean  | `false`                                    | `true`: the agent may add arguments to it.                                                                                          |
-| `ready`    | URL      | none                                       | For a dev server: the loopback URL that answers once it is up. `$PORT` is the free port Shapewall picks. Not in the OS sandbox.     |
+| `ready`    | URL      | none                                       | For a dev server: the loopback URL that answers once it is up. `$PORT` is the free port Shapewall picks. Bind `127.0.0.1`.          |
 
 `$PORT` goes bare, as its own word or part of one (`--port $PORT`, `--port=$PORT`): quoted or escaped it is refused, as it would
 read as text to a person and as the port to Shapewall, and it is never the program itself. `"args": true` lets the agent add any

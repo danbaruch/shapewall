@@ -280,6 +280,9 @@ export function starterSettings(config, { env = process.env, flags = {} } = {}) 
     limits: diskFlag(base.limits, flags['max-disk']),
     testCommand: base.testCommand,
     setupCommand: base.setupCommand,
+    // The checkout's config, read when the run starts (never the worktree's):
+    // the capability resolver reads its `commands` and origins from it.
+    config,
     branchPrefix: base.branchPrefix,
     remote: remoteFlag(flags, 'git-remote', 'origin'),
     prBase: base.prBase,

@@ -483,6 +483,11 @@ owner has opted in (on a local board these are the defaults; a hosted connection
 Hosted chat answers only: no edits, and on solo turns only the commands marked `"mutating": false` and the browser. No OS sandbox on
 the machine (Windows, no bubblewrap) means no full shell: commands fall back to a card each, and the line says why.
 
+On Linux with the OS sandbox (and `nsenter`), the browser runs inside it too: no home folder, nothing writable but its own session
+folder, and no network but the allowed addresses, checked by Shapewall's proxy and again by the sandbox's. Chromium's own sandbox
+cannot start in there, so the OS sandbox is its boundary. If that start fails, the browser is off for the task. Elsewhere (macOS,
+Windows, no bubblewrap) the browser starts on the machine as before.
+
 **A full shell, or a command that changes files, is an edit power.** Neither is ever on while edits are off. A connected agent
 whose machine says `approvals: "none"` (the default) reads and answers only on every tier: no edits, no named or exact commands, no
 shell, no push. The console card, `agent status` and what `agent connect` prints all say so, and a test holds them to each other.
@@ -490,7 +495,8 @@ shell, no push. The console card, `agent status` and what `agent connect` prints
 **The machine sets the ceiling, the server can only lower it.** A project's agent policy on the server (Workspace Console, Agent
 policy) can set `maxTier` (`"solo"`, `"team"` or `"open"`), `shell: false` and `browser: false`, for the project and per board; a
 board's own setting can only narrow the project's. The server sends this at hello and again with every turn, and the machine applies
-the narrower of the two. Nothing the server sends can add a capability: a test feeds the resolver random server input and checks
+the narrower of the two. A turn that is already running asks again before each command or browser step, at most every 5 seconds,
+so a narrowing made mid-turn can reach it up to 5 seconds late. Nothing the server sends can add a capability: a test feeds the resolver random server input and checks
 that every line stays at or below what it was without it.
 
 **The machine's keys** (`agent-policy.json` version 2, beside the version 1 keys above; the same keys go in a project's `capabilities`
@@ -511,15 +517,22 @@ reads a missing key as the "Local board" column:
 | `browserAuth`        | a recorded auth name                                                                                                | none           | none                                                     | none                         |
 | `browserProfile`     | a folder Shapewall made for the agent (it holds a marker file); never a real browser's own profile or a copy of one | none           | none                                                     | none                         |
 | `browserProfileTeam` | `true` / `false`                                                                                                    | `false`        | `false`                                                  | `false`                      |
+| `browserNoSandbox`   | `true` / `false` (the browser may start without Chromium's own sandbox where it cannot start; solo and team only)   | `false`        | `false`                                                  | `false`                      |
 | `extensionsFor`      | `"owner"` and handles                                                                                               | `["owner"]`    | `[]`                                                     | `[]`                         |
 | `allowTool`          | exact `mcp__server__tool` names, up to 20                                                                           | `[]`           | `[]`                                                     | `[]`                         |
 | `handoffHops`        | 0 to 2                                                                                                              | `0`            | `0`                                                      | `0`                          |
 
 A key that is there with a value this version does not know reads as its narrowest, and the connector names it. Origins in a
 project's `agent.browser.allow` count only where the machine's `browserAllow` has them too, except on a solo turn of a machine
-without a login for the browser: the machine wins. A `browserProfile` is read after resolving links, and only a folder holding
-Shapewall's marker file counts, so a real browser's profile folder (any browser, any name), a copy of one or a link to one is
-refused. A missing or malformed trust block reads as open. In `agents.json` a key it does not know at all is an
+without a login for the browser: the machine wins. The same goes for an address on this machine that the config names in any
+`baseUrl` or `publicUrl` (a loopback address in any spelling, `0.0.0.0`, `localhost` and `*.localhost`, or a local name such as
+`app.test`): below that solo turn it counts only where `browserAllow` names that exact origin, so a committed config cannot open
+a port on your machine to a team or open turn; the Browser line names what it held back and the command that lists it. A
+`browserProfile` is a name (`--browser-profile staging-login`) for a folder in
+`$XDG_STATE_HOME/shapewall/agent-browser-profiles/` (`~/.local/state/...` without it): that folder is yours, `0700` and never a
+link, and the commands an agent runs never see it. A profile is read after resolving links, and only a folder in there holding
+Shapewall's marker file counts, so a real browser's profile folder (any browser, any name), a copy of one, a link to one or a
+folder anywhere else (an older policy's path included: it reads as no profile, with a warning) is refused. A missing or malformed trust block reads as open. In `agents.json` a key it does not know at all is an
 error for that project, so a typo cannot fall back to a wider default.
 
 **Upgrading from version 1.** A version 1 `agent-policy.json` is read as exactly what it allowed before: no shell, no browser, no
@@ -560,7 +573,7 @@ for the agent (`exec-mcp`, internal) beside the agent's file tools, and the agen
 - `run_command { command, reason }`: on solo turns (and team turns with `trustTeamShell`), a shell command line inside the OS
   sandbox; otherwise only one of the machine's exact commands, character for character, each after a card.
 - `start_dev_server { name }`, `stop_dev_server`: the named `dev` command on a free port (`$PORT`), checked with its `ready` URL,
-  stopped when the turn ends. Its port is the one local address the session's commands may reach.
+  stopped when the turn ends. Its port joins the agent browser's allowlist for this session only, and leaves it when it stops.
 - `shapewall_capabilities`: what this turn may do, the same answer the console shows.
 
 Every check is in Shapewall's process, not in the tool server the agent's adapter starts (that one only relays calls, over a socket
@@ -588,10 +601,15 @@ again, and a card's "allow" counts only if the command, its config line and its 
   grows past 2 GB is emptied after the command, with a note in its output. There is no CPU or memory cgroup;
 - stops after 10 minutes, with its output capped at 64 KB, and its whole process group with it.
 
-**Dev servers** (`start_dev_server`) do not run in the OS sandbox: on Linux each sandboxed command gets its own network namespace,
-so a server started by one command could not be reached by the next (or by a browser), and the runtime forwards no ports. They are
-offered only where commands run without the sandbox (no sandbox on this machine, each after a card, or `--shell-unsandboxed`), and
-what a dev server writes in the fix copy counts as changed by the agent when it stops.
+**Dev servers** (`start_dev_server`). On Linux each sandboxed command gets its own network namespace, so a dev server runs in a
+sandbox of its own (the same folders and network as the session's commands) and Shapewall bridges exactly one port to it: a
+loopback port Shapewall binds itself and holds until the server stops, joined to the server's namespace by a small relay that
+`nsenter` (util-linux) starts in that namespace only. The agent's other commands cannot reach it, and no other port of theirs is
+reachable from outside. On macOS the sandbox could let a server listen only by opening every loopback port of the machine to it,
+so dev servers do not run in the OS sandbox there. Without the sandbox (no sandbox on this machine, each after a card, or
+`--shell-unsandboxed`) the server binds its port itself, and the browser gets it only when the listener on `127.0.0.1` is the
+server's own process group (Linux and macOS; not on Windows). The browser never opens Shapewall's own server port. What a dev
+server writes in the fix copy counts as changed by the agent when it stops.
 
 The sandbox starts only in the fix copy Shapewall made for the turn, inside the folder it keeps fix copies in: never in your
 checkout, never in a folder that holds the home folder. The fix copy is a Git worktree of your repository; commands in it can run
@@ -649,7 +667,8 @@ limits are in Shapewall's code, not in what the model is told:
   refused or sent back to a blank page, popups off the list are closed.
 - **No debugging port.** Shapewall drives Chromium over a pipe; no remote debugging port is opened, and no other program can attach.
   Your own Chrome and its profile are never used. Chromium's own sandbox stays on: where it cannot start, the browser stays off
-  unless the machine's owner allows a browser without it, and then every browser tool result says so.
+  unless the machine's owner allows a browser without it (`browserNoSandbox`, solo and team turns only), and then every browser
+  tool result says so.
 - **Nothing left behind.** The profile is a new folder in a folder private to you (`$XDG_RUNTIME_DIR/shapewall-agent-browser/`,
   or `shapewall-agent-browser-<uid>/` in the system temp folder; one that is a link, belongs to someone else or that others can
   open is refused), removed at close, when Chromium crashes, when Shapewall exits or is stopped, and after a forced kill by the next
@@ -657,8 +676,9 @@ limits are in Shapewall's code, not in what the model is told:
 - **Logins only where the turn allows them.** A recorded login (`browserAuth`, from `.shapewall-auth/<name>.auth.json` in the
   project folder, a plain folder and not a link; cookies kept to the allowed hosts and their parent domains, never a public suffix
   such as `.com` or `.co.uk`) or a persistent agent profile (`browserProfile`) loads only on the tiers in the table
-  above. A profile folder is checked again right before Chromium starts: only a folder Shapewall made (it holds a marker file), never
-  a browser's own profile folder.
+  above. A profile folder is checked again right before Chromium starts and once more right after: only a folder Shapewall made
+  (it holds a marker file) in its own profile folder, the same folder both times, never a browser's own profile folder; one that
+  changed in between closes the browser.
 
 What it cannot cover: the allowed app itself is the agent's to use, so a page there can still show the agent hostile text (page text
 comes back marked as untrusted). A hostname's DNS is trusted at the moment the browser starts. The address an allowed name resolved

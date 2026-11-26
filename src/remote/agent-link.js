@@ -35,15 +35,25 @@ import { runTurn } from '../agent/run.js'
 import { git } from '../agent/starter/worktree.js'
 import { instructionsStatus, loadInstructions } from '../agent/instructions.js'
 import { agentHandles, shouldRespond } from '../agent/triggers.js'
-import { CAPABILITY_NARROWEST, cleanHandle, hostPlatform, machineView, namedCommands, resolveCapabilities } from '../agent/capabilities.js'
+import {
+  CAPABILITY_NARROWEST,
+  cleanHandle,
+  combineNarrowing,
+  hostPlatform,
+  machineView,
+  namedCommands,
+  resolveCapabilities,
+} from '../agent/capabilities.js'
 import { approvalsDir, createApprovalStore } from '../agent/command-approvals.js'
-import { startExecSession } from '../agent/exec-mcp.js'
+import { createThreadRelay, startExecSession } from '../agent/exec-mcp.js'
+import { commandReadDenied } from '../agent/local-tools.js'
 import { loadConfig } from '../config.js'
-import { capabilitySummary } from '../agent/capability-render.js'
+import { capabilitySummary, toPrompt } from '../agent/capability-render.js'
 import { FixRefusal, dropFixFolder, dropHeld, finishFix, heldDiff, heldSummary, prepareFix, pushFix, readHeld } from './agent-fix.js'
 import { JobError, TURN_ID_RE, cleanJob, jobConversation } from './agent-job.js'
 import { RemoteError, badTokenMessage, readBounded } from './remote.js'
 import { ID_RE } from '../config.js'
+import { COMMENT_BODY_MAX } from '../store.js'
 
 export const LINK_DEFAULTS = {
   // The server sends a keepalive every 15 seconds: quiet for this long
@@ -68,6 +78,16 @@ export const LINK_DEFAULTS = {
   pushCardMs: 10 * 60_000,
   // How long a command card (exec-mcp) waits for someone on the board (the server's cap for a card).
   commandCardMs: 2 * 60_000,
+  // How often a running turn asks the server again for its narrowing (at most).
+  narrowingMs: 5000,
+}
+
+// The narrowing a turn runs under after the server answered again: never
+// wider than the one it started with. `pickup`: a missing one stays the
+// narrowest (open, no commands).
+export function tighter(before, now, pickup = false) {
+  const next = now && typeof now === 'object' ? now : pickup ? { maxTier: 'open', shell: false } : null
+  return combineNarrowing(before, next)
 }
 
 // The sha256 of a plain file's bytes (as agent-fix.js compares them), or null.
@@ -144,6 +164,8 @@ export function createLinkClient({ origin, token, source = null, fetchImpl = fet
     job: (id, signal) => call('GET', turn(id), { signal }),
     events: (id, body, signal) => call('POST', `${turn(id)}/events`, { json: body, signal }),
     finish: (id, body, signal) => call('POST', `${turn(id)}/finish`, { json: body, signal }),
+    // The project's and the board's ceiling for a running turn, as it is now.
+    narrowing: (id, signal) => call('GET', `${turn(id)}/narrowing`, { signal }),
     openTurn: (body, signal) => call('POST', '/api/v1/agent/turns', { json: body, signal }),
     // The stream itself: resolves to the response (its body is read by the caller).
     link: (signal, { takeover = false } = {}) =>
@@ -153,6 +175,20 @@ export function createLinkClient({ origin, token, source = null, fetchImpl = fet
         signal,
       }),
   }
+}
+
+// What a chat or comment turn of a connected agent may use (plan 3.3): its
+// session reads and answers only, so only commands that change no files,
+// never the shell, never edits or a push. The browser as resolved.
+export function answerOnly(caps) {
+  if (!caps) return caps
+  return Object.freeze({
+    ...caps,
+    edit: Object.freeze({ on: false, where: null, approvals: 'none' }),
+    commands: Object.freeze(caps.commands.filter((command) => !command.mutating)),
+    shell: Object.freeze({ mode: 'off', network: 'none', exact: [] }),
+    push: Object.freeze({ ...caps.push, on: false }),
+  })
 }
 
 // Runs until `signal` aborts (resolves) or the token stops working (throws).
@@ -247,6 +283,28 @@ export async function runAgentLink({
       : null
   // This connection, as the server said at hello: a held fix is bound to it (agent-fix.js readHeld).
   const ownerOf = () => ({ origin, workspace: agent?.workspace?.id, project: agent?.project?.id, agent: agent?.id })
+  // The checkout a chat or comment turn's read-style commands and browser use (none: neither).
+  const answerConfig = capabilities?.config || fix?.config || null
+  const answerEnv = fix?.env || process.env
+  // One exec relay per chat thread (exec-mcp.js createThreadRelay): the
+  // thread's read-only session keeps it, each turn puts its own host behind it.
+  const relays = new Map()
+  const closeRelay = (key) => {
+    const relay = relays.get(key)
+    relays.delete(key)
+    return relay ? relay.close().catch(() => {}) : Promise.resolve()
+  }
+  // The port of the board's origin when it is on this machine: its own
+  // server, never opened in the agent browser.
+  const originPort = (() => {
+    try {
+      const url = new URL(origin)
+      if (!['localhost', '127.0.0.1', '[::1]', '::1'].includes(url.hostname)) return null
+      return Number(url.port || (url.protocol === 'https:' ? 443 : 80))
+    } catch {
+      return null
+    }
+  })()
 
   // ---- One turn ----
 
@@ -479,6 +537,22 @@ export async function runAgentLink({
       const fetched = await api.job(id, controller.signal)
       job = cleanJob(fetched?.job)
       if (job.turn.id !== id) throw new JobError('The server sent another turn.')
+      // A comment picked up without a narrowing from the server reads as the
+      // narrowest: open, no commands (plan 3.5).
+      if (job.turn.kind === 'comment' && !job.narrowing) job.narrowing = { maxTier: 'open', shell: false }
+      // Before each command or browser step: the server's narrowing as it is
+      // now (a project or board setting tightened mid-turn applies at once).
+      // A server that cannot say keeps the narrowing this turn started with,
+      // only ever narrowed further.
+      let refreshedAt = Date.now()
+      const refreshNarrowing = async () => {
+        if (Date.now() - refreshedAt < limit.narrowingMs) return
+        refreshedAt = Date.now()
+        const answer = await api.narrowing(id, controller.signal)
+        const now = answer && typeof answer === 'object' ? answer.narrowing : undefined
+        if (now === undefined) throw new Error('the server did not say')
+        job.narrowing = tighter(job.narrowing, now, job.turn.kind === 'comment')
+      }
       // This machine's own rule: only the person who connected it.
       if (policy.audience === 'owner' && !job.asker.owner) {
         log(`turn ${id}: refused (this machine takes work from the person who connected it only)`)
@@ -646,6 +720,8 @@ export async function runAgentLink({
           scope: JSON.stringify([origin, agent?.workspace?.id, agent?.project?.id, agent?.id, fix.config.dir]),
           ask: policy.approvals === 'none' ? null : (card) => askBoard(card, limit.commandCardMs),
           shellCard: view.commandApproval === 'always',
+          refresh: refreshNarrowing,
+          denyPorts: originPort ? [originPort] : [],
           // Files a command changed join the fix as nobody looked at them (the fix is then held).
           onChanged: ({ changed }) => {
             commandChanges = commandChanges.then(async () => {
@@ -666,6 +742,7 @@ export async function runAgentLink({
               : 'Commands are off for this fix: the command session did not start on this machine',
           })
         fixTurn = {
+          capabilities: toPrompt(caps),
           workdir: exec ? { ...prepared.workdir, mcpServers: exec.servers } : prepared.workdir,
           gate: {
             // Asked on the board, unless this machine and the server's rule both say "allow".
@@ -685,6 +762,93 @@ export async function runAgentLink({
         entry.backend = editBackend
       }
       entry.thread = `${job.turn.board}/${job.turn.thread}`
+      let relay = null
+      if (!fixing) {
+        // A chat turn or a picked-up comment: what it may do (capabilities.js,
+        // path hosted-chat or pickup), answer only, and the tool host that
+        // holds it to that. Commands run on a read-only view of the checkout
+        // in the OS sandbox; Shapewall's folder there is never readable.
+        const where = job.turn.kind === 'comment' ? 'pickup' : 'hosted-chat'
+        const resolveNow = (config = answerConfig) =>
+          answerOnly(
+            resolveCapabilities({
+              path: where,
+              trust: boundTrust(job.trust),
+              audience: agent?.audience === 'owner' ? 'owner' : 'server',
+              machine: policy,
+              server: job.narrowing,
+              config,
+              platform,
+            }),
+          )
+        const caps = resolveNow()
+        if (caps.tier !== 'open') {
+          job.context.commentsLeft += job.context.comments.length
+          job.context.comments = []
+        }
+        fixTurn = { capabilities: toPrompt(caps) }
+        if (answerConfig?.dir) {
+          const checkoutConfig = () => {
+            if (!answerConfig.file) return answerConfig
+            try {
+              return loadConfig(answerConfig.file)
+            } catch {
+              return null
+            }
+          }
+          try {
+            exec = await startExecSession({
+              capabilities: caps,
+              platform,
+              recheck: () => {
+                const config = checkoutConfig()
+                return config ? resolveNow(config) : null
+              },
+              refresh: refreshNarrowing,
+              commands: namedCommands(answerConfig),
+              readCommands: () => namedCommands(checkoutConfig()),
+              root: answerConfig.dir,
+              expect: answerConfig.dir,
+              checkout: null,
+              browserCheckout: answerConfig.dir,
+              readOnly: true,
+              denyRead: commandReadDenied(answerConfig, answerConfig.dir),
+              network: 'none',
+              approvals: createApprovalStore(approvalsDir(agent?.id, answerEnv)),
+              scope: JSON.stringify([origin, agent?.workspace?.id, agent?.project?.id, agent?.id, answerConfig.dir]),
+              ask: policy.approvals === 'none' ? null : (card) => askBoard(card, limit.commandCardMs),
+              shellCard: false,
+              onChanged: () => {},
+              denyPorts: originPort ? [originPort] : [],
+              serve: false,
+              env: answerEnv,
+              log,
+            })
+          } catch (error) {
+            log(`turn ${id}: no tools of Shapewall's: ${error.message}`)
+            exec = null
+          }
+          if (exec) {
+            relay = relays.get(entry.thread)
+            if (relay && !relay.matches(exec.host)) {
+              await closeRelay(entry.thread)
+              relay = null
+            }
+            if (!relay) {
+              relay = await createThreadRelay({ env: answerEnv, log })
+              relays.set(entry.thread, relay)
+            }
+            try {
+              await relay.setHost(exec.host)
+              fixTurn.mcpServers = relay.servers
+            } catch (error) {
+              log(`turn ${id}: no tools of Shapewall's: ${error.message}`)
+              await closeRelay(entry.thread)
+              relay = null
+            }
+          }
+        }
+      }
       const reply = await runTurn({
         config: null,
         // The board's own store is not on this machine: the conversation is
@@ -774,6 +938,11 @@ export async function runAgentLink({
       if (job && job.turn.kind !== 'chat') await answerComment(job, null).catch(() => {})
     } finally {
       clearTimeout(timer)
+      if (entry.thread && relays.has(entry.thread))
+        await relays
+          .get(entry.thread)
+          .setHost(null)
+          .catch(() => {})
       if (exec) await exec.close().catch(() => {})
       if (prepared) {
         editBackend?.resetThread?.(entry.thread)
@@ -851,7 +1020,9 @@ export async function runAgentLink({
     } else if (!ok)
       lines.push('I could not answer this comment from here. It needs a person, or an agent that can edit (shapewall watch --exec).')
     try {
-      await remote.reply(board, comment, { body: lines.join('\n\n').slice(0, 9000) })
+      // A reply is a comment body: the server takes COMMENT_BODY_MAX characters, no more.
+      const body = lines.join('\n\n')
+      await remote.reply(board, comment, { body: body.length > COMMENT_BODY_MAX ? body.slice(0, COMMENT_BODY_MAX - 3) + '...' : body })
       // Where a fixed comment stands is the server's to write, with the turn (a late
       // write from here could land on the next fix). A comment this agent answered:
       // only while it still holds it.
@@ -1192,6 +1363,7 @@ export async function runAgentLink({
       }),
     ])
     clearTimeout(timer)
+    await Promise.all([...relays.keys()].map((key) => closeRelay(key)))
   }
   return { takenOver }
 }

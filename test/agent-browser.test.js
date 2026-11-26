@@ -1,7 +1,7 @@
 // The agent browser's pure parts: address checks and pinning, the egress
 // proxy, recorded logins, the leftover sweep, the tool list, and the
 // refusals that happen before Chromium starts (no browser needed).
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -12,13 +12,17 @@ import {
   browserRoot,
   browserTools,
   cookieAllowed,
+  browserSandboxPlan,
   createAgentBrowser,
   ensureBrowserRoot,
   readAuthState,
+  srtEntry,
   sweepAgentBrowserDirs,
   toolError,
 } from '../src/agent/agent-browser.js'
-import { addressKind, localName, pinHost, startEgressProxy } from '../src/agent/browser-egress.js'
+import { addressKind, localName, pinHost, startEgressProxy, upstreamDialer } from '../src/agent/browser-egress.js'
+import { BROWSER_PROFILE_MARKER, markBrowserProfile } from '../src/agent/capabilities.js'
+import { closeSandbox } from '../src/agent/sandbox-exec.js'
 import { tempDir } from './helpers.js'
 
 const on = (extra = {}) => ({ on: true, allow: ['http://127.0.0.1:5173'], auth: null, profile: null, realChrome: false, ...extra })
@@ -249,7 +253,7 @@ test('profile refusal happens before Chromium starts', async () => {
     }
     for (const profile of [chrome, path.join(tmp, 'unmarked'), 'relative/dir']) {
       if (path.isAbsolute(profile)) fs.mkdirSync(profile, { recursive: true })
-      const agent = createAgentBrowser({ browser: on({ profile }), tmpRoot: tmp, chromium })
+      const agent = createAgentBrowser({ browser: on({ profile }), tmpRoot: tmp, chromium, env: { XDG_STATE_HOME: tmp } })
       await assert.rejects(agent.navigate('http://127.0.0.1:5173/'), /Refused the browser profile/)
     }
     assert.equal(started, false)
@@ -463,5 +467,263 @@ test('a symlinked .shapewall-auth folder is refused', () => {
     assert.deepEqual(readAuthState(path.join(tmp, 'real'), 'x', []), { cookies: [], origins: [] })
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+// ---- The persistent profile, checked before and after the start (PR #37 review) ----
+
+// A Chromium stand-in: `during(userDataDir)` runs while it "starts"; the
+// context it returns stops the launch right after the profile re-check
+// (addInitScript is the next thing launch() calls) and records close().
+function fakeChromium(during = () => {}) {
+  const seen = { started: 0, closed: 0, dir: null }
+  return {
+    seen,
+    chromium: {
+      async launchPersistentContext(dir) {
+        seen.started += 1
+        seen.dir = dir
+        await during(dir)
+        return {
+          async close() {
+            seen.closed += 1
+          },
+          async addInitScript() {
+            throw new Error('past the profile check')
+          },
+          on() {},
+          pages: () => [],
+        }
+      },
+    },
+  }
+}
+
+test('profile: an unchanged profile in the base passes both checks', async () => {
+  const tmp = tempDir('agent-browser-profile-ok')
+  const env = { XDG_STATE_HOME: path.join(tmp, 'state') }
+  try {
+    const profile = markBrowserProfile('staging-login', { env })
+    const { seen, chromium } = fakeChromium()
+    const agent = createAgentBrowser({ browser: on({ profile }), tmpRoot: tmp, chromium, env })
+    await assert.rejects(agent.navigate('http://127.0.0.1:5173/'), /past the profile check/)
+    assert.equal(seen.dir, profile)
+    // By name too.
+    const byName = fakeChromium()
+    await assert.rejects(
+      createAgentBrowser({ browser: on({ profile: 'staging-login' }), tmpRoot: tmp, chromium: byName.chromium, env }).navigate(
+        'http://127.0.0.1:5173/',
+      ),
+      /past the profile check/,
+    )
+    assert.equal(byName.seen.dir, profile)
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('profile: swapped between the check and the start, the browser is closed and refused', async () => {
+  const tmp = tempDir('agent-browser-profile-swap')
+  const env = { XDG_STATE_HOME: path.join(tmp, 'state') }
+  try {
+    const profile = markBrowserProfile('swap', { env })
+    const other = markBrowserProfile('other', { env })
+    const marker = fs.readFileSync(path.join(profile, BROWSER_PROFILE_MARKER))
+    const swaps = {
+      // A symbolic link to another marked folder in its place.
+      link: (dir) => {
+        fs.renameSync(dir, `${dir}.was`)
+        fs.symlinkSync(other, dir)
+      },
+      // A link out of the base, to a marked folder elsewhere.
+      outside: (dir) => {
+        const away = path.join(tmp, 'away')
+        fs.mkdirSync(away, { mode: 0o700 })
+        fs.writeFileSync(path.join(away, BROWSER_PROFILE_MARKER), marker)
+        fs.renameSync(dir, `${dir}.was`)
+        fs.symlinkSync(away, dir)
+      },
+      // The same name, marked, 0700, but a different folder (another inode).
+      replaced: (dir) => {
+        fs.renameSync(dir, `${dir}.was`)
+        fs.mkdirSync(dir, { mode: 0o700 })
+        fs.writeFileSync(path.join(dir, BROWSER_PROFILE_MARKER), marker)
+      },
+      // The marker removed.
+      unmarked: (dir) => fs.rmSync(path.join(dir, BROWSER_PROFILE_MARKER)),
+      // The folder opened to other users.
+      mode: (dir) => fs.chmodSync(dir, 0o755),
+    }
+    for (const [name, swap] of Object.entries(swaps)) {
+      // Each case starts from a fresh, marked profile at the same path.
+      fs.rmSync(profile, { recursive: true, force: true })
+      fs.rmSync(`${profile}.was`, { recursive: true, force: true })
+      fs.rmSync(path.join(tmp, 'away'), { recursive: true, force: true })
+      markBrowserProfile('swap', { env })
+      const { seen, chromium } = fakeChromium(swap)
+      const agent = createAgentBrowser({ browser: on({ profile }), tmpRoot: tmp, chromium, env })
+      await assert.rejects(agent.navigate('http://127.0.0.1:5173/'), /it changed while the browser started/, name)
+      assert.equal(seen.started, 1, name)
+      assert.equal(seen.closed, 1, `${name}: the context is closed`)
+    }
+    // A failed start leaves no session folder behind.
+    assert.deepEqual(fs.readdirSync(browserRoot(tmp)), [])
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('profile: a folder outside the base, or a base that is open or a link, is refused before Chromium starts', async () => {
+  const tmp = tempDir('agent-browser-profile-base')
+  const env = { XDG_STATE_HOME: path.join(tmp, 'state') }
+  try {
+    const profile = markBrowserProfile('agent', { env })
+    const marker = fs.readFileSync(path.join(profile, BROWSER_PROFILE_MARKER))
+    const refused = async (browserProfile, useEnv, label) => {
+      const { seen, chromium } = fakeChromium()
+      const agent = createAgentBrowser({ browser: on({ profile: browserProfile }), tmpRoot: tmp, chromium, env: useEnv })
+      await assert.rejects(agent.navigate('http://127.0.0.1:5173/'), /Refused the browser profile/, label)
+      assert.equal(seen.started, 0, label)
+    }
+    // Marked, but not in the base (an old policy's absolute path).
+    const outside = path.join(tmp, 'old-profile')
+    fs.mkdirSync(outside, { mode: 0o700 })
+    fs.writeFileSync(path.join(outside, BROWSER_PROFILE_MARKER), marker)
+    await refused(outside, env, 'outside the base')
+    // The base open to other users.
+    const base = path.dirname(profile)
+    fs.chmodSync(base, 0o755)
+    await refused(profile, env, 'base 0755')
+    await refused('agent', env, 'base 0755, by name')
+    fs.chmodSync(base, 0o700)
+    // The base a symbolic link to a folder of the right shape.
+    const linkEnv = { XDG_STATE_HOME: path.join(tmp, 'linked') }
+    fs.mkdirSync(path.join(linkEnv.XDG_STATE_HOME, 'shapewall'), { recursive: true })
+    fs.symlinkSync(base, path.join(linkEnv.XDG_STATE_HOME, 'shapewall', 'agent-browser-profiles'))
+    await refused('agent', linkEnv, 'linked base')
+    await refused(path.join(linkEnv.XDG_STATE_HOME, 'shapewall', 'agent-browser-profiles', 'agent'), linkEnv, 'linked base path')
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+// ---- The OS sandbox launch: the parts that need no browser ----
+
+after(() => closeSandbox())
+
+test('sandbox plan: Linux with the sandbox and the bridge only; a stand-in or false launches on the host', () => {
+  const yes = () => ({ available: true, reason: null })
+  const no = (reason) => () => ({ available: false, reason })
+  const plan = (extra) => browserSandboxPlan({ platform: 'linux', probe: yes, bridge: yes, ...extra })
+  assert.deepEqual(plan({}), { use: true, why: null })
+  assert.deepEqual(plan({ osSandbox: false }), { use: false, why: 'off' })
+  assert.deepEqual(plan({ stand: true }), { use: false, why: 'off' }, 'a stand-in chromium (tests) unless asked')
+  assert.deepEqual(plan({ stand: true, osSandbox: true }), { use: true, why: null })
+  assert.deepEqual(plan({ probe: no('bwrap_missing') }), { use: false, why: 'bwrap_missing' })
+  assert.deepEqual(plan({ bridge: no('nsenter_missing') }), { use: false, why: 'nsenter_missing' })
+  assert.deepEqual(plan({ platform: 'darwin' }), { use: false, why: 'seatbelt' })
+  assert.deepEqual(plan({ platform: 'win32' }), { use: false, why: 'platform' })
+  assert.throws(
+    () => createAgentBrowser({ browser: on(), osSandbox: true, sandboxPlan: () => ({ use: false, why: 'platform' }) }),
+    /not available here \(platform\)/,
+  )
+  assert.throws(() => createAgentBrowser({ browser: on(), osSandbox: 'yes' }), /"auto", true or false/)
+})
+
+test('srt list entries: an address literal with its port, IPv6 in brackets', () => {
+  assert.equal(srtEntry('127.0.0.1', 5173), '127.0.0.1:5173')
+  assert.equal(srtEntry('::1', 8080), '[::1]:8080')
+  assert.equal(srtEntry('93.184.215.14', 443), '93.184.215.14:443')
+})
+
+test('a sandbox that does not start: the browser is off for the task, unless allowHostLaunch, then said in every result', async () => {
+  const tmp = tempDir('agent-browser-boxfail')
+  try {
+    const launches = []
+    // executablePath throws: the sandboxed launch fails before any Chromium.
+    const chromium = {
+      executablePath() {
+        throw new Error('no Chromium installed here')
+      },
+      async launchPersistentContext(dir, options) {
+        launches.push(options.executablePath || 'host')
+        throw new Error('host launch reached')
+      },
+    }
+    const box = () => ({ use: true, why: null })
+    const closed = createAgentBrowser({ browser: on(), tmpRoot: tmp, chromium, sandboxPlan: box })
+    assert.equal(closed.isolation().planned, 'os-sandbox')
+    await assert.rejects(closed.page(), /could not start inside the OS sandbox .*stays off for this task/)
+    await assert.rejects(closed.page(), /stays off for this task/, 'no second try in the same task')
+    assert.deepEqual(launches, [], 'never launched on the host')
+    assert.match(closed.isolation().failed, /stays off/)
+    assert.deepEqual(fs.readdirSync(browserRoot(tmp)), [], 'nothing left of the failed start')
+
+    const fallback = createAgentBrowser({ browser: on({ allowHostLaunch: true }), tmpRoot: tmp, chromium, sandboxPlan: box })
+    await assert.rejects(fallback.page(), /host launch reached/)
+    assert.deepEqual(launches, ['host'])
+    assert.match(fallback.notes()[0], /could not start inside the OS sandbox .*runs on this machine directly \(allowHostLaunch\)/)
+    const tool = browserTools(fallback).find((item) => item.name === 'browser_console')
+    assert.match((await tool.handler({})).content.at(-1).text, /^Shapewall: .*allowHostLaunch/)
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('upstream dialer: CONNECT to the pinned address with srt credentials; a refusal is an error', async () => {
+  const app = http.createServer((req, res) => res.end(`app ${req.headers.host} ${req.url}`))
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve))
+  const appPort = app.address().port
+  const seen = []
+  // A stand-in for srt's proxy: only 127.0.0.1:appPort, only with the right credentials.
+  const srt = http.createServer((req, res) => res.writeHead(405).end())
+  srt.on('connect', (req, socket) => {
+    seen.push({ target: req.url, auth: req.headers['proxy-authorization'] })
+    const good = req.headers['proxy-authorization'] === 'Basic ' + Buffer.from('srt.aWQ=:token').toString('base64')
+    if (!good || req.url !== `127.0.0.1:${appPort}`) return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
+    const out = net.connect(appPort, '127.0.0.1', () => {
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+      out.pipe(socket)
+      socket.pipe(out)
+    })
+  })
+  await new Promise((resolve) => srt.listen(0, '127.0.0.1', resolve))
+  const dial = upstreamDialer({ port: srt.address().port, username: 'srt.aWQ=', password: 'token' })
+  // The egress proxy in front, on a Unix socket, dialing through the stand-in.
+  const socketDir = tempDir('egress-sock')
+  const blocked = []
+  const proxy = await startEgressProxy({
+    target: (host, p) => (host === 'app.test' && p === appPort ? '127.0.0.1' : host === 'other.test' ? '127.0.0.1' : null),
+    onBlock: (entry) => blocked.push(entry),
+    dial,
+    socketPath: process.platform === 'win32' ? null : path.join(socketDir, 'p'),
+  })
+  const via = (url) =>
+    new Promise((resolve, reject) => {
+      const where = proxy.socketPath ? { socketPath: proxy.socketPath } : { host: '127.0.0.1', port: proxy.port }
+      const req = http.request({ ...where, path: url, headers: { host: new URL(url).host } }, (res) => {
+        let body = ''
+        res.on('data', (chunk) => (body += chunk))
+        res.on('end', () => resolve({ status: res.statusCode, body }))
+      })
+      req.on('error', reject)
+      req.end()
+    })
+  try {
+    assert.deepEqual(await via(`http://app.test:${appPort}/a`), { status: 200, body: `app app.test:${appPort} /a` })
+    assert.equal(seen.at(-1).target, `127.0.0.1:${appPort}`, 'the pinned address, never the name')
+    // Allowed by the egress check but not by the upstream: refused (two checks).
+    assert.equal((await via('http://other.test:80/b')).status, 502)
+    assert.equal(seen.at(-1).target, '127.0.0.1:80')
+    assert.equal(blocked.at(-1).by, 'upstream')
+    await assert.rejects(
+      upstreamDialer({ port: srt.address().port, username: 'srt.aWQ=', password: 'wrong' })('127.0.0.1', appPort),
+      /refused .*403/,
+    )
+  } finally {
+    await proxy.close()
+    await new Promise((resolve) => srt.close(resolve))
+    await new Promise((resolve) => app.close(resolve))
+    fs.rmSync(socketDir, { recursive: true, force: true })
   }
 })

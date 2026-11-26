@@ -3,6 +3,7 @@
 // endpoint or key.
 //
 //   "use a tool"      -> a list_comments tool call, then (after the result) a short answer
+//   "check capabilities" -> a shapewall_capabilities tool call (exec-mcp.js), then the result's first line
 //   "slowly"          -> 200 words, one every 25 ms (for Stop)
 //   "no tools here"   -> 400 when tools are offered, then the default answer
 //   "markdown"        -> a reply with a list, bold, code and a fenced block
@@ -78,8 +79,20 @@ export async function startOpenAIStub() {
         return
       }
       const text = lastUserText(body)
-      if (body.messages.at(-1).role === 'tool') {
+      if (body.messages.at(-1).role === 'tool' && text.includes('check capabilities')) {
+        const result = String(body.messages.at(-1).content || '')
+        sse(res, [delta({ content: 'caps: ' + result.split('\n')[0] }, 'stop')])
+      } else if (body.messages.at(-1).role === 'tool') {
         sse(res, [delta({ content: 'There is ' }), delta({ content: '**one** open comment.' }, 'stop')])
+      } else if (text.includes('check capabilities')) {
+        sse(res, [
+          delta(
+            {
+              tool_calls: [{ index: 0, id: 'call_caps', type: 'function', function: { name: 'shapewall_capabilities', arguments: '{}' } }],
+            },
+            'tool_calls',
+          ),
+        ])
       } else if (text.includes('use a tool')) {
         sse(res, [
           delta({ tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'list_comments', arguments: '' } }] }),

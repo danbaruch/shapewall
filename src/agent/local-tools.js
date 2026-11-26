@@ -1,0 +1,192 @@
+// A local board's turn, on the capability model (plan 3.3): what it may do
+// (capabilities.js resolveCapabilities, path "local-chat" for an ACP agent,
+// "local-endpoint" for an OpenAI-compatible one) and the tool host that
+// enforces it (exec-mcp.js): named commands, the shell in the OS sandbox,
+// dev servers and the throwaway browser.
+//
+// Who the turn is for: the local owner capability (the settings token on
+// loopback, a paired device, the tailnet owner) is solo, and only while
+// every word of the turn is the owner's: a board shared beyond this machine
+// (share visitors, signed-in accounts other than the owner) can put other
+// people's text in a comment thread, so such a turn is open. Display names
+// never count (the same rule as the starter gate).
+//
+// Where commands run: the folder the agent edits (the checkout in place, as
+// local boards always did until 2.0.0, or branch mode's worktree), with its
+// .git and Shapewall's own folder never writable. Cards of Shapewall's own
+// (a command that needs an answer) are answered on the board by its owner
+// (routes.js). Approvals are remembered in `.shapewall/agent/approvals/`
+// with the same key as a connected agent's (command-approvals.js: tier,
+// sandbox mode, network, read only) and never for an open turn or a command
+// outside the OS sandbox (exec-mcp.js mayRun).
+
+import fs from 'node:fs'
+import path from 'node:path'
+import { hostPlatform, namedCommands, resolveCapabilities } from './capabilities.js'
+import { createApprovalStore } from './command-approvals.js'
+import { toPrompt } from './capability-render.js'
+import { startExecSession } from './exec-mcp.js'
+import { localMachinePolicy, userAgentEntry } from './user-settings.js'
+import { authFiles, loadConfig } from '../config.js'
+
+let platformOnce = null
+// One sandbox probe per process: every turn and the capability card read the same answer.
+export const localPlatform = () => (platformOnce ||= hostPlatform())
+
+// The trust block of a local turn (capabilities.js cleanTrust).
+export function localTrust({ owner, shared = false, comment = false }) {
+  const authors = [{ handle: null, owner: owner === true, member: false }]
+  // A comment thread on a board others can reach: its text may be theirs.
+  if (comment && shared) authors.push({ handle: null, owner: false, member: false })
+  return { authors, guests: false }
+}
+
+// The folder a local approval record lives in: the board's project, never the server.
+export const localApprovalsDir = (config) => path.join(config.outputDir, 'agent', 'approvals')
+
+// The paths in `root` no command may read: Shapewall's own folder and every
+// login file the config records (auth.storageState, auth.loginScript, at the
+// top and per board), wherever in the folder they are (PR #39 review). A
+// login file of the checkout is found in `root` too when root is a copy or
+// worktree of it (the same path relative to config.dir). Only paths that
+// exist and are inside root (the sandbox denies the rest of the home folder
+// anyway).
+export function commandReadDenied(config, root) {
+  if (!root || !config) return []
+  let real
+  try {
+    real = fs.realpathSync(root)
+  } catch {
+    return []
+  }
+  const inside = (file) => {
+    const rel = path.relative(real, file)
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+  }
+  const out = new Set()
+  const add = (file) => {
+    if (!file) return
+    let resolved
+    try {
+      resolved = fs.realpathSync(file)
+    } catch {
+      return
+    }
+    if (inside(resolved) && resolved !== real) out.add(resolved)
+  }
+  if (config.outputDir) add(path.resolve(config.outputDir))
+  for (const file of authFiles(config)) {
+    const absolute = path.resolve(config.dir || real, file)
+    add(absolute)
+    if (config.dir) {
+      const rel = path.relative(path.resolve(config.dir), absolute)
+      if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) add(path.join(real, rel))
+    }
+  }
+  return [...out]
+}
+
+// resolveCapabilities for one local turn. `inPlace`: edits land in the
+// checkout (not branch mode), which is what the agent's Edit tools do.
+export function localCapabilities({ config, env = process.env, acp, owner, shared, comment, inPlace, platform = localPlatform() }) {
+  const machine = localMachinePolicy(config.dir ? userAgentEntry(config.dir, env).entry : null)
+  const view = inPlace ? { ...config, agent: { ...(config.agent || {}), fixIn: 'checkout' } } : config
+  return resolveCapabilities({
+    path: acp ? 'local-chat' : 'local-endpoint',
+    trust: localTrust({ owner, shared, comment }),
+    audience: 'owner',
+    machine,
+    server: null,
+    config: view,
+    platform,
+  })
+}
+
+// The tool host of one local turn, or null when it offers nothing.
+// -> { caps, prompt, exec } where exec is startExecSession's result (null: none).
+export async function startLocalTools({
+  config,
+  env = process.env,
+  acp,
+  owner,
+  shared = false,
+  comment = false,
+  // The folder the agent works in (config.dir, or branch mode's worktree).
+  root,
+  inPlace,
+  ask,
+  // Shapewall's own server port: never opened in the agent browser.
+  denyPorts = [],
+  // false: an endpoint backend calls the host in process.
+  serve = true,
+  platform = localPlatform(),
+  log = () => {},
+}) {
+  const resolve = (current) => localCapabilities({ config: current, env, acp, owner, shared, comment, inPlace, platform })
+  const caps = resolve(config)
+  const prompt = toPrompt(caps)
+  // `commands` come from the checkout's config, read again for each check.
+  const fresh = () => {
+    if (!config.file) return config
+    try {
+      return loadConfig(config.file)
+    } catch {
+      return null
+    }
+  }
+  let real = null
+  try {
+    real = root ? fs.realpathSync(root) : null
+  } catch {
+    real = null
+  }
+  // A local checkout keeps its repository and Shapewall's folder read only for commands.
+  const denyWrite = real ? [path.join(real, '.git'), path.resolve(config.outputDir)].filter((dir) => fs.existsSync(dir)) : []
+  const exec = await startExecSession({
+    capabilities: caps,
+    platform,
+    recheck: () => {
+      const current = fresh()
+      return current ? resolve(current) : null
+    },
+    commands: namedCommands(config),
+    readCommands: () => namedCommands(fresh()),
+    root: real,
+    expect: real,
+    checkout: null,
+    readOnly: !caps.edit.on,
+    denyWrite,
+    // Shapewall's own folder and the login files the config names hold the
+    // logins captures record: no command reads them.
+    denyRead: commandReadDenied(config, real),
+    network: caps.shell.mode !== 'off' ? caps.shell.network : 'none',
+    approvals: createApprovalStore(localApprovalsDir(config)),
+    scope: JSON.stringify(['local', config.dir]),
+    ask,
+    shellCard: caps.shell.mode !== 'off' && localMachinePolicy(userAgentEntry(config.dir, env).entry).commandApproval === 'always',
+    // Local edits are the agent's own: the run summary and Undo see the checkout as it is.
+    onChanged: () => {},
+    browserCheckout: real,
+    denyPorts,
+    serve,
+    env,
+    log,
+  })
+  return { caps, prompt, exec }
+}
+
+// Whether every word an owner's local turn reads is the owner's (solo).
+// `kind`: threads.js threadKind. A private chat belongs to the viewer who
+// opened it; the board thread and a comment's thread are shared, so they
+// count as the owner's only where nobody else can post in them (an ACP
+// agent behind the owner gate, no signed-in accounts) and, for a comment,
+// when the owner wrote it and every reply is the owner's agent's. Anything
+// else is open: the commands it may run are asked about every time.
+export function localOwnerOnly({ ownerWrites, kind, thread = null, comment = null, ownerGate = false, accounts = false, acp = false }) {
+  if (!ownerWrites) return false
+  if (kind === 'chat') return thread?.owner === 'owner'
+  const gated = ownerGate && acp && !accounts
+  if (kind === 'board') return gated
+  if (kind === 'comment') return gated && comment?.byOwner === true && (comment.replies || []).every((reply) => reply?.agent === true)
+  return false
+}

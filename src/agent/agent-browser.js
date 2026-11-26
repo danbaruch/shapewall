@@ -36,13 +36,33 @@
 //     are closed.
 //   - No CDP port: Playwright talks to Chromium over a pipe. No remote
 //     debugging flag is ever passed, and callers cannot add flags.
+//   - Where the OS sandbox runs (Linux with bubblewrap, socat, ripgrep and
+//     nsenter: probeSandbox() and devBridge()), Chromium and every process
+//     it starts run inside it (launchBoxed below): no home folder, nothing
+//     writable but the session folder (and a persistent profile when one is
+//     given), its own network namespace. Its one way out is 127.0.0.1:PORT
+//     in that namespace, a bridge to the egress proxy above, whose
+//     connections then go through the sandbox runtime's proxy as CONNECTs
+//     to the pinned addresses, under an srt allow list of exactly the
+//     allowed address:port pairs (IP literals with a port, never a bare
+//     127.0.0.1). Playwright's pipe (fds 3 and 4) passes through bubblewrap.
+//     Chromium's own sandbox cannot start in there (srt refuses nested user
+//     namespaces, which keeps its file rules from being undone), so the OS
+//     sandbox is the browser's boundary; the tool output says so.
+//     Elsewhere (macOS, Windows, no bubblewrap) the browser launches on
+//     this machine as before. A sandbox that should start and does not
+//     leaves the browser off for the task, unless the machine allows the
+//     host launch then (`browser.allowHostLaunch`), said in every result.
 //   - The profile is a new folder under <tmp>/shapewall-agent-browser/,
 //     removed at close, when the browser crashes, when this process exits
 //     or is stopped by a signal, and (after a SIGKILL) by the next start's
 //     sweep, which removes folders whose process is gone.
 //   - A logged-in persistent profile (`browser.profile`) only when
 //     cleanBrowserProfile() still accepts it right before launch (made by
-//     markBrowserProfile(), holds the marker, not a real browser's folder).
+//     markBrowserProfile() in Shapewall's own 0700 profile folder, holds the
+//     marker, not a real browser's folder), and again right after: the same
+//     resolved folder with the same device and inode, or the browser is
+//     closed and the tool refuses.
 import fs from 'node:fs'
 import os from 'node:os'
 import net from 'node:net'
@@ -53,7 +73,26 @@ import { cleanBrowserProfile, cleanOrigin } from './capabilities.js'
 import { processStartTime } from '../lock.js'
 import { fitPng } from '../png.js'
 import { quoteData } from './context.js'
-import { addressKind, hostPort, pinHost, startEgressProxy } from './browser-egress.js'
+import {
+  addressKind,
+  bridgeIntoNamespace,
+  hostPort,
+  isOwnAddress,
+  ownAddresses,
+  pinHost,
+  startEgressProxy,
+  upstreamDialer,
+} from './browser-egress.js'
+import {
+  acquireSandbox,
+  bridgeSockets,
+  deniedRoots,
+  isRuntimeListener,
+  probeSandbox,
+  runtimeVendorDir,
+  shellQuote,
+} from './sandbox-exec.js'
+import { devBridge, sandboxNamespace } from './dev-server.js'
 
 export const BROWSER_DIR_NAME = 'shapewall-agent-browser'
 export const SCREENSHOT_MAX_BYTES = 1024 * 1024
@@ -141,8 +180,35 @@ export function sweepAgentBrowserDirs({ root = browserRoot(), warn = defaultWarn
       warn(`could not remove the old agent browser folder ${dir} (${error.code || error.message}); skipped`)
     }
   }
+  // Launch folders in the system temp (sandboxed launches) whose process is
+  // gone, when they are this user's: wherever their session folder was.
+  const prefix = `${BROWSER_DIR_NAME}-launch-`
+  let temp = []
+  try {
+    temp = fs.readdirSync(os.tmpdir())
+  } catch {
+    /* none */
+  }
+  for (const name of temp) {
+    if (!name.startsWith(prefix)) continue
+    const match = SESSION_RE.exec(name.slice(prefix.length))
+    if (!match || alive(Number(match[1]), match[2])) continue
+    const launch = path.join(os.tmpdir(), name)
+    const stat = lstatOrNull(launch)
+    if (!stat?.isDirectory() || (uid() !== null && stat.uid !== uid())) continue
+    try {
+      fs.rmSync(launch, { recursive: true, force: true })
+    } catch {
+      /* the next sweep tries again */
+    }
+  }
   return removed
 }
+
+// The host-only folder of a sandboxed launch (the egress socket, the
+// launcher, its pid): in the system temp, which the sandbox never sees,
+// named after the session folder so the sweep finds it.
+export const launchDirFor = (sessionName) => path.join(os.tmpdir(), `${BROWSER_DIR_NAME}-launch-${sessionName}`)
 
 const liveDirs = new Set()
 let hooked = false
@@ -170,10 +236,13 @@ function hookExit() {
   process.on('exit', removeLive)
   if (hooked) return
   hooked = true
+  // The sandbox runtime's own listeners (it cleans up, it does not end the
+  // process) are not someone else's handler.
+  const others = (signal) => process.listeners(signal).filter((listener) => !isRuntimeListener(listener)).length
   for (const [signal, number] of Object.entries(SIGNALS)) {
-    if (process.listenerCount(signal)) continue
+    if (others(signal)) continue
     process.once(signal, () => {
-      if (!process.listenerCount(signal)) process.exit(128 + number)
+      if (!others(signal)) process.exit(128 + number)
     })
   }
 }
@@ -266,6 +335,73 @@ export function readAuthState(checkout, name, origins) {
   }
 }
 
+const lstatOrNull = (target) => {
+  try {
+    return fs.lstatSync(target)
+  } catch {
+    return null
+  }
+}
+
+// ---- In the OS sandbox ----
+
+// The browser's proxy address inside its own network namespace (the bridge
+// listens there; nothing of this machine's loopback is in that namespace).
+export const SANDBOX_PROXY_PORT = 18128
+const NAMESPACE_WAIT_MS = 10_000
+
+// The Chromium binary the sandboxed launch runs: Playwright's headless shell
+// beside its Chromium (what a host headless launch uses), else that Chromium.
+export function sandboxChromium(engine, { headless = true } = {}) {
+  const full = engine.executablePath()
+  if (headless) {
+    const install = path.dirname(path.dirname(full))
+    const match = /^chromium-(\d+)$/.exec(path.basename(install))
+    if (match) {
+      const shell = path.join(
+        path.dirname(install),
+        `chromium_headless_shell-${match[1]}`,
+        'chrome-headless-shell-linux64',
+        'chrome-headless-shell',
+      )
+      if (fs.existsSync(shell)) return shell
+    }
+  }
+  return full
+}
+
+// One srt allow list entry: an address literal with its port.
+export const srtEntry = (address, port) => `${net.isIP(address) === 6 ? `[${address}]` : address}:${port}`
+
+const parentPid = (pid) => {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8')
+    return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1])
+  } catch {
+    return null
+  }
+}
+
+// Whether this browser launches inside the OS sandbox: { use, why }.
+//   osSandbox  'auto' (where it runs), true (must: unavailable is an
+//              error), false (host launch). A stand-in chromium (tests)
+//              launches as on the host unless osSandbox is true.
+export function browserSandboxPlan({
+  osSandbox = 'auto',
+  stand = false,
+  platform = process.platform,
+  probe = probeSandbox,
+  bridge = devBridge,
+} = {}) {
+  if (osSandbox === false || (osSandbox === 'auto' && stand)) return { use: false, why: 'off' }
+  if (platform !== 'linux') return { use: false, why: platform === 'darwin' ? 'seatbelt' : 'platform' }
+  const probed = probe()
+  if (!probed.available) return { use: false, why: probed.reason }
+  const bridged = bridge()
+  if (!bridged.available) return { use: false, why: bridged.reason }
+  return { use: true, why: null }
+}
+
 // ---- The browser ----
 
 // One agent browser for one task. Nothing starts until the first tool call
@@ -275,11 +411,17 @@ export function readAuthState(checkout, name, origins) {
 //   - `browser.allowNoSandbox`: only when true may the browser start without
 //     Chromium's own sandbox where it cannot start (the machine policy key
 //     arrives with Q4); the tool output then says so. Otherwise it refuses.
-//   - `chromium`, `lookup`, `warn` are for tests.
+//   - `browser.profile`: checked right before launch (cleanBrowserProfile:
+//     marked, in Shapewall's own profile folder) and again after it, the
+//     same folder by device and inode; a change closes the browser.
+//   - `chromium`, `lookup`, `warn`, `env` (where the profile folder is) are for tests.
 // close() ends the current browser (the next tool call starts a fresh one);
 // dispose() ends it for good, at the end of the task.
 export function createAgentBrowser({
   browser,
+  // () => the turn's Browser line as it is now, or null when the browser is
+  // off now: asked before every (re)launch (exec-mcp.js browserFamily).
+  recheck = null,
   checkout = null,
   tmpRoot = null,
   chromium = null,
@@ -289,11 +431,31 @@ export function createAgentBrowser({
   screenshotMaxBytes = SCREENSHOT_MAX_BYTES,
   denyPorts = [],
   warn = defaultWarn,
+  env = process.env,
+  osSandbox = 'auto',
+  sandboxPlan = browserSandboxPlan,
+  // Tests only: this machine's own addresses (browser-egress.js ownAddresses).
+  interfaces = undefined,
 } = {}) {
   if (!browser || browser.on !== true) throw new Error('The browser is off for this turn.')
   if (browser.realChrome) throw new Error('An agent never gets your own Chrome.')
   const allowNoSandbox = browser.allowNoSandbox === true
+  const allowHostLaunch = browser.allowHostLaunch === true
+  if (osSandbox !== 'auto' && osSandbox !== true && osSandbox !== false) throw new Error('osSandbox is "auto", true or false.')
+  const plan = sandboxPlan({ osSandbox, stand: Boolean(chromium) })
+  if (osSandbox === true && !plan.use) throw new Error(`The OS sandbox for the browser is not available here (${plan.why}).`)
+  // 'os-sandbox' or 'host' once a browser started; why it is not boxed otherwise.
+  let isolation = null
+  // A sandboxed start that failed: the browser stays off for the task.
+  let boxFailure = null
+  // Set while a sandboxed browser runs: tells srt the current allow list.
+  let syncBox = () => {}
   const root = browserRoot(tmpRoot)
+  const profileStillOurs = (checked) => {
+    const again = cleanBrowserProfile(checked.real, { env })
+    const stat = again === checked.real ? lstatOrNull(again) : null
+    return Boolean(stat && stat.isDirectory() && stat.dev === checked.dev && stat.ino === checked.ino)
+  }
   const denied = new Set([...DENIED_LOOPBACK_PORTS, ...(Array.isArray(denyPorts) ? denyPorts : []).filter(Number.isInteger)])
   // origin -> { host, port, protocol }
   const allowed = new Map()
@@ -308,6 +470,7 @@ export function createAgentBrowser({
   }
   // token -> origin, for dev servers the tool host started (registerSpawned).
   const spawned = new Map()
+  const configured = new Set(given)
   const blocked = []
   const errors = []
   const notes = []
@@ -320,7 +483,10 @@ export function createAgentBrowser({
     if (list.length > LOG_MAX) list.splice(0, list.length - LOG_MAX)
   }
   const block = (url, by) => record(blocked, { url: clip(url, 300), by, at: new Date().toISOString() })
-  const deniedPort = (address, port) => addressKind(address) === 'loopback' && denied.has(port)
+  // A denied port on this machine: on loopback, and on its own LAN and
+  // tailnet addresses too (a server there answers on all of them).
+  const own = ownAddresses(interfaces)
+  const deniedPort = (address, port) => (addressKind(address) === 'loopback' || isOwnAddress(address, own)) && denied.has(port)
 
   async function allowOrigin(origin) {
     const { host, port, protocol } = hostPort(origin)
@@ -337,6 +503,7 @@ export function createAgentBrowser({
       return false
     }
     allowed.set(origin, { host, port, protocol })
+    syncBox()
     return true
   }
   const urlAllowed = (value) => {
@@ -370,7 +537,165 @@ export function createAgentBrowser({
     })
   }
 
+  // srt's allow list for the browser: each allowed origin's pinned address
+  // with its port, as an IP literal (srt then resolves nothing).
+  const srtList = () => {
+    const out = new Set()
+    for (const entry of allowed.values()) {
+      const address = pins.get(entry.host)
+      if (address && !deniedPort(address, entry.port)) out.add(srtEntry(address, entry.port))
+    }
+    return [...out]
+  }
+
+  // Chromium inside the OS sandbox (see the top of this file). Everything it
+  // made is undone when it throws. -> { context, proxy, box }, box.close()
+  // stops the bridge, srt's list for it and the launch folder.
+  async function launchBoxed({ engine, dir, userDataDir, profile, options }) {
+    const { box: srt, release } = await acquireSandbox()
+    const commandId = randomBytes(16).toString('base64url')
+    // Host side only (the system temp, which the sandbox never sees): the
+    // egress socket, the launcher, its pid and the arguments Playwright gave.
+    const launchDir = launchDirFor(path.basename(dir))
+    try {
+      fs.mkdirSync(launchDir, { mode: 0o700 })
+    } catch (error) {
+      release()
+      throw error
+    }
+    liveDirs.add(launchDir)
+    let proxy = null
+    let bridge = null
+    let closed = false
+    const close = () => {
+      if (closed) return
+      closed = true
+      if (syncBox === sync) syncBox = () => {}
+      bridge?.close()
+      srt.unregisterCommandNetworkLists(commandId)
+      try {
+        srt.cleanupAfterCommand()
+      } catch {
+        /* nothing to clean */
+      }
+      fs.rmSync(launchDir, { recursive: true, force: true })
+      liveDirs.delete(launchDir)
+      release()
+    }
+    const sync = () => {
+      if (!closed) srt.registerCommandNetworkLists(commandId, { allowedDomains: srtList() })
+    }
+    try {
+      fs.chmodSync(launchDir, 0o700)
+      sync()
+      syncBox = sync
+      const socketPath = path.join(launchDir, 'egress')
+      proxy = await startEgressProxy({
+        target,
+        onBlock: ({ url, by }) => block(url, by === 'upstream' ? 'sandbox' : 'proxy'),
+        socketPath,
+        dial: upstreamDialer({
+          port: srt.getProxyPort(),
+          username: `srt.${Buffer.from(commandId).toString('base64')}`,
+          password: srt.getProxyAuthToken(),
+        }),
+      })
+      const exe = fs.realpathSync(sandboxChromium(engine, { headless }))
+      const home = fs.realpathSync(os.homedir())
+      const realDir = fs.realpathSync(dir)
+      const vendor = runtimeVendorDir()
+      const argsFile = path.join(launchDir, 'args')
+      fs.writeFileSync(argsFile, '', { mode: 0o600 })
+      const filesystem = {
+        denyRead: [...new Set([home, ...deniedRoots({ env: process.env })])],
+        allowRead: [
+          realDir,
+          path.dirname(exe),
+          argsFile,
+          ...(vendor ? [vendor] : []),
+          ...bridgeSockets(srt),
+          ...(profile ? [profile] : []),
+        ],
+        allowWrite: [realDir, ...(profile ? [profile] : [])],
+        denyWrite: [],
+      }
+      // Inside: Playwright's arguments back (one per line; the launcher
+      // refuses one with a line break), then Chromium with its own small
+      // environment only. srt's proxy variables (and its token) stay out of
+      // Chromium's environment; its proxy is the bridge, given as a flag.
+      const vars = Object.entries(cleanEnv(dir))
+        .filter(([name]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
+        .map(([name, value]) => `${name}=${shellQuote(value)}`)
+        .join(' ')
+      const inner =
+        `set --; while IFS= read -r a; do set -- "$@" "$a"; done < ${shellQuote(argsFile)}; ` +
+        `exec env -i ${vars} ${shellQuote(exe)} "$@"`
+      const wrapped = await srt.wrapWithSandboxArgv(inner, '/bin/sh', { filesystem }, undefined, realDir, { commandId })
+      const launcher = path.join(launchDir, 'chromium')
+      const pidFile = path.join(launchDir, 'pid')
+      fs.writeFileSync(
+        launcher,
+        [
+          '#!/bin/sh',
+          "nl='",
+          "'",
+          'for a in "$@"; do case "$a" in *"$nl"*) echo "shapewall: a browser argument with a line break" >&2; exit 64 ;; esac; done',
+          `echo $$ > ${shellQuote(pidFile)}`,
+          `printf '%s\\n' "$@" > ${shellQuote(argsFile)}`,
+          `exec ${wrapped.argv.map(shellQuote).join(' ')}`,
+          '',
+        ].join('\n'),
+        { mode: 0o700 },
+      )
+      // No Chromium sandbox in there (see the top of this file); no shared
+      // memory folder either (the sandbox hides /dev/shm).
+      const base = options(false, `http://127.0.0.1:${SANDBOX_PROXY_PORT}`, { PATH: process.env.PATH || '/usr/bin:/bin' })
+      const context = await engine.launchPersistentContext(userDataDir, {
+        ...base,
+        executablePath: launcher,
+        args: ['--disable-dev-shm-usage', ...base.args],
+      })
+      try {
+        // The launcher Playwright started (our own child), then the
+        // sandbox's namespace below it, then the bridge into it.
+        const pid = Number(fs.readFileSync(pidFile, 'utf8').trim())
+        if (!Number.isInteger(pid) || parentPid(pid) !== process.pid) throw new Error('the browser launcher is not ours')
+        let namespace = null
+        const until = Date.now() + NAMESPACE_WAIT_MS
+        while (!namespace && Date.now() < until) {
+          namespace = sandboxNamespace(pid)
+          if (!namespace) await new Promise((resolve) => setTimeout(resolve, 25))
+        }
+        if (!namespace) throw new Error('the browser sandbox has no network namespace of its own')
+        bridge = await bridgeIntoNamespace({ namespace, socketPath, port: SANDBOX_PROXY_PORT })
+      } catch (error) {
+        await context.close().catch(() => {})
+        throw error
+      }
+      return { context, proxy, box: { close } }
+    } catch (error) {
+      await proxy?.close().catch(() => {})
+      close()
+      throw error
+    }
+  }
+
+  // The Browser line as it is now, before a launch: off now, no launch.
+  function launchAllowed() {
+    if (!recheck) return browser
+    let now = null
+    try {
+      now = recheck()
+    } catch {
+      now = null
+    }
+    if (!now || now.on !== true) throw new Error('The browser is no longer allowed on this turn.')
+    return now
+  }
   async function launch() {
+    const now = launchAllowed()
+    // allowNoSandbox counts only while the turn still has it.
+    const noSandboxNow = allowNoSandbox && now.allowNoSandbox === true
     ensureBrowserRoot(root)
     sweepAgentBrowserDirs({ root, warn })
     const dir = path.join(root, `${process.pid}-${processStartTime(process.pid) ?? 'x'}-${randomBytes(4).toString('hex')}`)
@@ -378,23 +703,28 @@ export function createAgentBrowser({
     liveDirs.add(dir)
     let proxy = null
     let context = null
+    let box = null
     try {
       for (const origin of given) await allowOrigin(origin)
       // The logged-in profile, checked again right before launch: it may
       // have changed since the policy was read.
       let userDataDir = path.join(dir, 'profile')
+      // The persistent profile as it was checked: its folder and identity,
+      // compared again once Chromium has it (profileStillOurs below).
+      let checked = null
       if (browser.profile !== null && browser.profile !== undefined) {
-        const real = cleanBrowserProfile(browser.profile)
-        if (!real)
+        const real = cleanBrowserProfile(browser.profile, { env })
+        const stat = real ? lstatOrNull(real) : null
+        if (!real || !stat)
           throw new Error(
             `Refused the browser profile ${String(browser.profile).slice(0, 200)}: only a folder Shapewall made for an agent ` +
-              "(shapewall agent connect --browser-profile) is used, never a browser's own profile or a copy of one.",
+              "in its own profile folder (shapewall agent connect --browser-profile NAME) is used, never a browser's own profile or a copy of one.",
           )
         userDataDir = real
+        checked = { real, dev: stat.dev, ino: stat.ino }
       }
-      proxy = await startEgressProxy({ target, onBlock: ({ url }) => block(url, 'proxy') })
       const engine = chromium || (await import('playwright')).chromium
-      const options = (sandbox) => ({
+      const options = (sandbox, proxyServer, launchEnv) => ({
         headless,
         chromiumSandbox: sandbox,
         artifactsDir: path.join(dir, 'artifacts'),
@@ -407,8 +737,8 @@ export function createAgentBrowser({
         ignoreHTTPSErrors: false,
         // Loopback goes through the proxy too, said here rather than left to
         // Playwright's default (an environment variable turns that off).
-        proxy: { server: `http://127.0.0.1:${proxy.port}`, bypass: '<-loopback>' },
-        env: cleanEnv(dir),
+        proxy: { server: proxyServer, bypass: '<-loopback>' },
+        env: launchEnv,
         // Chromium resolves nothing itself (the proxy does, at pinned
         // addresses); the proxy's own address is the one exception. WebRTC
         // may not use UDP outside the proxy. The bypass list again, last,
@@ -425,18 +755,48 @@ export function createAgentBrowser({
         handleSIGTERM: false,
         handleSIGHUP: false,
       })
-      try {
-        context = await engine.launchPersistentContext(userDataDir, options(chromiumSandbox))
-      } catch (error) {
-        if (!chromiumSandbox || !SANDBOX_ERROR_RE.test(String(error?.message))) throw error
-        if (!allowNoSandbox)
-          throw new Error(
-            "Chromium's own sandbox could not start on this machine, so the agent browser stays off. " +
-              'The machine owner can allow a browser without it (allowNoSandbox); pages then run with less isolation.',
-            { cause: error },
+      if (plan.use) {
+        try {
+          ;({ context, proxy, box } = await launchBoxed({ engine, dir, userDataDir, profile: checked?.real || null, options }))
+          isolation = 'os-sandbox'
+        } catch (error) {
+          const why = clip(String(error?.message || error).split('\n')[0], 300)
+          if (!allowHostLaunch) {
+            boxFailure = `The agent browser could not start inside the OS sandbox (${why}), so it stays off for this task. The machine owner can allow the browser to start on this machine directly then (allowHostLaunch).`
+            throw new Error(boxFailure, { cause: error })
+          }
+          notes.push(
+            `The agent browser could not start inside the OS sandbox (${why}); it runs on this machine directly (allowHostLaunch).`,
           )
-        notes.push("Chromium's own sandbox could not start on this machine; this browser runs without it (allowNoSandbox).")
-        context = await engine.launchPersistentContext(userDataDir, options(false))
+        }
+      }
+      if (!context) {
+        proxy = await startEgressProxy({ target, onBlock: ({ url }) => block(url, 'proxy') })
+        const hostOptions = (sandbox) => options(sandbox, `http://127.0.0.1:${proxy.port}`, cleanEnv(dir))
+        try {
+          context = await engine.launchPersistentContext(userDataDir, hostOptions(chromiumSandbox))
+        } catch (error) {
+          if (!chromiumSandbox || !SANDBOX_ERROR_RE.test(String(error?.message))) throw error
+          if (!noSandboxNow)
+            throw new Error(
+              "Chromium's own sandbox could not start on this machine, so the agent browser stays off. " +
+                'The machine owner can allow a browser without it (allowNoSandbox); pages then run with less isolation.',
+              { cause: error },
+            )
+          notes.push("Chromium's own sandbox could not start on this machine; this browser runs without it (allowNoSandbox).")
+          context = await engine.launchPersistentContext(userDataDir, hostOptions(false))
+        }
+        isolation = 'host'
+      }
+      // The persistent profile once more, now that Chromium holds it: the
+      // same folder (device and inode) at the same resolved path, still
+      // marked and still in Shapewall's own profile folder. Anything else
+      // (a link swapped in between the check and the start) closes it.
+      if (checked && !profileStillOurs(checked)) {
+        throw new Error(
+          `Refused the browser profile ${checked.real.slice(0, 200)}: it changed while the browser started, so the browser was closed. ` +
+            'Make a new one with shapewall agent connect --browser-profile NAME.',
+        )
       }
       hookExit()
       // No service workers: a worker's own requests would skip the route.
@@ -469,7 +829,7 @@ export function createAgentBrowser({
         return ws.close({ code: 1008, reason: 'Blocked by Shapewall' })
       })
       if (browser.auth) await context.setStorageState(readAuthState(checkout, browser.auth, [...allowed.keys()]))
-      const current = { context, proxy, dir, page: null }
+      const current = { context, proxy, dir, page: null, box }
       context.on('page', (page) => {
         watch(page)
         if (!current.page) {
@@ -504,6 +864,7 @@ export function createAgentBrowser({
     } catch (error) {
       await context?.close().catch(() => {})
       await proxy?.close().catch(() => {})
+      box?.close()
       try {
         fs.rmSync(dir, { recursive: true, force: true, maxRetries: 2 })
       } catch {
@@ -519,6 +880,7 @@ export function createAgentBrowser({
     if (finished.has(current)) return
     finished.add(current)
     current.proxy.close().catch(() => {})
+    current.box?.close()
     try {
       fs.rmSync(current.dir, { recursive: true, force: true, maxRetries: 2 })
       liveDirs.delete(current.dir)
@@ -537,6 +899,7 @@ export function createAgentBrowser({
   async function open() {
     if (disposed) throw ended()
     if (state) return state
+    if (boxFailure) throw new Error(boxFailure)
     opening ||= launch().finally(() => {
       opening = null
     })
@@ -585,6 +948,9 @@ export function createAgentBrowser({
     allowed: () => [...allowed.keys()],
     refused: () => [...refused],
     notes: () => [...notes],
+    // Where the browser runs: 'os-sandbox' or 'host' once one started; before
+    // that, whether it will try the sandbox and why not (for the panel).
+    isolation: () => ({ now: isolation, planned: plan.use ? 'os-sandbox' : 'host', why: plan.why, failed: boxFailure }),
     // For the tool host's dev server supervisor only: a port that a dev
     // server it started itself listens on. Returns the token that
     // allowSessionOrigin takes; the agent's tools never see it. Q2/Q4 wire
@@ -597,6 +963,18 @@ export function createAgentBrowser({
       spawned.set(token, `http://127.0.0.1:${port}`)
       return token
     },
+    // Takes a stopped dev server's origin off again (its port is anyone's
+    // after), unless the config allows that origin itself.
+    revokeSpawned(token) {
+      const origin = typeof token === 'string' ? spawned.get(token) : undefined
+      if (!origin) return false
+      spawned.delete(token)
+      if (configured.has(origin) || [...spawned.values()].includes(origin)) return true
+      if (given.includes(origin)) given.splice(given.indexOf(origin), 1)
+      allowed.delete(origin)
+      syncBox()
+      return true
+    },
     // Adds the dev server registerSpawned() returned `token` for. Live when
     // the browser runs, or with the next start; never a port it was not given.
     async allowSessionOrigin(token) {
@@ -605,6 +983,12 @@ export function createAgentBrowser({
       if (!given.includes(origin)) given.push(origin)
       // A start in progress has read `given` already, or will.
       if (opening) await opening.catch(() => {})
+      // Revoked (or the browser ended) while that start went on: never let in again.
+      if (disposed || spawned.get(token) !== origin) {
+        if (!configured.has(origin) && ![...spawned.values()].includes(origin) && given.includes(origin))
+          given.splice(given.indexOf(origin), 1)
+        return false
+      }
       if (state) return allowOrigin(origin)
       return true
     },

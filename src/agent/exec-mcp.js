@@ -40,6 +40,7 @@ import { toPrompt } from './capability-render.js'
 import { showCommand } from './starter/approvals.js'
 import * as z from 'zod'
 import { browserTools, createAgentBrowser } from './agent-browser.js'
+import { DEV_BRIDGE_WHY, devBridge, reserveDevPort, startDevServer } from './dev-server.js'
 
 export const EXEC_MCP_NAME = 'shapewall_exec'
 export const EXEC_TOOL_PREFIX = `mcp__${EXEC_MCP_NAME}__`
@@ -70,18 +71,43 @@ export function registerTools(factory) {
 }
 // The throwaway browser (src/agent/agent-browser.js, Q3): its browser_* tools,
 // only on a turn whose Browser line is on. The browser itself starts on the
-// first tool call and is disposed with the tool host. Arguments are checked
-// against the tools' own schemas before a handler sees them.
+// first tool call and is disposed with the tool host, after its dev servers
+// stopped. It is the host's one browser (host.agentBrowser): the dev server
+// supervisor registers the ports it holds with it. Shapewall's own server
+// port (host.denyPorts) is never opened. Arguments are checked against the
+// tools' own schemas before a handler sees them.
 function browserFamily(host) {
   const browser = host.capabilities.browser
   if (!browser || browser.on !== true) return []
+  // What the browser may do now (null: nothing): asked again before every
+  // call and before every (re)launch. The Browser line must still be on and
+  // the tier the same one the allowlist was resolved for (a narrowing only
+  // ever lowers it); allowNoSandbox counts only while it still says so.
+  const browserNow = () => {
+    let fresh
+    try {
+      fresh = host.recheck()
+    } catch {
+      return null
+    }
+    if (!fresh || fresh.tier !== host.capabilities.tier || fresh.browser?.on !== true) return null
+    return fresh.browser
+  }
   let agentBrowser
   try {
-    agentBrowser = createAgentBrowser({ browser, checkout: host.checkout, warn: (line) => host.log(`agent browser: ${line}`) })
+    agentBrowser = createAgentBrowser({
+      ...host.browserOptions,
+      browser,
+      recheck: browserNow,
+      checkout: host.checkout,
+      denyPorts: host.denyPorts,
+      warn: (line) => host.log(`agent browser: ${line}`),
+    })
   } catch (error) {
     host.log(`agent browser: off for this turn: ${error.message}`)
     return []
   }
+  host.agentBrowser = agentBrowser
   host.onClose(() => agentBrowser.dispose())
   return browserTools(agentBrowser).map((tool) => {
     const schema = z.object(tool.inputSchema).strict()
@@ -92,6 +118,12 @@ function browserFamily(host) {
       async call(args) {
         const parsed = schema.safeParse(args)
         if (!parsed.success) return failure(`${tool.name}: ${parsed.error.issues.map((issue) => issue.message).join('; ')}`)
+        // Checked again now (refresh ran first): a browser turned off
+        // mid-turn is closed for good, never used once more.
+        if (!browserNow()) {
+          await agentBrowser.dispose().catch(() => {})
+          return failure('Not done: the browser is no longer allowed on this turn.')
+        }
         return tool.handler(parsed.data)
       },
     }
@@ -202,6 +234,14 @@ export function createToolHost({
   onChanged = () => {},
   // The person's checkout (the browser reads its recorded logins there, never from the fix copy).
   checkout = null,
+  // Loopback ports the agent browser never opens: Shapewall's own server port.
+  denyPorts = [],
+  // Tests only: more options for createAgentBrowser (a stand-in chromium, a temp root).
+  browserOptions = {},
+  // async () => void, run before every call so that `recheck` reads what is
+  // true now (agent-link.js: the server's narrowing, fetched again). One that
+  // throws refuses the call (fail closed).
+  refresh = null,
   log = () => {},
 }) {
   const caps = capabilities
@@ -209,7 +249,13 @@ export function createToolHost({
   // A card's text within what a card may hold (card-hash.js CARD_LIMITS.detail).
   const askCard = (card) => ask({ ...card, detail: card.detail.length > 4000 ? card.detail.slice(0, 3990) + '\n[...]' : card.detail })
   const devServers = new Map()
+  // Dev servers being started (their slot is taken before the first await).
+  const starting = new Set()
   let closed = false
+  // Aborted at close(): every run this host started stops with it, whoever
+  // called (a thread relay's connection outlives the turn).
+  const ended = new AbortController()
+  const runSignal = (signal) => (signal ? AbortSignal.any([signal, ended.signal]) : ended.signal)
   // The inputs as the fix copy started (the base commit, the person's own):
   // on solo and team turns a command whose inputs are still those runs
   // without a card. Worked out once, before the agent can change anything.
@@ -307,29 +353,58 @@ export function createToolHost({
     return null
   }
 
-  async function runTracked(what, options) {
-    const mutating = options.mutating !== false && !session.readOnly
+  // Runs start() (a command, or a dev server's whole life) and reports the
+  // files it changed in the fix copy.
+  async function tracked(mutatingCommand, start) {
+    const mutating = mutatingCommand !== false && !session.readOnly
     const before = mutating ? snapshot(session.root) : null
-    let run
     try {
-      run = await session.run(what, options)
+      return await start()
     } finally {
       if (before) {
         const diff = changes(before, snapshot(session.root))
         if (diff.changed.length || diff.deleted.length) onChanged(diff)
       }
     }
-    return run
   }
+  const runTracked = (what, options) => tracked(options.mutating, () => session.run(what, options))
 
-  // Dev servers run only outside the OS sandbox (plan 7 Q4): inside it each
-  // command gets its own network namespace on Linux, so nothing else (the
-  // agent's next command, a browser) could reach the port, and srt 0.0.83
-  // forwards no ports.
+  // Dev servers: outside the OS sandbox the server binds a port itself; in
+  // it (Linux) each one gets its own sandbox and one bridged port that the
+  // supervisor holds (dev-server.js). Where the sandbox cannot bridge one
+  // (macOS: Seatbelt would open every loopback port to it), none runs there.
+  const bridge = session?.mode === 'sandboxed' ? devBridge() : { available: true, reason: null }
   const devAvailable = () =>
     Boolean(session) &&
-    session.mode !== 'sandboxed' &&
+    bridge.available &&
     caps.commands.some((item) => item.name === 'dev' || commands.find((c) => c.name === item.name)?.ready)
+  // A server's port joins the agent browser's allowlist for this session
+  // only when the supervisor knows the server is what listens there: the
+  // port it holds and bridges (sandbox), or a listener of the server's own
+  // process group (host mode). Never a port the session did not bind.
+  // -> words for the agent.
+  async function offerToBrowser(server) {
+    const browser = host.agentBrowser
+    if (!browser || browser.disposed) return ''
+    if (!server.bridged && !server.owned())
+      return ' Your browser tools do not get it: Shapewall could not check that the server is what listens on 127.0.0.1 there (bind 127.0.0.1:$PORT).'
+    try {
+      server.token = browser.registerSpawned(server.port)
+      if (!(await browser.allowSessionOrigin(server.token))) {
+        server.token = null
+        return ' Your browser tools do not get it: its port was refused or let go meanwhile.'
+      }
+    } catch (error) {
+      server.token = null
+      return ` Your browser tools do not get it: ${error.message}`
+    }
+    return ` Your browser tools can open http://127.0.0.1:${server.port}.`
+  }
+  // Its port leaves the browser's allowlist when it stops: the port is free for anyone after.
+  function forget(server) {
+    if (server.token) host.agentBrowser?.revokeSpawned(server.token)
+    server.token = null
+  }
 
   const builtin = [
     {
@@ -365,7 +440,7 @@ export function createToolHost({
         const refused = await mayRun({ ...picked, label: `Run ${picked.command.name}` })
         if (refused) return failure(refused)
         if (!allowedNow(picked.command.name)) return failure('Not run: it is no longer allowed on this turn.')
-        const run = await runTracked(picked.argv, { mutating: picked.command.mutating, signal })
+        const run = await runTracked(picked.argv, { mutating: picked.command.mutating, signal: runSignal(signal) })
         return { ...text(resultText({ label: picked.command.name, run })), isError: run.code !== 0 }
       },
     },
@@ -402,17 +477,20 @@ export function createToolHost({
             return failure(error.message)
           }
           if (!ask) return failure('This command needs someone to allow it on the board, and this machine takes no answers from the board.')
+          const exactStill = () => {
+            const now = recheck()
+            return Boolean(now && now.shell.mode === 'exact' && now.shell.exact.includes(line))
+          }
           const state = await askCard({
             name: 'command',
             label: 'Run a command',
             detail: `${showCommandLine(argv)}\n\nWhy: ${why || '(no reason given)'}\n\n${whereText(session)}`,
-            recheck: () => {
-              const now = recheck()
-              return Boolean(now && now.shell.mode === 'exact' && now.shell.exact.includes(line))
-            },
+            recheck: exactStill,
           })
           if (state !== 'approved') return failure(`Not run: ${state === 'denied' ? 'it was denied on the board' : 'nobody allowed it'}.`)
-          const run = await runTracked(argv, { signal })
+          // Once more, now: the answer was for this line, still allowed.
+          if (closed || !exactStill()) return failure('Not run: it is no longer allowed, since it was asked.')
+          const run = await runTracked(argv, { signal: runSignal(signal) })
           return { ...text(resultText({ label: line, run })), isError: run.code !== 0 }
         }
         // The full shell: solo (or the team with --trust-team-shell), in the sandbox
@@ -422,17 +500,19 @@ export function createToolHost({
         if (caps.shell.mode === 'sandboxed' && session.mode !== 'sandboxed') return failure('Not run: the OS sandbox did not start.')
         if (shellCard) {
           if (!ask) return failure('This machine asks before every command, and takes no answers from the board.')
+          const shellStill = () => recheck()?.shell?.mode === caps.shell.mode
           const state = await askCard({
             name: 'command',
             label: 'Run a shell command',
             detail: `${line}\n\nWhy: ${why || '(no reason given)'}\n\n${whereText(session)}`,
-            recheck: () => recheck()?.shell?.mode === caps.shell.mode,
+            recheck: shellStill,
           })
           if (state !== 'approved') return failure('Not run: nobody allowed it.')
+          if (closed || !shellStill()) return failure('Not run: the shell is no longer allowed on this turn, since it was asked.')
         }
         let run
         try {
-          run = await runTracked({ shell: line }, { signal })
+          run = await runTracked({ shell: line }, { signal: runSignal(signal) })
         } catch (error) {
           if (error instanceof SandboxRefusal) return failure(error.message)
           throw error
@@ -443,7 +523,7 @@ export function createToolHost({
     {
       name: 'start_dev_server',
       description:
-        "Starts the project's named dev server (its `dev` command) on a free port in your working folder and waits until it answers. Only where commands run without the OS sandbox; files it writes count as changed by you.",
+        "Starts the project's named dev server (its `dev` command) on a free port in your working folder and waits until it answers on 127.0.0.1:$PORT. In the OS sandbox it runs in a sandbox of its own, and only that one port reaches it (not your other commands). Your browser tools can open it. Files it writes count as changed by you.",
       inputSchema: {
         type: 'object',
         properties: { name: { type: 'string', description: 'The command name (default "dev")' } },
@@ -453,39 +533,64 @@ export function createToolHost({
       async call({ name = 'dev' } = {}) {
         const id = String(name || 'dev')
         if (devServers.has(id)) return text(`${id} is already running on port ${devServers.get(id).port}.`)
-        if (devServers.size >= EXEC_LIMITS.devServers)
+        if (starting.has(id)) return failure(`${id} is starting already: wait for that call.`)
+        if (devServers.size + starting.size >= EXEC_LIMITS.devServers)
           return failure(`At most ${EXEC_LIMITS.devServers} dev servers at a time: stop one first.`)
         if (!allowedNow(id)) return failure(`"${id}" is not allowed on this turn.`)
-        if (!devAvailable()) return failure('Dev servers do not run in the OS sandbox: each command there has its own network.')
-        const port = await freePort()
-        const picked = namedArgv(id, null, { port })
-        if (picked.error) return failure(picked.error)
-        const refused = await mayRun({ ...picked, label: `Start ${id}` })
-        if (refused) return failure(refused)
-        if (closed) return failure('The session has ended.')
-        const server = { port, kill: () => {}, done: null, output: '' }
-        // Tracked like any command: what the server writes in the fix copy is
-        // reported when it stops, so the fix is held for a look.
-        server.done = runTracked(picked.argv, {
-          mutating: picked.command.mutating,
-          timeoutMs: SANDBOX_LIMITS.timeoutMaxMs,
-          extraEnv: { PORT: String(port) },
-          onStart: ({ kill }) => (server.kill = kill),
-        }).then((run) => {
-          server.output = run.output
-          server.exited = true
-          devServers.delete(id)
-          return run
-        })
-        devServers.set(id, server)
-        const ready = picked.command.ready ? picked.command.ready.split(PORT_TOKEN).join(String(port)) : `http://127.0.0.1:${port}`
-        const up = await waitReady(ready, server)
-        if (!up) {
-          server.kill()
-          await server.done
-          return failure(`${id} did not answer on ${ready} within ${EXEC_LIMITS.readyMs / 1000} s.\n${server.output.slice(-4000)}`)
+        if (!devAvailable()) return failure(DEV_BRIDGE_WHY[bridge.reason] || 'Dev servers do not run here.')
+        // The slot is this call's from here, before anything waits: two
+        // calls at once never both pass the limit above.
+        starting.add(id)
+        let reserved = null
+        let server = null
+        try {
+          reserved = await reserveDevPort(session)
+          const { port } = reserved
+          const picked = namedArgv(id, null, { port })
+          if (picked.error) return failure(picked.error)
+          const refused = await mayRun({ ...picked, label: `Start ${id}` })
+          if (refused) return failure(refused)
+          if (closed) return failure('The session has ended.')
+          server = await startDevServer({
+            session,
+            reserved,
+            command: picked.argv,
+            timeoutMs: SANDBOX_LIMITS.timeoutMaxMs,
+            // Tracked like any command: what the server writes in the fix
+            // copy is reported when it stops, so the fix is held for a look.
+            track: (start) => tracked(picked.command.mutating, start),
+            log,
+          })
+          if (closed) {
+            await server.stop()
+            return failure('The session has ended.')
+          }
+          const gone = () => {
+            forget(server)
+            if (devServers.get(id) === server) devServers.delete(id)
+          }
+          server.done.then(gone, gone)
+          if (server.bridgeError) {
+            await server.stop()
+            return failure(`${id} did not start: ${server.bridgeError}.\n${server.output().slice(-4000)}`)
+          }
+          devServers.set(id, server)
+          const ready = readyUrl(picked.command.ready, port, reserved.bridged)
+          const up = await waitReady(ready, server)
+          if (!up) {
+            await server.stop()
+            return failure(`${id} did not answer on ${ready} within ${EXEC_LIMITS.readyMs / 1000} s.\n${server.output().slice(-4000)}`)
+          }
+          if (closed) {
+            await server.stop()
+            return failure('The session has ended.')
+          }
+          const browser = await offerToBrowser(server)
+          return text(`${id} is up on ${ready} (port ${port}).${browser} Stop it with stop_dev_server when you are done.`)
+        } finally {
+          starting.delete(id)
+          if (!server) reserved?.release()
         }
-        return text(`${id} is up on ${ready} (port ${port}). Stop it with stop_dev_server when you are done.`)
       },
     },
     {
@@ -494,11 +599,13 @@ export function createToolHost({
       inputSchema: { type: 'object', properties: { name: { type: 'string' } }, additionalProperties: false },
       available: devAvailable,
       async call({ name = 'dev' } = {}) {
-        const server = devServers.get(String(name || 'dev'))
+        const id = String(name || 'dev')
+        const server = devServers.get(id)
         if (!server) return text('No such dev server is running.')
-        server.kill()
-        await server.done
-        return text(`${name} stopped.`)
+        forget(server)
+        await server.stop()
+        devServers.delete(id)
+        return text(`${id} stopped.`)
       },
     },
   ]
@@ -507,7 +614,13 @@ export function createToolHost({
     capabilities: caps,
     session,
     checkout,
+    denyPorts: (Array.isArray(denyPorts) ? denyPorts : []).filter((port) => Number.isInteger(port) && port > 0 && port < 65536),
+    browserOptions,
+    // Set by browserFamily when the Browser line is on: the one agent browser of this host.
+    agentBrowser: null,
     onClose: (fn) => closers.push(fn),
+    // What this turn may do now (the tool families check again with it).
+    recheck,
     devPorts: () => [...devServers.values()].map((server) => server.port),
     log,
   }
@@ -516,11 +629,22 @@ export function createToolHost({
   const byName = new Map(listed.map((tool) => [tool.name, tool]))
   return {
     ...host,
+    get agentBrowser() {
+      return host.agentBrowser
+    },
     tools: () => listed.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
     async call(name, args, { signal } = {}) {
       if (closed) return failure('This session has ended.')
       const tool = byName.get(String(name))
       if (!tool) return failure(`No tool "${name}" here.`)
+      if (refresh) {
+        try {
+          await refresh()
+        } catch (error) {
+          log(`exec-mcp: ${name}: refused, what this turn may do could not be checked again: ${error.message}`)
+          return failure('Not run: what this turn may do could not be checked again just now. Try again in a moment.')
+        }
+      }
       try {
         return await tool.call(args && typeof args === 'object' && !Array.isArray(args) ? args : {}, { signal })
       } catch (error) {
@@ -530,23 +654,31 @@ export function createToolHost({
     },
     async close() {
       closed = true
-      for (const server of devServers.values()) server.kill()
-      await Promise.allSettled([...devServers.values()].map((server) => server.done))
+      ended.abort()
+      // The dev servers first (their ports leave the browser), then the browser.
+      const running = [...devServers.values()]
+      for (const server of running) forget(server)
+      await Promise.allSettled(running.map((server) => server.stop()))
+      devServers.clear()
       await Promise.allSettled(closers.map((fn) => Promise.resolve().then(fn)))
     },
   }
 }
 
-async function freePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer()
-    server.unref()
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address()
-      server.close(() => resolve(port))
-    })
-  })
+// The ready URL: the config's (its $PORT filled in), or the port's root. In
+// the sandbox only the held port reaches the server, so the check goes to
+// http://127.0.0.1:PORT with the config's path, whatever host it names.
+function readyUrl(ready, port, bridged) {
+  const base = `http://127.0.0.1:${port}`
+  if (!ready) return base
+  const filled = ready.split(PORT_TOKEN).join(String(port))
+  if (!bridged) return filled
+  try {
+    const url = new URL(filled)
+    return `${base}${url.pathname}${url.search}`
+  } catch {
+    return base
+  }
 }
 async function waitReady(url, server) {
   const until = Date.now() + EXEC_LIMITS.readyMs
@@ -576,69 +708,167 @@ export async function startExecSession({
   capabilities,
   platform,
   recheck,
+  refresh = null,
   commands = [],
   readCommands,
+  // The folder commands run in (the fix copy, a throwaway copy, or a local
+  // board's own working folder). null: no commands at all, only the browser.
   root,
   expect = root,
   within = null,
   checkout = null,
+  // The checkout the agent browser reads recorded logins from (a local board
+  // works in place: no session checkout, but the browser still knows it).
+  browserCheckout = checkout,
   readOnly = false,
   readPaths = [],
+  // Folders inside `root` no command may write (a local checkout's .git and .shapewall).
+  denyWrite = [],
+  // Paths inside `root` no command may read (a checkout's Shapewall folder: its recorded logins).
+  denyRead = [],
   network = 'none',
   approvals = null,
   scope = '',
   ask = null,
   shellCard = false,
   onChanged,
+  // Loopback ports the agent browser never opens (Shapewall's own server port).
+  denyPorts = [],
+  // false: the host only, no relay (an endpoint backend calls it in process; createThreadRelay serves it).
+  serve = true,
   env = process.env,
   log = () => {},
 }) {
   const caps = capabilities
   if (!caps || (!caps.commands.length && caps.shell.mode === 'off' && caps.browser?.on !== true)) return null
+  const wantsCommands = caps.commands.length > 0 || caps.shell.mode !== 'off'
   const mode = platform?.sandbox ? 'sandboxed' : caps.shell.mode === 'unsandboxed' ? 'host-shell' : 'host'
   // The resolver counted on the sandbox for the full shell: no sandbox, no shell.
   if (caps.shell.mode === 'sandboxed' && mode !== 'sandboxed') return null
-  let session
-  try {
-    session = await createCommandSession({ root, expect, within, checkout, network, readOnly, mode, readPaths, env, log })
-  } catch (error) {
-    log(`exec-mcp: no command session: ${error.message}`)
-    return null
+  let session = null
+  if (wantsCommands && root) {
+    try {
+      session = await createCommandSession({
+        root,
+        expect,
+        within,
+        checkout,
+        network,
+        readOnly,
+        mode,
+        readPaths,
+        denyWrite,
+        denyRead,
+        env,
+        log,
+      })
+    } catch (error) {
+      log('exec-mcp: no command session: ' + error.message)
+      // Commands were the point: without a session nothing here may run them.
+      if (caps.browser?.on !== true) return null
+    }
   }
+  const offered = session ? caps : withoutCommands(caps)
   const host = createToolHost({
-    capabilities: caps,
-    recheck,
-    commands,
-    readCommands,
+    capabilities: offered,
+    recheck: session ? recheck : () => (recheck ? withoutCommands(recheck()) : offered),
+    refresh,
+    commands: session ? commands : [],
+    readCommands: session ? readCommands : () => [],
     session,
     approvals,
     scope,
     ask,
     shellCard,
     onChanged,
-    checkout,
+    checkout: browserCheckout,
+    denyPorts,
     log,
   })
-  let served
-  try {
-    served = await serveToolHost(host, { env, log })
-  } catch (error) {
-    log(`exec-mcp: the tool host did not start: ${error.message}`)
+  if (!host.tools().length) {
     await host.close()
-    session.close()
+    session?.close()
     return null
+  }
+  let served = null
+  if (serve) {
+    try {
+      served = await serveToolHost(host, { env, log })
+    } catch (error) {
+      log('exec-mcp: the tool host did not start: ' + error.message)
+      await host.close()
+      session?.close()
+      return null
+    }
   }
   let closed = false
   return {
     host,
     session,
-    servers: served.servers,
+    servers: served ? served.servers : [],
     async close() {
       if (closed) return
       closed = true
       await host.close()
-      await served.close().catch(() => {})
-      session.close()
+      await served?.close().catch(() => {})
+      session?.close()
+    },
+  }
+}
+
+// The same capabilities with every command and the shell off: what a turn
+// gets when its command session did not start, or it has no folder to run in.
+export function withoutCommands(caps) {
+  if (!caps) return caps
+  return Object.freeze({ ...caps, commands: [], shell: Object.freeze({ mode: 'off', network: 'none', exact: [] }) })
+}
+
+// One stable exec server for a chat thread whose agent session outlives a
+// turn (a local board's chat, a connected agent's chat): the agent's adapter
+// starts the relay once, with the session, and each turn puts its own tool
+// host behind it (setHost) and takes it away at the end (setHost(null)).
+// Between turns, and for a tool the current turn does not offer, a call is
+// refused. The relay lists the tools of the host it first met (an adapter
+// reads the list when the session starts).
+export async function createThreadRelay({ env = process.env, log = () => {} } = {}) {
+  let current = null
+  let first = null
+  const relayHost = {
+    tools: () => (current || first)?.tools() || [],
+    call: (name, args, options) =>
+      current ? current.call(name, args, options) : Promise.resolve(failure('No turn of yours is running on the board just now.')),
+  }
+  let served = null
+  return {
+    get servers() {
+      return served ? served.servers : []
+    },
+    // The host of this turn (null: none). The first host decides what is listed.
+    async setHost(host) {
+      current = host || null
+      if (host && !served) {
+        first = host
+        served = await serveToolHost(relayHost, { env, log })
+      }
+    },
+    current: () => current,
+    // Whether `host` offers the tools this relay listed: when not, the
+    // caller starts a new relay (and so a new agent session) for the turn.
+    matches(host) {
+      if (!first || !host) return true
+      const names = (h) =>
+        JSON.stringify(
+          h
+            .tools()
+            .map((tool) => tool.name)
+            .sort(),
+        )
+      return names(first) === names(host)
+    },
+    async close() {
+      current = null
+      await served?.close().catch(() => {})
+      served = null
     },
   }
 }
@@ -695,6 +925,9 @@ export async function serveToolHost(host, { env = process.env, log = () => {} } 
     server.listen(socket, resolve)
   })
   if (process.platform !== 'win32') fs.chmodSync(socket, 0o600)
+  // The agent process that talks to it keeps this process busy; the
+  // listener alone (a chat thread's relay between turns) never does.
+  server.unref()
   const policy = path.join(dir, 'policy.json')
   fs.writeFileSync(policy, `${JSON.stringify({ v: 1, socket, token: token.toString('hex'), tools: host.tools() })}\n`, {
     mode: 0o600,

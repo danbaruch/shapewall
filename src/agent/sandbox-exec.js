@@ -18,7 +18,8 @@
 //              "registries"), or none ("none"). Never a local port: on
 //              Linux each command has its own network namespace, so a dev
 //              server one command starts cannot be reached by the next, and
-//              a host port it did not bind is the person's
+//              a host port it did not bind is the person's. A dev server
+//              gets its own sandbox and one bridged port (dev-server.js)
 //   hidden     the home folder (every spelling of it), the absolute XDG
 //              folders, the shared temp folders (/tmp, $TMPDIR, /var/tmp,
 //              /dev/shm), /run/user/<uid>, /mnt, /media and the other fix
@@ -326,6 +327,8 @@ export function runProcess(
     }
     signal?.addEventListener('abort', onAbort, { once: true })
     onStart({ child, kill })
+    // Stopped before it started: it never runs on.
+    if (signal?.aborted) onAbort()
     const done = (code, sig, error = null) => {
       clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
@@ -350,6 +353,12 @@ export function runProcess(
 
 let manager = null
 let starting = null
+// The signal listeners the runtime adds (it cleans up on SIGINT and SIGTERM
+// but does not end the process): a module that ends the process on a
+// signal nobody else handles does not count these (agent-browser.js).
+const RUNTIME_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP']
+const runtimeListeners = new Set()
+export const isRuntimeListener = (listener) => runtimeListeners.has(listener)
 // The runtime runs only while a session uses it: its proxies and socat
 // bridges would keep the process alive (and listening) between fixes.
 let sessions = 0
@@ -360,6 +369,7 @@ async function sandboxManager() {
   starting ||= (async () => {
     const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime')
     const vendor = runtimeVendorDir()
+    const before = Object.fromEntries(RUNTIME_SIGNALS.map((signal) => [signal, new Set(process.listeners(signal))]))
     // The process-wide base: no network (each command brings its list), no
     // writes, the home folder unreadable. Each command's own folders come
     // with the command (customConfig).
@@ -367,6 +377,8 @@ async function sandboxManager() {
       network: { allowedDomains: [], deniedDomains: [] },
       filesystem: { denyRead: [os.homedir()], allowRead: vendor ? [vendor] : [], allowWrite: [], denyWrite: [] },
     })
+    for (const signal of RUNTIME_SIGNALS)
+      for (const listener of process.listeners(signal)) if (!before[signal].has(listener)) runtimeListeners.add(listener)
     manager = SandboxManager
     return manager
   })()
@@ -390,6 +402,29 @@ function releaseSandbox() {
   sessions -= 1
   if (sessions > 0) return
   stopping = closeSandbox().finally(() => (stopping = null))
+}
+
+// The runtime for a user other than a command session (the agent browser,
+// src/agent/agent-browser.js): counted like a session, so it stays up while
+// used. -> { box (the SandboxManager), release() }; release once.
+export async function acquireSandbox() {
+  sessions += 1
+  let box
+  try {
+    box = await sandboxManager()
+  } catch (error) {
+    releaseSandbox()
+    throw error
+  }
+  let released = false
+  return {
+    box,
+    release() {
+      if (released) return
+      released = true
+      releaseSandbox()
+    },
+  }
 }
 
 // What a session's commands may reach, as srt host patterns: the package
@@ -504,7 +539,7 @@ export function toolchainDir({ execPath = process.execPath, denied = [] } = {}) 
 
 // srt's own Unix sockets to its proxies (Linux), which it binds into every
 // sandbox inside the system temp.
-function bridgeSockets(box) {
+export function bridgeSockets(box) {
   const out = []
   for (const get of ['getLinuxHttpSocketPath', 'getLinuxSocksSocketPath']) {
     const file = typeof box?.[get] === 'function' ? box[get]() : null
@@ -565,6 +600,9 @@ export async function createCommandSession({
   tmpParent = null,
   env = process.env,
   denyRead = [],
+  // Folders inside the root no command may write (a local board's own
+  // checkout: its .git and .shapewall stay read only).
+  denyWrite = [],
   limits = SANDBOX_LIMITS,
   log = () => {},
 }) {
@@ -638,10 +676,15 @@ export async function createCommandSession({
       ...readPaths.filter((dir) => path.isAbsolute(dir)),
     ],
     allowWrite: readOnly ? [tmp] : [real, tmp],
-    denyWrite: [],
+    denyWrite: denyWrite.filter((dir) => path.isAbsolute(dir)),
   })
   const list = () => networkList(network)
   let closed = false
+  // Run at close, before the temp goes: the session's dev servers (dev-server.js).
+  const closers = []
+  // The kill of every run still going: close() stops them all, whatever
+  // signal their caller holds (a command never outlives its session).
+  const live = new Set()
   // A command that left the session temp over its cap: emptied (a fresh HOME).
   function capTmp(result) {
     if (sizeOf(tmp, limits.tmpBytes) <= limits.tmpBytes) return result
@@ -653,8 +696,22 @@ export async function createCommandSession({
   }
 
   // argv (no shell) or { shell: "..." } (the solo full shell). -> runProcess's result.
-  async function run(command, { timeoutMs = SANDBOX_LIMITS.timeoutMs, extraEnv = {}, signal = null, onStart } = {}) {
+  async function run(command, options = {}) {
     if (closed) throw new SandboxRefusal('closed', 'This session has ended.')
+    let kill = null
+    const started = (handle) => {
+      kill = handle.kill
+      if (closed) handle.kill()
+      else live.add(kill)
+      options.onStart?.(handle)
+    }
+    try {
+      return await runInSession(command, { ...options, onStart: started })
+    } finally {
+      if (kill) live.delete(kill)
+    }
+  }
+  async function runInSession(command, { timeoutMs = SANDBOX_LIMITS.timeoutMs, extraEnv = {}, signal = null, onStart } = {}) {
     const time = Math.min(Math.max(1000, timeoutMs), SANDBOX_LIMITS.timeoutMaxMs)
     const vars = commandEnv({ env, tmp, extra: extraEnv })
     if (!boxed) {
@@ -694,9 +751,23 @@ export async function createCommandSession({
   function close() {
     if (closed) return
     closed = true
+    for (const kill of [...live])
+      try {
+        kill()
+      } catch {
+        /* gone */
+      }
+    live.clear()
+    for (const fn of closers.splice(0))
+      try {
+        fn()
+      } catch {
+        /* the next one still runs */
+      }
     fs.rmSync(tmp, { recursive: true, force: true })
     if (boxed) releaseSandbox()
   }
   log(`sandbox: ${boxed ? 'OS sandbox' : 'no OS sandbox (a card each)'} in ${real}`)
-  return { root: real, tmp, mode, network, readOnly, denied, run, close }
+  const onClose = (fn) => (closed ? fn() : closers.push(fn))
+  return { root: real, tmp, mode, network, readOnly, denied, run, close, onClose }
 }

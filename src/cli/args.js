@@ -39,6 +39,7 @@ const BOOLEAN_FLAGS = new Set([
   'status',
   'pass-token',
   'takeover',
+  'browser-no-sandbox',
   'include-guests',
   'dry-run',
   'chat',
@@ -219,6 +220,8 @@ export const COMMAND_FLAGS = {
     'allow-path',
     'auto',
     'base',
+    'browser-profile',
+    'browser-no-sandbox',
     // agent setup, agent docs
     'claude',
     'codex',

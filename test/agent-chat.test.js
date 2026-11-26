@@ -194,10 +194,12 @@ test('a message streams back: user event, reasoning, text, done; the thread keep
   const user = lastUserText(call.body)
   assert.match(user, /<shapewall-data source="board" trust="untrusted" board="sample">/)
   assert.ok(user.endsWith('Hi there'))
-  assert.deepEqual(
-    call.body.tools.map((tool) => tool.function.name),
-    ['list_pages', 'list_comments', 'get_comment'],
-  )
+  // The board's tools, then Shapewall's tool host (an open turn: what it may do and the browser, no commands).
+  const toolNames = call.body.tools.map((tool) => tool.function.name)
+  assert.deepEqual(toolNames.slice(0, 3), ['list_pages', 'list_comments', 'get_comment'])
+  assert.ok(toolNames.slice(3).every((name) => name === 'shapewall_capabilities' || name.startsWith('browser_')))
+  assert.ok(!toolNames.some((name) => /command|shell/.test(name)))
+  assert.match(call.body.messages[0].content, /On this board \(tier: open\)/)
 
   const thread = await request(port, 'GET', '/api/agent/boards/sample/threads/board')
   assert.deepEqual(

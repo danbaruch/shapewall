@@ -80,6 +80,9 @@ import { uploadHashes } from './identity.js'
 import { readIcon } from './icon-store.js'
 import { finishFix, projectChanged, projectSnapshot, stopReason } from './feedback-loop.js'
 import { ownerMcpServers } from './owner-mcp.js'
+import { localOwnerOnly, startLocalTools } from './local-tools.js'
+import { createThreadRelay } from './exec-mcp.js'
+import { deprecated } from '../deprecation.js'
 import { agentHandles, respondLine, shouldRespond } from './triggers.js'
 import { RUN_MS_MAX, commentIdOf, runTurn } from './run.js'
 import { beginTurnChanges, finishTurnChanges, ignoredPaths, starterSummary, undoFiles, undoStarterBranch } from './turn-changes.js'
@@ -348,6 +351,23 @@ export function agentRouter({
   // icon and tint (identity.js), which are display only. Renaming an agent
   // must not stop its processes.
   const fingerprintOf = (current) => JSON.stringify({ ...current, label: null, icon: null, tint: null })
+  // A local board's Claude Code session (1.4.0): restricted, with
+  // Shapewall's tool server for commands, the shell and the browser.
+  // `agent.localSession: "own"` keeps the 1.2.0 session for one minor.
+  const localSession = config.agent?.localSession === 'own' ? 'own' : 'restricted'
+  if (localSession === 'own')
+    deprecated(
+      'agent.localSession "own"',
+      'leave it out: a local board\u2019s agent gets read and edit tools and Shapewall\u2019s own tools for commands and the browser',
+    )
+  // One exec relay per chat thread (exec-mcp.js createThreadRelay): its ACP
+  // session keeps the relay, each turn puts its own tool host behind it.
+  const relays = new Map()
+  const closeRelay = (key) => {
+    const relay = relays.get(key)
+    relays.delete(key)
+    return relay?.close().catch(() => {})
+  }
   const backendFor = (current, ownerWrites = false) => {
     const key = JSON.stringify({ profileId: current.profileId || 'default', ownerWrites })
     const fingerprint = fingerprintOf(current)
@@ -358,7 +378,7 @@ export function agentRouter({
     if (!backends.has(key)) {
       // usage: an endpoint is asked for token counts (the composer's usage
       // ring); one that refuses stream_options is asked again without.
-      const live = { ...current, usage: current.usage ?? true }
+      const live = { ...current, usage: current.usage ?? true, localSession }
       const backend = createBackend(live, {
         env,
         fetchImpl,
@@ -412,7 +432,8 @@ export function agentRouter({
     for (const entry of backends.values()) entry.backend?.close?.()
     backends.clear()
     cached = null
-    return Promise.all([settingsStopped, ...owned.map((agent) => agent.stoppingPromise)])
+    const relaysClosed = [...relays.keys()].map((key) => closeRelay(key))
+    return Promise.all([settingsStopped, ...relaysClosed, ...owned.map((agent) => agent.stoppingPromise)])
   }
   router.backend = () => cached?.backend || null
   router.processes = () =>
@@ -700,6 +721,82 @@ export function agentRouter({
   // edit, another version): the next turn sends the thread so far instead.
   const resetSessions = (key) => {
     for (const entry of backends.values()) entry.backend?.resetThread?.(key)
+    closeRelay(key)
+  }
+  // What a local turn may do (capabilities.js) and the tool host that holds
+  // it to that (local-tools.js), behind the thread's relay for an ACP agent.
+  // The composer's prepare starts the session the same way, so that the
+  // first turn finds it with the same tools and keeps it.
+  // -> { tools, relay, mcpServers } (tools null: none)
+  const turnTools = async ({ req, board, threadId, backend, ownerWrites, root, inPlace, ask }) => {
+    const key = [board.id, threadId].join('/')
+    const commentId = commentIdOf(threadId)
+    let tools = null
+    try {
+      const kind = threadKind(threadId)
+      tools = await startLocalTools({
+        config,
+        env,
+        acp: backend.id === 'acp',
+        owner: localOwnerOnly({
+          ownerWrites,
+          kind,
+          thread: readThread(config, board.id, threadId),
+          comment: kind === 'comment' && commentId ? getComment(config, board.id, commentId) : null,
+          ownerGate,
+          accounts: Boolean(accountUser),
+          acp: backend.id === 'acp',
+        }),
+        shared,
+        comment: kind !== 'chat',
+        root,
+        inPlace,
+        ask,
+        denyPorts: [ownPort(req)].filter(Boolean),
+        serve: false,
+        log,
+      })
+    } catch (error) {
+      log(`agent tools: ${error.message}`)
+      tools = null
+    }
+    let relay = null
+    let mcpServers = null
+    if (tools?.exec && backend.id === 'acp') {
+      relay = relays.get(key)
+      if (relay && !relay.matches(tools.exec.host)) {
+        await closeRelay(key)
+        relay = null
+      }
+      if (!relay) {
+        relay = await createThreadRelay({ env, log })
+        relays.set(key, relay)
+      }
+      try {
+        await relay.setHost(tools.exec.host)
+        mcpServers = relay.servers
+      } catch (error) {
+        log(`agent tools: ${error.message}`)
+        await closeRelay(key)
+        relay = null
+      }
+    }
+    return { tools, relay, mcpServers }
+  }
+  const endTurnTools = async (key, { tools, relay }) => {
+    if (relay && relays.get(key) === relay) await relay.setHost(null).catch(() => {})
+    await tools?.exec?.close().catch((error) => log(`agent tools: ${error.message}`))
+  }
+  // This server's own port: the agent browser never opens it.
+  const ownPort = (req) => {
+    const port =
+      req.socket?.localPort ||
+      Number(
+        String(req.headers?.host || '')
+          .split(':')
+          .pop(),
+      )
+    return Number.isInteger(port) && port > 0 && port < 65536 ? port : null
   }
   const handle = (handler) => async (req, res) => {
     try {
@@ -1098,30 +1195,57 @@ export function agentRouter({
           : null
         // The files the agent's own tools edited: the only ones its Undo may put back.
         const agentFiles = new Set()
-        const reply = await runTurn({
-          config,
+        // What this turn may do (capabilities.js) and the tool host that
+        // holds it to that (local-tools.js): named commands, the shell in the
+        // OS sandbox, dev servers, the browser. Its cards are answered on the
+        // board by the owner (the permission route below).
+        const key = [board.id, threadId].join('/')
+        const cards = {}
+        res.locals.run.cards = cards
+        const { tools, relay, mcpServers } = await turnTools({
+          req,
           board,
           threadId,
-          messages,
           backend,
-          editedFiles: agentFiles,
-          model: current.model,
-          // The composer's model picker (an endpoint's own list), owner turns only.
-          modelOverride: ownerWrites ? chosenModel(current, `${board.id}/${threadId}`) : null,
-          // The owner's own feedback notes go to the owner's turns only (ratings-core.js downNotes).
-          ownerTurn: res.locals.viewer === 'owner',
-          // The composer's options for this chat (an ACP session's own), owner turns only.
-          choices: ownerWrites && backend.id === 'acp' ? cleanChoices(req.body?.options) : null,
-          emit,
-          signal: controller.signal,
           ownerWrites,
-          allowCapture,
-          capture,
-          requestedPages,
-          // Branch mode: the agent's cwd, file sandbox and commands are the worktree.
-          workdir: work ? worktreeWorkdir(work) : null,
-          agentName: current.label || null,
+          root: work ? work.root : config.dir,
+          inPlace: !work,
+          ask: (card) => (cards.ask ? cards.ask(card) : Promise.resolve('cancelled')),
         })
+        let reply
+        try {
+          reply = await runTurn({
+            config,
+            board,
+            threadId,
+            messages,
+            backend,
+            editedFiles: agentFiles,
+            model: current.model,
+            // The composer's model picker (an endpoint's own list), owner turns only.
+            modelOverride: ownerWrites ? chosenModel(current, `${board.id}/${threadId}`) : null,
+            // The owner's own feedback notes go to the owner's turns only (ratings-core.js downNotes).
+            ownerTurn: res.locals.viewer === 'owner',
+            // The composer's options for this chat (an ACP session's own), owner turns only.
+            choices: ownerWrites && backend.id === 'acp' ? cleanChoices(req.body?.options) : null,
+            emit,
+            signal: controller.signal,
+            ownerWrites,
+            allowCapture,
+            capture,
+            requestedPages,
+            // Branch mode: the agent's cwd, file sandbox and commands are the worktree.
+            workdir: work ? worktreeWorkdir(work) : null,
+            agentName: current.label || null,
+            capabilities: tools?.prompt || '',
+            quoteOthers: !tools || tools.caps.tier === 'open',
+            mcpServers,
+            execHost: backend.id === 'acp' ? null : tools?.exec?.host || null,
+            cards,
+          })
+        } finally {
+          await endTurnTools(key, { tools, relay })
+        }
         health.record(current, reply)
         // What the profile offers, as this turn's session saw it; a turn that
         // could not sign in drops what was known (the next look starts fresh).
@@ -1762,7 +1886,17 @@ export function agentRouter({
       if (!release) return res.json({ options: null })
       try {
         if (runs.has(key) || selecting.has(key)) return res.json({ options: backend.sessionOptions(key) })
-        const options = await backend.prepare(key, { choices, signal: admission.signal })
+        // The session the first turn would start: with the tools it would have.
+        const branchOn = branchModeSettings(config, env).enabled
+        const prepared = branchOn
+          ? { tools: null, relay: null, mcpServers: null }
+          : await turnTools({ req, board, threadId, backend, ownerWrites: true, root: config.dir, inPlace: true, ask: null })
+        let options
+        try {
+          options = await backend.prepare(key, { choices, signal: admission.signal, mcpServers: prepared.mcpServers })
+        } finally {
+          await endTurnTools(key, prepared)
+        }
         ownerThreads.add(key)
         if (readThread(config, board.id, threadId).messages.length) await markThreadOwnerControls(config, board.id, threadId)
         rememberSession(current, backend, key)
@@ -2015,6 +2149,14 @@ export function agentRouter({
         // answer must come from this board's own page.
         if (!(controlsAllowed(req, board, threadId) && sameOriginWrite(req))) return controlDenied(res)
         const run = runs.get(`${board.id}/${threadId}`)
+        // A card of Shapewall's own (a command this turn's tool host asks
+        // about): the command runs as the person, so only the owner answers.
+        const own = run?.cards?.pending?.get(permission)
+        if (own) {
+          if (!ownerWritesFor(req)) return ownerNeeded(res)
+          own(optionId === 'allow' ? 'approved' : 'denied', req.shapewallAccess?.name || null)
+          return res.json({ state: optionId === 'allow' ? 'approved' : 'denied' })
+        }
         // An approval lets the agent run a command or write a file as the
         // person: with an owner capability on this server, only the owner answers.
         if (ownerGate && run?.backend.id === 'acp' && !agentOwner(req)) return ownerNeeded(res)

@@ -30,6 +30,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
   profile folder removed at close, on a crash, on a signal and by the next start after a kill. A recorded login or a Shapewall-made
   profile only where the turn allows it. On a hosted Fix with whose Browser line is on, the `browser_*` tools are in Shapewall's tool
   host beside the commands, their arguments checked against their schemas, and the browser is disposed when the fix ends.
+- On Linux with the OS sandbox, the agent's browser runs inside it: Chromium sees no home folder, writes only its session folder,
+  and reaches only the allowed addresses, through Shapewall's egress proxy (pinned addresses) and then the sandbox runtime's proxy,
+  whose list holds exactly those address:port pairs. A sandboxed start that fails leaves the browser off for the task (unless the
+  machine allows the host start then). macOS, Windows and machines without bubblewrap start it on the host as before.
 - "What it can do": each agent on a project's Agents page (and a local board's Agents page, for its owner) has a card with every
   capability line per place and tier, an on, asks first, off or unknown chip, one sentence, and the command that changes it on the
   agent's machine. A line the project's setting holds says so. The board's agent panel shows the main lines for a fix you ask for.
@@ -40,7 +44,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The token API's `/project` says which agent the token is and its state (online while its link is open).
 
 - Commands through Shapewall on a hosted Fix with: the agent gets Shapewall's own tools (`run_named_command`, `run_command`,
-  `shapewall_capabilities`, and `start_dev_server` / `stop_dev_server` where commands run without the OS sandbox) and never its own
+  `shapewall_capabilities`, `start_dev_server` and `stop_dev_server`) and never its own
   shell. On Linux (bubblewrap, socat and ripgrep) and macOS (Seatbelt) every command runs in an OS sandbox through
   `@anthropic-ai/sandbox-runtime`: it writes only in the fix copy and its own tmp folder, cannot read the home folder, the XDG
   folders, the shared temp folders, `/run/user`, `/mnt`, `/media` or other fix copies, gets a clean environment, reaches the package
@@ -50,9 +54,51 @@ and the project uses [Semantic Versioning](https://semver.org/).
   sandbox are recorded on the machine per command line, tier, sandbox mode, network and inputs (the manifests, lockfiles and `.npmrc`
   always among them), and asked again when the agent changes one; answers on open turns or without the sandbox are never recorded.
   Files a command or dev server changed hold the fix for a look. See "Commands through Shapewall" in the agent hardening guide.
+- Dev servers in the OS sandbox (Linux): `start_dev_server` runs the `dev` command in a sandbox of its own and bridges exactly one
+  loopback port to it, a port Shapewall binds and holds until the server stops (needs `nsenter`, util-linux). That port joins the
+  agent browser's allowlist for the session and leaves it at stop; the agent's other commands cannot reach it. Without the sandbox
+  the browser gets a dev server's port only when the server's own process group is what listens there. Shapewall's own server port
+  is never opened in the agent browser (`denyPorts`). Not in macOS's sandbox, which could only open every loopback port to it.
+- The starter agent on the capability model: each run is resolved on the host (path `starter`) from the gate's trust (team when
+  every author whose text reaches the model is on the board's trusted list, otherwise open) and the checkout's config. Besides
+  `run_tests` (`commands.test` wins over `starterAgent.testCommand`) it gets `run_named_command` for the other names in `commands`
+  (`build`, `lint`, ...; the lines come from your checkout, never from the agent's), with the same re-ask rule as `run_tests` (an
+  input the agent changed, a file a command changed since the run started, an approved shell command; on an open run every time).
+  `dev` starts in the background on a port in the container, and the `browser_*` tools (no screenshot: the model reads text only)
+  open that port; Chromium starts without its own sandbox there only on a team run. The prompt ends with the capability block.
+
+- Every agent path on the capability model: a local board's chat (ACP and endpoint), a connected agent's chat, its Fix with, a
+  comment sent to it and `watch --exec` resolve what the turn may do, and every prompt carries it after the instruction files.
+  Commands, the sandboxed shell, dev servers and the browser come from Shapewall's tool host on each of them. A local board's
+  commands run in the OS sandbox in the checkout with its `.git` and `.shapewall` folders read only (`.shapewall` unreadable), its
+  own cards are answered on the board by the owner, and solo approvals are kept in `.shapewall/agent/approvals/` under the same rule
+  as a connected agent's. A connected agent's chat and comment turns answer only: commands that change no files, on a read only
+  view of the checkout, never the shell.
+- `watch --exec` passes `SHAPEWALL_CAPABILITIES_FILE`, a `0600` JSON file with the comment's resolved capabilities and the same
+  text a board's agent reads (not enforced: the command's own sandbox is the boundary).
 
 ### Changed
 
+- A local board's Claude Code session is restricted: read and edit tools plus Shapewall's tools, no shell of its own, no settings
+  files (`~/.claude` allow rules, hooks, plugins, `.mcp.json`), no auto memory. `agent.localSession: "own"` keeps the 1.2.0
+  session, with a deprecation warning, until 2.0. Other ACP adapters keep their own session.
+- A local turn is solo only while every word in it is the owner's (a private chat, or a comment the owner wrote on a board only
+  the owner can reach); anything else is open, and commands wait for a card. Above the open tier, other people's comments are
+  counted in the board context, not quoted.
+- A comment picked up by a connected agent without a narrowing from the server is open with no commands, and a running turn asks
+  the server for its narrowing again before each command (at most every 5 seconds): a project or board tightened mid-turn applies
+  to the commands after it, up to 5 seconds late, and a turn never widens.
+- Command cards are allowed in a connected agent's chat and comment turns too (read-style commands only), still never where the
+  project or board took commands away.
+
+- The agent browser: an address on the agent's machine (a loopback address in any spelling, `localhost`, a local name such as
+  `app.test`) that a committed config names counts below the owner's own turn (team, open, and solo with a browser login) only
+  where the machine's `browserAllow` lists that exact origin; the Browser line names what it held back and the command that
+  lists it. Persistent agent browser profiles live in `$XDG_STATE_HOME/shapewall/agent-browser-profiles/NAME` (yours, `0700`,
+  never a link, out of reach of the agent's commands) and are checked again after Chromium starts; a profile path saved
+  elsewhere reads as no profile, with a warning. New machine policy key `browserNoSandbox` (`agent connect --browser-no-sandbox`,
+  `agent set browser-no-sandbox on`, default off): the browser may start without Chromium's own sandbox where it cannot start,
+  on solo and team turns only, and the Browser line says so. `agent connect --browser-profile NAME` makes and saves a profile.
 - Who "the owner" is on a connected agent's turns is pinned on its machine: the handle of the account that approved it (saved
   with the token, or the first one the server names, then saved), not the server's word alone. With `--approvals owner` a card's
   "allow" must name that handle as the one who answered.
@@ -75,6 +121,22 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - An origin is never a wildcard, and a machine audience it cannot read is "server", not "owner".
 - The `agent_policy_changed` audit row says which settings of which board changed, not only how many boards.
 - A hello that arrives after a newer one from the same process no longer replaces what the newer one said.
+
+### Fixed
+
+- A connected agent's reply on a long comment answer is cut to the comment limit instead of failing to post.
+- A command started through a chat thread's tool relay stops when its turn ends; before, it could keep running (and writing)
+  after the turn.
+- The agent browser checks again before every step and every start: a browser turned off mid-turn is closed, and a tier or
+  `browserNoSandbox` change takes effect at the next start.
+- This machine's own LAN and tailnet addresses count as "on this machine" for the browser's held-back config origins and for its
+  denied ports; on open turns, private and tailnet addresses the config names open only where the machine lists them.
+- Two `start_dev_server` calls at once can no longer both start a server past the limit (and leave one running after the turn).
+- A dev server's port let go while the browser started is never let in again.
+- Commands cannot read the login files the config records (`auth.storageState`, `auth.loginScript`) anywhere in the folder they
+  run in, not only in `.shapewall`.
+- An exact command or a shell command allowed on a card is checked again after the answer, and a local card's answer counts only
+  while what it asked is still allowed.
 
 ## 1.3.0 - 2026-11-25
 

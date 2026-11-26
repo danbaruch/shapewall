@@ -16,6 +16,9 @@
 //   "env"               -> the names of its environment variables, as JSON
 //   "caps"              -> the client capabilities it was given, as JSON
 //   "newparams"         -> the params of session/new, as JSON
+//   "exec TOOL [JSON]"  -> calls TOOL of the shapewall_exec server session/new named (exec-mcp.js), then
+//                          "exec TOOL ok|error: TEXT", or "exec: no exec tools in this session";
+//                          [[stub-exec:TOOL]] anywhere in the prompt does the same
 //   "pid"               -> its process id
 //   "cwd"               -> its working folder, what is in it, and the session cwd
 //   "runenv N=V CMD..."  -> like run, with env for the terminal
@@ -54,6 +57,7 @@
 
 import fs from 'node:fs'
 import process from 'node:process'
+import { spawn } from 'node:child_process'
 
 const MODE = process.env.STUB_ACP_MODE || ''
 const OPTIONS = process.argv.includes('--options')
@@ -300,11 +304,17 @@ function handle(message) {
 async function prompt({ sessionId, prompt: blocks }) {
   cancelled.delete(sessionId)
   if (MODE === 'promptauth') throw Object.assign(new Error('Authentication required'), { code: -32000 })
-  const last =
+  let last =
     [...blocks]
       .reverse()
       .find((block) => block.type === 'text')
       ?.text?.trim() || ''
+  // [[stub-exec:TOOL]] anywhere in the prompt (a comment's text in the board context, say): "exec TOOL".
+  const marked = blocks
+    .map((block) => block.text || '')
+    .join('\n')
+    .match(/\[\[stub-exec:([a-z_]+)\]\]/)
+  if (marked) last = 'exec ' + marked[1]
   const [word, ...rest] = last.split(/\s+/)
   if (last === 'unsupported model') {
     say(sessionId, "The 'unavailable-model' model is not supported when using Codex with a ChatGPT account.")
@@ -422,6 +432,24 @@ async function prompt({ sessionId, prompt: blocks }) {
     say(sessionId, JSON.stringify(Object.keys(process.env).sort()))
     return 'end_turn'
   }
+  if (word === 'exec') {
+    const entry = (newParams?.mcpServers || []).find((server) => server?.name === 'shapewall_exec')
+    if (!entry) {
+      say(sessionId, 'exec: no exec tools in this session')
+      return 'end_turn'
+    }
+    const tool = rest[0]
+    let args = {}
+    try {
+      args = rest.length > 1 ? JSON.parse(rest.slice(1).join(' ')) : {}
+    } catch {
+      args = {}
+    }
+    const answer = await execCall(entry, tool, args)
+    const text = (answer?.result?.content || []).map((part) => part.text || '').join('')
+    say(sessionId, 'exec ' + tool + (answer?.result?.isError ? ' error: ' : ' ok: ') + text.slice(0, 3000))
+    return 'end_turn'
+  }
   if (last === 'newparams') {
     say(sessionId, JSON.stringify(newParams))
     return 'end_turn'
@@ -521,4 +549,40 @@ async function prompt({ sessionId, prompt: blocks }) {
   }
   say(sessionId, 'Hello from the ACP stub.')
   return 'end_turn'
+}
+
+// One tools/call to the exec server, started as an adapter starts an MCP
+// server: its command, args and env, over stdio; closed after the answer.
+function execCall(entry, tool, args) {
+  return new Promise((resolve) => {
+    const env = Object.fromEntries((entry.env || []).map((item) => [item.name, item.value]))
+    const child = spawn(entry.command, entry.args, { env, stdio: ['pipe', 'pipe', 'ignore'] })
+    let buffer = ''
+    const done = (value) => {
+      child.kill()
+      resolve(value)
+    }
+    child.on('error', () => done(null))
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk
+      let index
+      while ((index = buffer.indexOf('\n')) >= 0) {
+        const message = JSON.parse(buffer.slice(0, index))
+        buffer = buffer.slice(index + 1)
+        if (message.id === 1) {
+          child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
+          child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: tool, arguments: args } }) + '\n')
+        } else if (message.id === 2) done(message)
+      }
+    })
+    child.stdin.write(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'stub', version: '1' } },
+      }) + '\n',
+    )
+  })
 }

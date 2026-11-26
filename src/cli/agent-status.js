@@ -12,7 +12,7 @@
 // `shapewall agent connect` (and the next turn on a local board) reads it.
 
 import fs from 'node:fs'
-import { CAPABILITY_KEYS, cleanCapabilityKeys, hostPlatform, resolveCeiling } from '../agent/capabilities.js'
+import { CAPABILITY_KEYS, cleanCapabilityKeys, hostPlatform, markBrowserProfile, resolveCeiling } from '../agent/capabilities.js'
 import { toCli, toPanel } from '../agent/capability-render.js'
 import { TIER_LABELS } from '../agent/capability-views.js'
 import { localMachinePolicy, updateUserAgentEntry, userAgentEntry } from '../agent/user-settings.js'
@@ -169,11 +169,11 @@ const CONNECT_KEYS = {
 }
 const kebab = (key) => key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)
 const CAPABILITY_FLAGS = Object.fromEntries(CAPABILITY_KEYS.map((key) => [kebab(key), key]))
-const BOOLEAN_KEYS = ['trustTeamShell', 'shellUnsandboxed', 'browserProfileTeam']
+const BOOLEAN_KEYS = ['trustTeamShell', 'shellUnsandboxed', 'browserProfileTeam', 'browserNoSandbox']
 const LIST_KEYS = ['browserAllow', 'extensionsFor', 'allowTool']
 
 // One value from the command line, as the policy file holds it.
-function capabilityValue(key, raw) {
+function capabilityValue(key, raw, env) {
   const text = String(raw)
   if (BOOLEAN_KEYS.includes(key)) {
     if (['on', 'true', 'yes'].includes(text)) return true
@@ -184,13 +184,16 @@ function capabilityValue(key, raw) {
   if (key === 'trustTeam') return ['none', 'members'].includes(text) ? text : text.split(',').map((item) => item.trim())
   if (key === 'handoffHops') return /^\d+$/.test(text) ? Number(text) : NaN
   if ((key === 'browserAuth' || key === 'browserProfile') && text === 'none') return null
+  // A profile NAME (or a folder directly in Shapewall's own profile folder):
+  // made there, new or empty, the first time it is set.
+  if (key === 'browserProfile') return markBrowserProfile(text, { env })
   return text
 }
-function capabilityChange(name, raw) {
+function capabilityChange(name, raw, env = process.env) {
   const key = CAPABILITY_FLAGS[name]
-  const value = capabilityValue(key, raw)
+  const value = capabilityValue(key, raw, env)
   let problem = null
-  const cleaned = cleanCapabilityKeys({ [key]: value }, { warn: (_, said) => (problem = said) })
+  const cleaned = cleanCapabilityKeys({ [key]: value }, { warn: (_, said) => (problem = said), env })
   if (problem) throw new Error(`${name}: not a value this setting takes (it would read as ${problem})`)
   return { [key]: cleaned[key] }
 }
@@ -206,7 +209,7 @@ export async function agentSet(positional, flags, out, err, { env = process.env,
     if (!CAPABILITY_FLAGS[name])
       throw new Error(`${name} is set per connection: add --remote URL. A local board's agent has its own settings in Settings > Agents.`)
     const config = configAt(flags, cwd, { required: true })
-    const change = capabilityChange(name, raw)
+    const change = capabilityChange(name, raw, env)
     updateUserAgentEntry(config.dir, (entry) => ({ ...entry, capabilities: { ...(entry.capabilities || {}), ...change } }), env)
     out(`Saved ${name} ${raw} for the local board in ${config.dir}. The next turn uses it.`)
     out('See every line: shapewall agent status')
@@ -218,8 +221,8 @@ export async function agentSet(positional, flags, out, err, { env = process.env,
   let changes
   if (CONNECT_KEYS[name]) {
     const { policyChanges } = await import('../remote/agent-connect.js')
-    changes = policyChanges({ [CONNECT_KEYS[name]]: raw }, saved, null, { cwd })
-  } else changes = capabilityChange(name, raw)
+    changes = policyChanges({ [CONNECT_KEYS[name]]: raw }, saved, null, { cwd, env })
+  } else changes = capabilityChange(name, raw, env)
   saveMachinePolicy(origin, slug, changes, env)
   const where = `--remote ${origin}${slug === 'default' ? '' : ` --as ${slug}`}`
   out(`Saved ${name} ${raw} for connection "${slug}" to ${origin}.`)

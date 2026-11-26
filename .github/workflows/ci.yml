@@ -102,7 +102,14 @@ jobs:
         if: runner.os == 'macOS'
         run: echo 'SHAPEWALL_SANDBOX_TEST=1' >> "$GITHUB_ENV"
       - name: Sandbox, exec tools and hosted fix commands
-        run: node --test --test-concurrency=1 --test-timeout=300000 test/sandbox-exec.test.js test/exec-mcp.test.js test/hosted-exec.test.js
+        run: node --test --test-concurrency=1 --test-timeout=300000 test/sandbox-exec.test.js test/exec-mcp.test.js test/dev-server.test.js test/hosted-exec.test.js
+      # The agent browser inside the OS sandbox (Linux): real Chromium under bubblewrap, its egress through srt's proxy.
+      - name: Playwright Chromium for the sandboxed agent browser
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+      - name: Agent browser inside the OS sandbox
+        if: runner.os == 'Linux'
+        run: node --test --test-concurrency=1 --test-timeout=300000 test/e2e/agent-browser-sandbox.e2e.test.js test/e2e/agent-browser.e2e.test.js
 
   website:
     name: Website (build and SEO checks)

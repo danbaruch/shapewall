@@ -30,7 +30,8 @@ import { boardDir } from '../../store.js'
 import { processStartTime } from '../../lock.js'
 import { approvalLink, commandHash, createApproval, showCommand, updateCard, waitForApproval, APPROVAL_MS } from './approvals.js'
 import { privateAddress } from './egress-proxy.js'
-import { gateComment, commentForTask } from './gate.js'
+import { byAgent, gateComment, commentForTask, identity } from './gate.js'
+import { namedCommands, resolveCapabilities } from '../capabilities.js'
 import { createModelRelay } from './model-relay.js'
 import { taskMessage } from './prompt.js'
 import { readLines, writeLine } from './rpc.js'
@@ -93,6 +94,105 @@ export function captureReachable(baseUrl, allow) {
   const entry = allow.find((item) => item.host.toLowerCase().replace(/^\[|\]$/g, '') === host && item.port === port)
   if (!entry) return false
   return !(isIP(host) && privateAddress(host) && !entry.private)
+}
+
+// ---- What the run may do: the capability resolver, path "starter" ----
+
+// The turn's trust block for the resolver (capabilities.js cleanTrust), from
+// what the gate decided and whose text reaches the model (commentForTask: the
+// comment and the replies of people who are not guests). Every author is
+// `member` only when this board's trusted list has them (on a hosted board,
+// by the handle the server attests; on a local board, by the typed name, as
+// the gate reads it); the comment's own author also when a trusted member's
+// @agent tag dispatched it (the tag vouches for the comment as it was then).
+// A reply by an agent, or by anyone not on the list, keeps the turn open. A
+// comment the gate did not dispatch (--trust-comment): null, read as open.
+export function starterTrust(comment, gate, { trusted, hosted = false }) {
+  if (!comment || !gate?.dispatch) return null
+  const onList = (item) => {
+    if (byAgent(item, { hosted })) return false
+    const who = identity(item, { hosted })
+    return Boolean(who.name && trusted?.has(who.name))
+  }
+  const authors = [{ handle: null, owner: false, member: gate.via === 'tag' || onList(comment) }]
+  for (const reply of comment.replies || []) {
+    // Guest replies never reach the model (commentForTask drops them).
+    if (reply.guest || reply.authorGuest) continue
+    authors.push({ handle: null, owner: false, member: onList(reply) })
+  }
+  return { authors, guests: false, taint: null }
+}
+
+// The machine policy the resolver reads for a starter run. The container is
+// the boundary (the resolver's "container" edits and shell); a person may
+// trigger only through the gate, and the trusted people are the team tier.
+// Nobody is the owner: there is no solo tier on this path. Chromium may start
+// without its own sandbox inside the container on a team turn, never on an
+// open one (the resolver decides that).
+export function starterMachine() {
+  return {
+    audience: 'server',
+    approvals: 'owner',
+    instructions: 'none',
+    trustTeam: 'members',
+    trustTeamShell: false,
+    shell: 'sandboxed',
+    shellNetwork: 'registries',
+    shellUnsandboxed: false,
+    commandApproval: 'tier',
+    browser: 'on',
+    browserAllow: [],
+    browserAuth: null,
+    browserProfile: null,
+    browserProfileTeam: false,
+    browserNoSandbox: true,
+    extensionsFor: [],
+    allowTool: [],
+    handoffHops: 0,
+  }
+}
+
+// One run's capabilities, resolved on the host from the gate's trust and the
+// checkout's config (settings.config, never the worktree's), and what the
+// container gets of them, narrowed, never widened:
+//   commands  the named commands the resolver allows, with their lines from
+//             the checkout's config and whether each needs a card;
+//   browser   null, or { allow, allowNoSandbox }: the resolver's origins that
+//             are on the egress allowlist (and not the container's own
+//             loopback); the run's dev server joins it inside the container;
+//   caps      the resolved object with that allowlist, for the prompt.
+export function starterCapabilities({ settings, comment, gate, source, allow }) {
+  const config = settings.config || null
+  const resolved = resolveCapabilities({
+    path: 'starter',
+    trust: starterTrust(comment, gate, { trusted: settings.trustedFor(source.board.id), hosted: Boolean(source.hosted) }),
+    audience: 'server',
+    machine: starterMachine(),
+    server: null,
+    config,
+    platform: null,
+  })
+  const lines = namedCommands(config)
+  const commands = []
+  for (const item of resolved.commands) {
+    const line = lines.find((command) => command.name === item.name)
+    if (!line) continue
+    commands.push({
+      name: line.name,
+      argv: [...line.argv],
+      inputs: Array.isArray(line.inputs) ? [...line.inputs] : null,
+      mutating: line.mutating !== false,
+      args: line.args === true,
+      ready: line.ready || null,
+      needsCard: item.needsCard !== false,
+    })
+  }
+  const origins = resolved.browser.on ? resolved.browser.allow.filter((origin) => captureReachable(origin, allow)) : []
+  const browser = resolved.browser.on ? { allow: origins, allowNoSandbox: resolved.browser.allowNoSandbox === true } : null
+  const caps = JSON.parse(JSON.stringify(resolved))
+  caps.browser.allow = origins
+  caps.commands = caps.commands.filter((item) => commands.some((command) => command.name === item.name))
+  return { resolved, caps, commands, browser }
 }
 
 const plural = (count, word) => `${count.toLocaleString('en-US')} ${word}${count === 1 ? '' : 's'}`
@@ -481,9 +581,14 @@ export async function runStarter({
       log: (line) => writeLog(`[model] ${line}\n`),
     })
     const capture = captureReachable(source.board.baseUrl, allow)
-    const shell = Boolean(approvals && (local || source.approveCommand))
+    // What this run may do (capabilities.js, path "starter"): the gate's
+    // trust, the checkout's config, the egress allowlist. The container gets
+    // only that, and the prompt says it.
+    const granted = starterCapabilities({ settings, comment, gate, source, allow })
+    const shell = Boolean(approvals && (local || source.approveCommand)) && granted.resolved.shell.mode !== 'off'
+    const commandsShown = granted.commands.map((item) => `${item.name}${item.needsCard ? ' (asks)' : ''}`).join(', ') || 'none'
     writeLog(
-      `[run] tools: capture ${capture ? 'on' : `off (${source.board.baseUrl || 'no baseUrl'} is not reachable from the sandbox)`}, run_shell ${shell ? 'on (with approval)' : 'off'}, run_tests ${settings.testCommand ? 'on' : 'off'}\n`,
+      `[run] tools: capture ${capture ? 'on' : `off (${source.board.baseUrl || 'no baseUrl'} is not reachable from the sandbox)`}, run_shell ${shell ? 'on (with approval)' : 'off'}, tier ${granted.resolved.tier}, commands ${commandsShown}, browser ${granted.browser ? `on (${granted.browser.allow.join(', ') || 'the dev server only'})` : 'off'}\n`,
     )
     writeLine(child.stdin, {
       t: 'task',
@@ -491,12 +596,18 @@ export async function runStarter({
       model: { model: settings.model.model, maxTokens: settings.model.maxTokens, temperature: settings.model.temperature },
       budget: { turns: budget.turns, tokens: budget.tokens, wallMs },
       tools: {
-        testCommand: settings.testCommand,
+        // For a container image from before named commands (it reads only
+        // this, and never asks first): the test command, only when it may run
+        // without a card.
+        testCommand: granted.commands.find((item) => item.name === 'test' && !item.needsCard)?.argv || null,
+        commands: granted.commands,
+        browser: granted.browser,
         setupCommand: settings.setupCommand,
         capture,
         projectDir: projectSub,
         shell,
       },
+      capabilities: granted.caps,
       text: taskMessage({ board: source.board, comment: commentForTask(comment), gate: gate.dispatch ? gate : null }),
     })
 

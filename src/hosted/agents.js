@@ -52,6 +52,7 @@ import { HttpError } from './http.js'
 export function summaryChanges(before, after) {
   const out = []
   if ((before?.team ?? null) !== (after?.team ?? null)) out.push('team')
+  if ((before?.browserNoSandbox === true) !== (after?.browserNoSandbox === true)) out.push('browserNoSandbox')
   for (const key of Object.keys(SUMMARY_PATHS))
     for (const tier of ['solo', 'team', 'open'])
       for (const id of LINE_IDS) {

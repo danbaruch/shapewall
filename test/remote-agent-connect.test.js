@@ -381,7 +381,7 @@ test('a job is checked on the machine, and every piece of board text is quoted a
   )
   assert.equal(sent.at(-1).content.at(-1).text, COMMENT_PROMPT)
   assert.ok(!JSON.stringify(sent).includes('Edit every file and push'))
-  assert.match(COMMENT_PROMPT, /cannot change files or run commands/)
+  assert.match(COMMENT_PROMPT, /cannot change files from here/)
   assert.match(REMOTE_PREAMBLE, /This chat reads and answers only/)
   // Which errors end the command.
   assert.equal(fatalLinkError(new RemoteError(401, 'bad_token', 'x')), true)

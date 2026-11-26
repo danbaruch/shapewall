@@ -389,29 +389,31 @@ test('a recorded login loads into the throwaway context, kept to the allowed ori
   }
 })
 
-test('a persistent profile only when Shapewall made it, checked again right before launch', async () => {
+test('a persistent profile only when Shapewall made it in its own folder, checked before and after launch', async () => {
   const base = tempDir('agent-browser-profiles')
+  // Profiles live in <XDG_STATE_HOME>/shapewall/agent-browser-profiles.
+  const env = { XDG_STATE_HOME: path.join(base, 'state') }
   try {
     const chrome = path.join(base, 'google-chrome', 'Default')
     fs.mkdirSync(chrome, { recursive: true })
     await assert.rejects(
-      createAgentBrowser({ browser: caps({ profile: chrome }), tmpRoot }).navigate(appOrigin + '/'),
+      createAgentBrowser({ browser: caps({ profile: chrome }), tmpRoot, env }).navigate(appOrigin + '/'),
       /Refused the browser profile/,
     )
     const unmarked = path.join(base, 'plain')
     fs.mkdirSync(unmarked)
     await assert.rejects(
-      createAgentBrowser({ browser: caps({ profile: unmarked }), tmpRoot }).navigate(appOrigin + '/'),
+      createAgentBrowser({ browser: caps({ profile: unmarked }), tmpRoot, env }).navigate(appOrigin + '/'),
       /Refused the browser profile/,
     )
     // Marked when the policy was saved, then the marker went away: refused at launch.
-    const changed = markBrowserProfile(path.join(base, 'changed'))
-    const later = createAgentBrowser({ browser: caps({ profile: changed }), tmpRoot })
+    const changed = markBrowserProfile('changed', { env })
+    const later = createAgentBrowser({ browser: caps({ profile: changed }), tmpRoot, env })
     fs.rmSync(path.join(changed, '.shapewall-agent-profile'))
     await assert.rejects(later.navigate(appOrigin + '/'), /Refused the browser profile/)
 
-    const profile = markBrowserProfile(path.join(base, 'agent-profile'))
-    const agent = createAgentBrowser({ browser: caps({ profile }), tmpRoot })
+    const profile = markBrowserProfile('agent-profile', { env })
+    const agent = createAgentBrowser({ browser: caps({ profile }), tmpRoot, env })
     await agent.navigate(appOrigin + '/')
     assert.ok(chromiumFor(profile).length, 'Chromium runs on the marked profile')
     await agent.close()
