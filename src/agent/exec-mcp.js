@@ -38,6 +38,8 @@ import { inputsDigest } from './command-approvals.js'
 import { SANDBOX_LIMITS, SandboxRefusal, createCommandSession } from './sandbox-exec.js'
 import { toPrompt } from './capability-render.js'
 import { showCommand } from './starter/approvals.js'
+import * as z from 'zod'
+import { browserTools, createAgentBrowser } from './agent-browser.js'
 
 export const EXEC_MCP_NAME = 'shapewall_exec'
 export const EXEC_TOOL_PREFIX = `mcp__${EXEC_MCP_NAME}__`
@@ -66,8 +68,36 @@ export function registerTools(factory) {
   if (typeof factory !== 'function') throw new Error('registerTools takes a factory: (host) => [tool].')
   if (!FACTORIES.includes(factory)) FACTORIES.push(factory)
 }
-// Q3: the browser tools (src/agent/agent-browser.js) register here, one line:
-//   registerTools(browserTools)
+// The throwaway browser (src/agent/agent-browser.js, Q3): its browser_* tools,
+// only on a turn whose Browser line is on. The browser itself starts on the
+// first tool call and is disposed with the tool host. Arguments are checked
+// against the tools' own schemas before a handler sees them.
+function browserFamily(host) {
+  const browser = host.capabilities.browser
+  if (!browser || browser.on !== true) return []
+  let agentBrowser
+  try {
+    agentBrowser = createAgentBrowser({ browser, checkout: host.checkout, warn: (line) => host.log(`agent browser: ${line}`) })
+  } catch (error) {
+    host.log(`agent browser: off for this turn: ${error.message}`)
+    return []
+  }
+  host.onClose(() => agentBrowser.dispose())
+  return browserTools(agentBrowser).map((tool) => {
+    const schema = z.object(tool.inputSchema).strict()
+    return {
+      name: tool.name,
+      description: tool.description,
+      inputSchema: z.toJSONSchema(schema),
+      async call(args) {
+        const parsed = schema.safeParse(args)
+        if (!parsed.success) return failure(`${tool.name}: ${parsed.error.issues.map((issue) => issue.message).join('; ')}`)
+        return tool.handler(parsed.data)
+      },
+    }
+  })
+}
+registerTools(browserFamily)
 
 // ---- Files a command changed ----
 
@@ -170,9 +200,12 @@ export function createToolHost({
   // The machine asks before every command (commandApproval "always"): the full shell too.
   shellCard = false,
   onChanged = () => {},
+  // The person's checkout (the browser reads its recorded logins there, never from the fix copy).
+  checkout = null,
   log = () => {},
 }) {
   const caps = capabilities
+  const closers = []
   // A card's text within what a card may hold (card-hash.js CARD_LIMITS.detail).
   const askCard = (card) => ask({ ...card, detail: card.detail.length > 4000 ? card.detail.slice(0, 3990) + '\n[...]' : card.detail })
   const devServers = new Map()
@@ -473,6 +506,8 @@ export function createToolHost({
   const host = {
     capabilities: caps,
     session,
+    checkout,
+    onClose: (fn) => closers.push(fn),
     devPorts: () => [...devServers.values()].map((server) => server.port),
     log,
   }
@@ -497,6 +532,7 @@ export function createToolHost({
       closed = true
       for (const server of devServers.values()) server.kill()
       await Promise.allSettled([...devServers.values()].map((server) => server.done))
+      await Promise.allSettled(closers.map((fn) => Promise.resolve().then(fn)))
     },
   }
 }
@@ -558,7 +594,7 @@ export async function startExecSession({
   log = () => {},
 }) {
   const caps = capabilities
-  if (!caps || (!caps.commands.length && caps.shell.mode === 'off')) return null
+  if (!caps || (!caps.commands.length && caps.shell.mode === 'off' && caps.browser?.on !== true)) return null
   const mode = platform?.sandbox ? 'sandboxed' : caps.shell.mode === 'unsandboxed' ? 'host-shell' : 'host'
   // The resolver counted on the sandbox for the full shell: no sandbox, no shell.
   if (caps.shell.mode === 'sandboxed' && mode !== 'sandboxed') return null
@@ -580,6 +616,7 @@ export async function startExecSession({
     ask,
     shellCard,
     onChanged,
+    checkout,
     log,
   })
   let served

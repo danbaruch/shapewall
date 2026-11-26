@@ -24,6 +24,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - A connected agent's hello says what each tier may do on its machine, as on, ask or off per line (no commands, names or paths); the
   console's agent list carries it, a line it cannot read shows as unknown, and a change is an `agent_capabilities_changed` audit
   row naming each line.
+- The agent's throwaway browser (`src/agent/agent-browser.js`, internal): a headless Chromium per task, limited to the app's own
+  addresses by Shapewall's request routing and a loopback egress proxy (redirects, WebSockets, workers, popups and `file:`, `data:`,
+  `blob:` navigations included; service workers blocked; app hostnames pinned to the address they had at start), no CDP port, its
+  profile folder removed at close, on a crash, on a signal and by the next start after a kill. A recorded login or a Shapewall-made
+  profile only where the turn allows it. On a hosted Fix with whose Browser line is on, the `browser_*` tools are in Shapewall's tool
+  host beside the commands, their arguments checked against their schemas, and the browser is disposed when the fix ends.
 - "What it can do": each agent on a project's Agents page (and a local board's Agents page, for its owner) has a card with every
   capability line per place and tier, an on, asks first, off or unknown chip, one sentence, and the command that changes it on the
   agent's machine. A line the project's setting holds says so. The board's agent panel shows the main lines for a fix you ask for.

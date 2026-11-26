@@ -381,6 +381,27 @@ test(
   },
 )
 
+test('the browser tools join only where the Browser line is on, with their arguments checked', async (t) => {
+  const off = createToolHost({ capabilities: capsOf('solo'), commands: [TEST], session: fakeSession(t), approvals: records(t) })
+  assert.ok(!off.tools().some((tool) => tool.name.startsWith('browser_')))
+  const caps = Object.freeze({
+    ...capsOf('solo'),
+    browser: { on: true, allow: ['http://127.0.0.1:4173'], auth: null, profile: null, realChrome: false },
+  })
+  const on = createToolHost({ capabilities: caps, commands: [TEST], session: fakeSession(t), approvals: records(t) })
+  const names = on.tools().map((tool) => tool.name)
+  for (const name of ['browser_navigate', 'browser_screenshot', 'browser_click', 'browser_text', 'browser_close'])
+    assert.ok(names.includes(name), name)
+  const navigate = on.tools().find((tool) => tool.name === 'browser_navigate')
+  assert.equal(navigate.inputSchema.type, 'object')
+  assert.deepEqual(navigate.inputSchema.required, ['url'])
+  // Checked before the browser sees it: nothing starts.
+  const bad = await on.call('browser_navigate', { url: 5, extra: true })
+  assert.equal(bad.isError, true)
+  await on.close()
+  assert.match(textOf(await on.call('browser_text', {})), /session has ended/)
+})
+
 test('startExecSession fails closed', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-exec-start-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))

@@ -627,6 +627,44 @@ its token (or, for a token saved before this release, the first handle the serve
 token). A server that later names another account gets no solo turns from that process. With `--approvals owner` an "allow" counts
 only when the server says the owner answered and names the answering handle, and that handle is the one this machine pinned.
 
+### The agent's throwaway browser
+
+When a turn's Browser line is on, the agent checks its work in its own headless Chromium through the `browser_*` tools (navigate,
+screenshot, click, type, read text, console errors, close). Shapewall starts it on first use and removes it when the task ends. The
+limits are in Shapewall's code, not in what the model is told:
+
+- **Only the app's addresses.** The allowlist is every `baseUrl` and `publicUrl` in the project's config, the origins the machine
+  allows (`browserAllow`, plus `agent.browser.allow` as above) and the session's own dev server port. It is read from the
+  project folder's config, never from a fix copy the agent can write to. Every request (page loads, fetch, XHR, workers, iframes,
+  popups, WebSockets) is checked in Shapewall's request routing, and every connection also goes through a small proxy on loopback
+  that only connects to an allowed host and port. That second check catches what routing cannot see, such as a redirect from an
+  allowed page to another address. Another port on your machine is not on the list just because it is loopback, and a few never
+  are, whatever a list says: browser and Node debugging ports (9222, 9229, 9230) and Shapewall's own server. The session's dev
+  server joins only as a server Shapewall started itself.
+- **Pinned names.** Each allowed hostname is looked up once, when the browser starts, and every connection goes to that address.
+  A public name that resolves to this machine or to a private network (10/8, 172.16/12, 192.168/16, 100.64/10 such as a tailnet,
+  IPv6 `fc00::/7`, IPv4 inside IPv6 in any spelling included) is refused; to reach such a server, allow its address itself. Any name
+  that resolves to a link-local or metadata address (`169.254.169.254`) is refused. Chromium resolves no names itself.
+- **No way out of the page.** Service workers are blocked, downloads refused, `file:`, `data:`, `blob:` and `chrome:` pages are
+  refused or sent back to a blank page, popups off the list are closed.
+- **No debugging port.** Shapewall drives Chromium over a pipe; no remote debugging port is opened, and no other program can attach.
+  Your own Chrome and its profile are never used. Chromium's own sandbox stays on: where it cannot start, the browser stays off
+  unless the machine's owner allows a browser without it, and then every browser tool result says so.
+- **Nothing left behind.** The profile is a new folder in a folder private to you (`$XDG_RUNTIME_DIR/shapewall-agent-browser/`,
+  or `shapewall-agent-browser-<uid>/` in the system temp folder; one that is a link, belongs to someone else or that others can
+  open is refused), removed at close, when Chromium crashes, when Shapewall exits or is stopped, and after a forced kill by the next
+  start. Chromium gets that folder as its home, not yours.
+- **Logins only where the turn allows them.** A recorded login (`browserAuth`, from `.shapewall-auth/<name>.auth.json` in the
+  project folder, a plain folder and not a link; cookies kept to the allowed hosts and their parent domains, never a public suffix
+  such as `.com` or `.co.uk`) or a persistent agent profile (`browserProfile`) loads only on the tiers in the table
+  above. A profile folder is checked again right before Chromium starts: only a folder Shapewall made (it holds a marker file), never
+  a browser's own profile folder.
+
+What it cannot cover: the allowed app itself is the agent's to use, so a page there can still show the agent hostile text (page text
+comes back marked as untrusted). A hostname's DNS is trusted at the moment the browser starts. The address an allowed name resolved
+to is assumed to stay that host for the task. Names on your own network (`.test`, `.local`, `.internal` and similar) may point at
+this machine on purpose.
+
 ### What Shapewall cannot do
 
 - **The agent's own tools.** An ACP agent is still a program running as you. Outside a board's restricted sessions, Claude Code's
