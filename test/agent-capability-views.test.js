@@ -21,6 +21,7 @@ import { SET_KEYS, agentSet, agentStatus, agentStatusData } from '../src/cli/age
 import { saveMachinePolicy, readMachinePolicy } from '../src/remote/agent-policy-file.js'
 import { policyChanges } from '../src/remote/agent-connect.js'
 import { parseArgs } from '../src/cli/args.js'
+import { localCardConfig } from '../src/agent/local-tools.js'
 import { tempDir } from './helpers.js'
 
 const ORIGIN = 'https://sw.example.com'
@@ -114,6 +115,9 @@ for (const [tier, machine] of Object.entries(FIXTURES))
       const card = summaryCard(summary, { remote: ORIGIN })
       const lines = card.paths.find((item) => item.id === key).tiers.find((item) => item.tier === tier).lines
       assert.deepEqual(Object.fromEntries(lines.map((line) => [line.id, line.state])), expected, `${key} console`)
+      // A copy command only on a line that is off (IC2: an "ask" line is already what its setting gives).
+      for (const line of lines)
+        if (line.fix) assert.equal(line.state, 'off', `${key} ${tier} ${line.id}: a fix on a line that is ${line.state}`)
       assert.deepEqual(
         lines.map((line) => line.label),
         LINE_IDS.map((id) => LINE_LABELS[id]),
@@ -230,7 +234,8 @@ test('a local board: the card, agent status and agent set agree, and set refuses
   const { localMachinePolicy, userAgentEntry } = await import('../src/agent/user-settings.js')
   const card = localCard({
     machine: localMachinePolicy(userAgentEntry(fs.realpathSync(dir), e).entry ?? userAgentEntry(dir, e).entry),
-    config: { dir },
+    // As the board's card resolves it (app.js): in place, Work on a branch off.
+    config: localCardConfig({ dir }, e),
     platform: PLATFORM,
   })
   assert.deepEqual(
@@ -380,4 +385,38 @@ test('agent set and agent connect: browser-no-sandbox and browser-profile NAME',
   })
   assert.throws(() => policyChanges({ 'browser-profile': '/etc' }, none, null, { env: e }), /lives in/)
   assert.deepEqual(policyChanges({}, none, null, { env: e }), {}, 'no flag, no change')
+})
+
+// IC2 (1.4.0): a local board that edits in place says so. Its card and
+// `agent status` read the config every turn resolves with (local-tools.js
+// turnTools inPlace): edits in the checkout, no commands and no shell, until
+// Work on a branch is on for an ACP agent.
+test('a local board in place: the card says edits land in the checkout and there are no commands; on a branch they come back', async () => {
+  const { dir, env: e } = env()
+  fs.writeFileSync(
+    path.join(dir, 'shapewall.config.json'),
+    JSON.stringify({
+      boards: [{ id: 'main', baseUrl: 'http://127.0.0.1:5173', pages: [{ id: 'home', path: '/' }] }],
+      commands: { test: { run: 'npm test' } },
+    }),
+  )
+  const config = loadConfig(path.join(dir, 'shapewall.config.json'))
+  const { localMachinePolicy, userAgentEntry } = await import('../src/agent/user-settings.js')
+  const machine = localMachinePolicy(userAgentEntry(config.dir, e).entry)
+  const acp = 'claude-agent-acp'
+  const solo = (view) =>
+    Object.fromEntries(
+      localCard({ machine, config: view, platform: PLATFORM, agent: { kind: 'claude', hardened: true } })
+        .paths[0].tiers.find((tier) => tier.tier === 'solo')
+        .lines.map((line) => [line.id, line.state]),
+    )
+  const inPlace = solo(localCardConfig(config, e, { acp }))
+  assert.equal(inPlace.shell, 'off')
+  assert.equal(inPlace.commands, 'off')
+  const status = await agentStatusData({}, { env: e, cwd: dir, platform: PLATFORM })
+  const statusSolo = Object.fromEntries(status.tiers.solo.lines.map((line) => [line.id, line.state]))
+  assert.equal(statusSolo.shell, 'off', 'agent status agrees with the card')
+  const branch = solo(localCardConfig(config, { ...e, SHAPEWALL_AGENT_BRANCH_MODE: '1' }, { acp }))
+  assert.notEqual(branch.shell, 'off', 'Work on a branch: the shell is back')
+  assert.notEqual(branch.commands, 'off', 'Work on a branch: commands are back')
 })

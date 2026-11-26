@@ -87,7 +87,9 @@ export const TERMINAL_REFUSALS = Object.freeze({
 export function terminalsOff(settings, workdir, { fdChecks = FD_CHECKS } = {}) {
   if (settings?.readOnly === true) return null
   if (!fdChecks) return 'edits_without_fd_checks'
-  if (!workdir && !settings?.remoteEdit) return 'in_place_commands'
+  // No workdir means the checkout itself: never terminals, hosted edit
+  // sessions included (a hosted fix always brings its own workdir).
+  if (!workdir) return 'in_place_commands'
   return null
 }
 export const READ_ONLY_REFUSAL = 'Refused: this agent reads and answers only. It cannot change files or run commands from a hosted board.'

@@ -363,7 +363,10 @@ test('Q7 round 3 item 3: an ACP agent editing in the checkout gets no terminal; 
   // The rule itself, with the platform as a test input.
   assert.equal(terminalsOff({}, null), 'in_place_commands')
   assert.equal(terminalsOff({}, { root: '/x' }), null)
-  assert.equal(terminalsOff({ remoteEdit: { commands: ['test'] } }, null), null)
+  // No workdir means no terminals, a hosted edit session included (review LOW, 1.4.0).
+  assert.equal(terminalsOff({ remoteEdit: { commands: ['test'] } }, null), 'in_place_commands')
+  assert.equal(terminalsOff({ remoteEdit: { commands: [] } }, null), 'in_place_commands')
+  assert.equal(terminalsOff({ remoteEdit: { commands: ['test'] } }, { root: '/x' }), null)
   assert.equal(terminalsOff({}, { root: '/x' }, { fdChecks: false }), 'edits_without_fd_checks')
   assert.equal(terminalsOff({ remoteEdit: { commands: ['test'] } }, { root: '/x' }, { fdChecks: false }), 'edits_without_fd_checks')
   assert.equal(terminalsOff({ readOnly: true }, null, { fdChecks: false }), null)

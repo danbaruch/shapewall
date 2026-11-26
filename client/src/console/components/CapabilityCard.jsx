@@ -50,7 +50,7 @@ function CopyCommand({ command }) {
     <div className="mt-1.5 flex min-w-0 items-stretch gap-1.5">
       <code
         ref={text}
-        className="min-w-0 flex-1 rounded border border-line bg-surface px-2 py-1.5 font-mono text-[11.5px] leading-4 break-all text-fg select-all"
+        className="min-w-0 flex-1 rounded border border-line bg-surface px-2 py-1.5 font-mono text-[11.5px] leading-4 break-words text-fg select-all"
         data-sw-cap-fix
       >
         {command}

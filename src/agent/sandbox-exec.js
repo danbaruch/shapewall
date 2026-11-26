@@ -73,6 +73,11 @@ export const SANDBOX_LIMITS = {
   // Set with ulimit inside the sandbox, per command (commandLimits).
   processes: 1024,
   memoryBytes: 8 * 1024 * 1024 * 1024,
+  // The address space (ulimit -v), well above memoryBytes: V8 reserves about
+  // 10 GB of address space for one WebAssembly memory, so Node's fetch (undici
+  // loads llhttp as WebAssembly), Vite and other dev servers died at 8 GB (IC2).
+  // Real memory stays capped by the systemd scope's MemoryMax where there is one.
+  addressBytes: 64 * 1024 * 1024 * 1024,
   fileBytes: 2 * 1024 * 1024 * 1024,
   // The session temp (caches, HOME): emptied after a command that leaves more.
   tmpBytes: 2 * 1024 * 1024 * 1024,
@@ -643,7 +648,7 @@ export function commandLimits(platform = process.platform, limits = SANDBOX_LIMI
   const lines = []
   if (platform === 'linux') {
     lines.push(`{ ulimit -u ${limits.processes} || ulimit -p ${limits.processes}; } 2>/dev/null`)
-    lines.push(`ulimit -v ${kb(limits.memoryBytes)} 2>/dev/null`)
+    lines.push(`ulimit -v ${kb(limits.addressBytes ?? limits.memoryBytes)} 2>/dev/null`)
   }
   // 512-byte blocks in dash and POSIX mode, 1024 in bash: at most twice the cap.
   lines.push(`ulimit -f ${Math.floor(limits.fileBytes / 512)} 2>/dev/null`)

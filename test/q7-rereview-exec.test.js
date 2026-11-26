@@ -400,3 +400,50 @@ test(
     assert.equal(walked, 0, 'no walk of the fix copy right after the last one')
   },
 )
+
+// IC2 (1.4.0 real-agent run): with Work on a branch, a local board's commands
+// ran in the worktrees' folder (.shapewall/agent-worktrees), not the worktree,
+// and that folder sits in the checkout's Shapewall folder, which is kept read
+// only, so every write failed (EROFS). A command runs in the worktree's
+// project, writes there, and the checkout and the other worktrees stay as they are.
+test('IC2: a branch-mode command runs in its worktree and writes only there', posix, async (t) => {
+  const checkout = scratch(t, 'branch-root')
+  const worktrees = path.join(checkout, '.shapewall', 'agent-worktrees')
+  const tree = path.join(worktrees, '20261126000000-abcdef')
+  const other = path.join(worktrees, '20261126000001-fedcba')
+  for (const dir of [checkout, tree, other]) {
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"branch-root","private":true}\n')
+  }
+  fs.writeFileSync(path.join(worktrees, '20261126000001-fedcba.json'), '{"id":"x"}\n')
+  const env = { ...process.env, XDG_CONFIG_HOME: scratch(t, 'branch-xdg'), XDG_STATE_HOME: scratch(t, 'branch-state') }
+  const script =
+    'require("fs").writeFileSync("made.txt", process.cwd()); for (const f of ["../20261126000001-fedcba/made.txt", "../20261126000001-fedcba.json", "../../../made.txt"]) { try { require("fs").writeFileSync(f, "x"); console.log("WROTE " + f) } catch (e) { console.log("refused " + f) } }'
+  const config = {
+    dir: checkout,
+    outputDir: path.join(checkout, '.shapewall'),
+    file: null,
+    commands: { write: { run: 'node -e ...', argv: ['node', '-e', script] } },
+  }
+  const tools = await startLocalTools({
+    config,
+    env,
+    acp: true,
+    owner: true,
+    root: tree,
+    inPlace: false,
+    ask: async () => 'approved',
+    serve: false,
+  })
+  t.after(() => tools.exec?.close())
+  if (!tools.caps.commands.length) return t.skip(`no commands here: ${JSON.stringify(tools.caps.why)}`)
+  const result = await tools.exec.host.call('run_named_command', { name: 'write' })
+  const text = JSON.stringify(result)
+  assert.equal(fs.readFileSync(path.join(tree, 'made.txt'), 'utf8'), fs.realpathSync(tree), text)
+  // Without the OS sandbox a named command is the owner's own command on the host: only the cwd is checked.
+  if (!probeSandbox().available) return
+  // Outside the worktree a write lands nowhere on this machine (the sandbox's view of the home folder is its own).
+  assert.equal(fs.existsSync(path.join(other, 'made.txt')), false)
+  assert.equal(fs.readFileSync(path.join(worktrees, '20261126000001-fedcba.json'), 'utf8'), '{"id":"x"}\n')
+  assert.equal(fs.existsSync(path.join(checkout, 'made.txt')), false)
+})

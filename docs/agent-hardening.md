@@ -698,8 +698,9 @@ again, and a card's "allow" counts only if the command, its config line and its 
   There is no "any public host": the runtime's proxy is shared by every command of the process and cannot be lifted for one. The
   runtime's proxy connects through the `HTTPS_PROXY` of the process that started Shapewall when there is one, so a proxy setting
   that does not work there makes every registry request fail (a 502 on `CONNECT`);
-- runs under `ulimit`: at most 1024 processes and 8 GB of address space (Linux only: on macOS a process limit would count every
-  process of yours, and the address-space limit is not enforced), and files of at most 2 GB (everywhere); a tmp folder that
+- runs under `ulimit`: at most 1024 processes and 64 GB of address space (Linux only: on macOS a process limit would count every
+  process of yours, and the address-space limit is not enforced; address space is not memory, and Node's WebAssembly needs
+  more than 8 GB of it), and files of at most 2 GB (everywhere); a tmp folder that
   grows past 2 GB is emptied after the command, with a note in its output. On Linux with a systemd user manager each command also
   runs in a systemd scope of its own (`systemd-run --user --scope`, in the slice Shapewall runs in), so the command and everything
   it starts share one cap: 8 GB of memory with no swap, 1024 tasks and a lower CPU weight. Without a user manager (a container, CI,
