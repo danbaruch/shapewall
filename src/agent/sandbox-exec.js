@@ -117,6 +117,8 @@ export function probeSandbox({ platform = process.platform, env = process.env, r
     const bwrap = onPath('bwrap', env)
     if (!bwrap) result = { available: false, reason: 'bwrap_missing' }
     else if (!onPath('socat', env)) result = { available: false, reason: 'socat_missing' }
+    // The runtime looks for files that must stay unwritable with ripgrep, on Linux.
+    else if (!onPath('rg', env)) result = { available: false, reason: 'ripgrep_missing' }
     else {
       const tried = run(bwrap, ['--unshare-all', '--die-with-parent', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', 'true'], {
         stdio: 'ignore',
@@ -234,7 +236,10 @@ function collect(stream, budget, sink) {
 
 // Spawns argv (already wrapped or not) in its own process group and waits.
 // -> { code, signal, output, cut, timedOut, stopped, ms }
-export function runProcess(argv, { cwd, env, timeoutMs = SANDBOX_LIMITS.timeoutMs, outputBytes = SANDBOX_LIMITS.outputBytes, signal = null, onStart = () => {} }) {
+export function runProcess(
+  argv,
+  { cwd, env, timeoutMs = SANDBOX_LIMITS.timeoutMs, outputBytes = SANDBOX_LIMITS.outputBytes, signal = null, onStart = () => {} },
+) {
   return new Promise((resolve) => {
     const began = Date.now()
     let child

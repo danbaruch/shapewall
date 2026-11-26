@@ -22,6 +22,8 @@
 //   ["always", path, old, new]      like edit, but only offers allow_always and reject
 //   ["slow"]                        wait until session/cancel
 //   ["say", text]
+//   ["mcp", tool, args]             call a tool of the exec server session/new named (exec-mcp.js), say its answer
+//   ["tools-meta"]                  say the allowedTools session/new set
 //
 // A path that is not absolute is inside the session folder. After each ask
 // it says what came back: "allowed <what>" or "refused <what>".
@@ -30,7 +32,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import readline from 'node:readline'
-import { execSync } from 'node:child_process'
+import { execSync, spawn } from 'node:child_process'
 
 let cwd = process.cwd()
 let nextId = 1000
@@ -61,12 +63,58 @@ async function allowed(sessionId, toolCall, options = OPTIONS) {
   return result.outcome.outcome === 'selected' && ['allow', 'always'].includes(result.outcome.optionId)
 }
 
+// The exec tools server session/new named (exec-mcp.js), started as an
+// adapter starts an MCP server: its command, args and env, over stdio.
+let mcp = null
+function mcpClient() {
+  if (mcp) return mcp
+  const entry = (globalThis.newParams?.mcpServers || []).find((server) => server?.name === 'shapewall_exec')
+  if (!entry) return null
+  const env = Object.fromEntries((entry.env || []).map((item) => [item.name, item.value]))
+  const child = spawn(entry.command, entry.args, { env, stdio: ['pipe', 'pipe', 'ignore'] })
+  const waiting = new Map()
+  let buffer = ''
+  let id = 0
+  child.stdout.setEncoding('utf8')
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk
+    let index
+    while ((index = buffer.indexOf('\n')) >= 0) {
+      const message = JSON.parse(buffer.slice(0, index))
+      buffer = buffer.slice(index + 1)
+      waiting.get(message.id)?.(message)
+      waiting.delete(message.id)
+    }
+  })
+  const rpc = (method, params) =>
+    new Promise((resolve) => {
+      id += 1
+      waiting.set(id, resolve)
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
+    })
+  const ready = rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'stub', version: '1' } }).then(
+    () => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n'),
+  )
+  mcp = { call: async (name, args) => (await ready, rpc('tools/call', { name, arguments: args })), child }
+  return mcp
+}
+
 async function run(sessionId, steps) {
   let call = 0
   for (const [name, ...args] of steps) {
     if (cancelled) return 'cancelled'
     const toolCallId = `call-${(call += 1)}`
     if (name === 'say') say(sessionId, `${args[0]}\n`)
+    else if (name === 'mcp') {
+      const client = mcpClient()
+      if (!client) say(sessionId, 'mcp: no exec tools in this session\n')
+      else {
+        const answer = await client.call(args[0], args[1] || {})
+        const text = (answer.result?.content || []).map((part) => part.text).join('')
+        say(sessionId, 'mcp ' + args[0] + (answer.result?.isError ? ' error: ' : ' ok: ') + text.slice(0, 1500) + '\n')
+      }
+    } else if (name === 'tools-meta')
+      say(sessionId, 'meta ' + JSON.stringify(globalThis.newParams?._meta?.claudeCode?.options?.allowedTools || null) + '\n')
     else if (name === 'env') say(sessionId, `${JSON.stringify(Object.keys(process.env).sort())}\n`)
     else if (name === 'slow') {
       await new Promise((resolve) => {

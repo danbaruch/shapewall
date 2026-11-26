@@ -173,6 +173,8 @@ export function createToolHost({
   log = () => {},
 }) {
   const caps = capabilities
+  // A card's text within what a card may hold (card-hash.js CARD_LIMITS.detail).
+  const askCard = (card) => ask({ ...card, detail: card.detail.length > 4000 ? card.detail.slice(0, 3990) + '\n[...]' : card.detail })
   const devServers = new Map()
   let closed = false
   // The inputs as the fix copy started (the base commit, the person's own):
@@ -248,7 +250,7 @@ export function createToolHost({
       ...(argsWarning(command) ? ['', argsWarning(command)] : []),
     ]
     const recheckCard = () => allowedNow(command.name) && sameLine(command) && inputsDigest(session.root, { ...command, argv }) === digest
-    const state = await ask({ name: 'command', label, detail: lines.join('\n'), recheck: recheckCard })
+    const state = await askCard({ name: 'command', label, detail: lines.join('\n'), recheck: recheckCard })
     if (state !== 'approved')
       return `Not run: ${state === 'denied' ? 'it was denied on the board' : state === 'expired' ? 'nobody answered in time' : 'stopped'}.`
     // Once more, now: the answer was for this line with these inputs, still allowed.
@@ -343,7 +345,7 @@ export function createToolHost({
             return failure(error.message)
           }
           if (!ask) return failure('This command needs someone to allow it on the board, and this machine takes no answers from the board.')
-          const state = await ask({
+          const state = await askCard({
             name: 'command',
             label: 'Run a command',
             detail: `${showCommandLine(argv)}\n\nWhy: ${why || '(no reason given)'}\n\n${whereText(session)}`,
@@ -363,7 +365,7 @@ export function createToolHost({
         if (caps.shell.mode === 'sandboxed' && session.mode !== 'sandboxed') return failure('Not run: the OS sandbox did not start.')
         if (shellCard) {
           if (!ask) return failure('This machine asks before every command, and takes no answers from the board.')
-          const state = await ask({
+          const state = await askCard({
             name: 'command',
             label: 'Run a shell command',
             detail: `${line}\n\nWhy: ${why || '(no reason given)'}\n\n${whereText(session)}`,
