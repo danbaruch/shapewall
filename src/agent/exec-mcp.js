@@ -178,7 +178,7 @@ export function showCommandLine(argv) {
 function whereText(session) {
   if (!session) return 'Nowhere: no session.'
   if (session.mode === 'host-shell')
-    return "On the agent's machine, in the fix copy, WITHOUT an OS sandbox (its owner chose --shell-unsandboxed): it can read and write what that person can."
+    return "On the agent's machine, in the fix copy, WITHOUT an OS sandbox (its owner ran agent set shell-unsandboxed on): it can read and write what that person can."
   if (session.mode === 'sandboxed')
     return `In the fix copy, in the OS sandbox: it writes only there${session.readOnly ? ' (here not even there: read only)' : ''}, cannot read the home folder or the shared temp folders, and reaches ${
       session.network === 'registries' ? 'the package registries only' : 'no network'
@@ -494,7 +494,7 @@ export function createToolHost({
           return { ...text(resultText({ label: line, run })), isError: run.code !== 0 }
         }
         // The full shell: solo (or the team with --trust-team-shell), in the sandbox
-        // (or, where the owner insisted with --shell-unsandboxed, without one).
+        // (or, where the owner insisted with shell-unsandboxed on, without one).
         if (caps.shell.mode === 'unsandboxed' && session.mode !== 'host-shell')
           return failure('Not run: no OS sandbox here, and the machine did not allow commands without one.')
         if (caps.shell.mode === 'sandboxed' && session.mode !== 'sandboxed') return failure('Not run: the OS sandbox did not start.')

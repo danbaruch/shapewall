@@ -312,7 +312,8 @@ Connected Claude Code sessions never load or write Claude Code's auto memory.
 
 `--allow-command` is in the help text and is not available for Claude Code in this release. Started with its shell tool, Claude
 Code runs commands it takes to be read-only (`ls`, `cat`) without asking anyone, and those can read outside the project. So a fix
-session of Claude Code gets no shell tool, and the flag is refused with that explanation. A fix runs the project's named commands
+session of Claude Code gets no shell tool, and the flag (and `agent set allow-command`) is refused with that explanation; only
+`none`, which empties a saved list, is taken. A fix runs the project's named commands
 (config `commands`) through Shapewall's own tools instead, in an OS sandbox where the machine has one
 ([commands through Shapewall](/docs/agent-hardening#commands-through-shapewall)). The whole of it, with the trust table: [the hosted guide](/docs/hosted#edits-from-the-board-the-trust-decision).
 
@@ -807,9 +808,9 @@ Commands
                             connected it may allow each edit on the board. "admins": whoever the server lets
                             answer (admins by default). A fix is made on a new branch in a folder of its own,
                             never in this checkout. Saved for this connection; the server cannot widen it
-      --allow-command "CMD" one exact command the agent may ask to run, each time allowed on the board (adds to
-                            the list; "none" empties it). Default: no commands at all. Not for Claude Code in
-                            this release: with its shell tool it runs read-only commands without asking
+      --allow-command "CMD" refused in this release ("none" empties a saved list; agent set allow-command
+                            too): exact commands would need Claude Code's own shell tool, which runs read-only
+                            commands without asking. The project's named commands run through Shapewall instead
       --auto none|edits|commands|edits,commands  what the server's "allow without asking" rule may apply to
                             (default none). Never a file that runs something. Such a fix stays on this machine:
                             it is pushed only after a person allows "Push this fix" on its whole diff. With

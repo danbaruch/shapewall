@@ -31,7 +31,10 @@ export function agentAsks(asks) {
       `Asked to allow edits without asking: that stays off until ${asks.approvals === 'owner' ? 'you switch' : 'an admin switches'} it on, on the project's Agents page. Such a fix is not pushed until a person has looked at its whole diff.`,
     )
   lines.push(asks.base ? `A fix starts from the branch ${asks.base}.` : "A fix starts from the commit that machine's checkout is on.")
-  lines.push('Never runs a command for the board: that machine refuses them.')
+  // Commands are that machine's own rule (shapewall agent status there lists them), not part of what it reports here.
+  lines.push(
+    "Runs a command only where that machine's own settings allow it: the project's named commands, or a shell in an OS sandbox in the fix copy, never a command of the board's choosing.",
+  )
   lines.push(TOKEN)
   return { mode: 'edits', lines }
 }
@@ -42,7 +45,7 @@ export function agentAsksDone(asks) {
   if (mode === 'edits')
     return `It reads the project and answers, and it makes fixes asked on the board on a branch of their own, each edit allowed by ${
       asks.approvals === 'owner' ? 'you' : 'whoever this server lets answer'
-    } first; it runs no commands.`
+    } first; it runs only the commands that machine allows.`
   if (mode === 'read') return 'It reads the project and answers; it does not change files or run commands.'
   return 'It reads the project and answers; its terminal says whether it also takes edits from the board.'
 }

@@ -363,7 +363,7 @@ test('the Extensions line reads the same on the card, in agent status and in the
   }
   assert.match(
     extensionsText({ on: true, skills: ['a'], servers: ['b'], tools: [] }),
-    /None of their tools is allowed yet \(--allow-tool\)/,
+    /None of their tools is allowed yet \(shapewall agent set allow-tool mcp__SERVER__TOOL\)/,
   )
   assert.match(
     extensionsText({ on: true, skills: [], servers: ['b'], tools: ['mcp__b__c'] }),

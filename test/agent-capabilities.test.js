@@ -81,7 +81,7 @@ const CONFIG = {
 const optIn = (entry, warn) => cleanMachinePolicy({ ...CAPABILITY_DEFAULTS, ...entry }, warn)
 // A connected machine that takes edits, with one exact command and a team.
 // It names an agent config folder of its own (extensions), which holds one skill and one server.
-const MACHINE = optIn({ approvals: 'owner', commands: ['npm test'], trustTeam: ['robin'], agentConfig: '/home/dan/agent-config/builder' })
+const MACHINE = optIn({ approvals: 'owner', commands: ['npm test'], trustTeam: ['robin'], agentConfig: '/home/ada/agent-config/builder' })
 const FOLDER = { skills: ['notes'], servers: ['brain'] }
 const CLEAN = { tainted: false, authors: [] }
 const TRUST = {
@@ -224,7 +224,7 @@ test('capabilities: an unknown path, a missing machine and junk inputs read as t
     assert.notEqual(caps.shell.mode, 'sandboxed', JSON.stringify(platform))
     assert.ok(caps.commands.every((item) => item.needsCard))
   }
-  // --shell-unsandboxed: solo only.
+  // shell-unsandboxed on: solo only.
   const loud = optIn({ approvals: 'owner', shellUnsandboxed: true, trustTeam: ['robin'], trustTeamShell: true })
   const at = (tier) =>
     resolveCapabilities({

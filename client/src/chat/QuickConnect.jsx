@@ -125,6 +125,8 @@ export function QuickConnect({ agent, touch, onOpenSettings, onConnected }) {
 
   const detected = view.detected || []
   const ready = detected.filter((item) => item.state === 'ready')
+  // Only Claude Code takes the restricted local session; the other adapters keep their own tools.
+  const others = ready.filter((item) => item.id !== 'claude')
   const missing = detected.filter((item) => item.state === 'needs-adapter')
   // Windows: only a .cmd wrapper, which needs a shell.
   const wrapped = detected.filter((item) => item.state === 'needs-shell')
@@ -208,12 +210,26 @@ export function QuickConnect({ agent, touch, onOpenSettings, onConnected }) {
       ))}
       {ready.length ? (
         <p className="text-[11px] leading-4 text-muted" data-sw-chat-connect-note="true">
-          Connect asks first, then runs that command on this machine, as you, with the agent’s own login. It brings its own tools (a shell,
-          file edits), which Shapewall does not sandbox, and its own permission settings, which may let it act without asking:{' '}
-          <a className="text-accent underline-offset-2 hover:underline" href={HARDENING_URL} target="_blank" rel="noreferrer">
-            use a restricted profile
-          </a>
-          .
+          Connect asks first, then runs that command on this machine, as you, with the agent’s own login.
+          {ready.some((item) => item.id === 'claude') ? (
+            <>
+              {' '}
+              Claude Code gets a restricted session by default: read and edit tools plus Shapewall’s own tools for commands and the browser,
+              never a shell of its own or your Claude settings files.
+            </>
+          ) : null}
+          {others.length ? (
+            <>
+              {' '}
+              {others.map((item) => item.label).join(', ')} {others.length === 1 ? 'brings its' : 'bring their'} own tools (a shell, file
+              edits), which Shapewall does not sandbox, and {others.length === 1 ? 'its' : 'their'} own permission settings, which may let{' '}
+              {others.length === 1 ? 'it' : 'them'} act without asking:{' '}
+              <a className="text-accent underline-offset-2 hover:underline" href={HARDENING_URL} target="_blank" rel="noreferrer">
+                use a restricted profile
+              </a>
+              .
+            </>
+          ) : null}
         </p>
       ) : null}
       <div className="flex justify-end">

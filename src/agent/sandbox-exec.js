@@ -584,7 +584,7 @@ function sizeOf(dir, limit) {
 //             that do not change files)
 //   mode      "sandboxed" (srt), "host" (no OS sandbox: only after a card
 //             each, without a shell; the open tier's model), or "host-shell"
-//             (--shell-unsandboxed: solo only, the owner's loud choice)
+//             (shell-unsandboxed on: solo only, the owner's loud choice)
 export async function createCommandSession({
   root,
   expect,
@@ -715,7 +715,7 @@ export async function createCommandSession({
     const time = Math.min(Math.max(1000, timeoutMs), SANDBOX_LIMITS.timeoutMaxMs)
     const vars = commandEnv({ env, tmp, extra: extraEnv })
     if (!boxed) {
-      // --shell-unsandboxed (solo, the owner's own choice): the shell on this machine itself.
+      // shell-unsandboxed on (solo, the owner's own choice): the shell on this machine itself.
       if (command.shell !== undefined && mode === 'host-shell' && process.platform !== 'win32')
         return capTmp(
           await runProcess(['/bin/sh', '-c', String(command.shell)], { cwd: real, env: vars, timeoutMs: time, signal, onStart }),

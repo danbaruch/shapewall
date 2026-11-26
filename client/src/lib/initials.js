@@ -1,5 +1,5 @@
 // The letters an avatar shows for a name. Only letters and digits count (any
-// script): "Harry (ibuypower)" is Harry + ibuypower, and a word with none of
+// script): "Scout (workbench)" is Scout + workbench, and a word with none of
 // them, such as an emoji or "-", is skipped.
 const LETTER = /[\p{L}\p{N}]/gu
 
@@ -23,7 +23,7 @@ export function initials(name) {
 }
 
 // Two letters for an agent without an icon: the initials of its first two
-// words ("Claude Code" CC, "Harry (ibuypower)" HI), else its first two
+// words ("Claude Code" CC, "Scout (workbench)" SW), else its first two
 // letters ("Codex" Co, "goose" Go).
 export function monogram(label) {
   const words = nameWords(label)

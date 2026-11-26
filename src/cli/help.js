@@ -191,9 +191,9 @@ export const SECTIONS = {
                             connected it may allow each edit on the board. "admins": whoever the server lets
                             answer (admins by default). A fix is made on a new branch in a folder of its own,
                             never in this checkout. Saved for this connection; the server cannot widen it
-      --allow-command "CMD" one exact command the agent may ask to run, each time allowed on the board (adds to
-                            the list; "none" empties it). Default: no commands at all. Not for Claude Code in
-                            this release: with its shell tool it runs read-only commands without asking
+      --allow-command "CMD" refused in this release ("none" empties a saved list; agent set allow-command
+                            too): exact commands would need Claude Code's own shell tool, which runs read-only
+                            commands without asking. The project's named commands run through Shapewall instead
       --auto none|edits|commands|edits,commands  what the server's "allow without asking" rule may apply to
                             (default none). Never a file that runs something. Such a fix stays on this machine:
                             it is pushed only after a person allows "Push this fix" on its whole diff. With

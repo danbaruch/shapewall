@@ -51,7 +51,7 @@ const TIER_TEXT = {
 // Why a line is off (or narrower), as a sentence and the setting that changes it.
 // `set`: [key, value] for `shapewall agent set KEY VALUE`. `server`: the project's
 // setting on the server holds it; only an admin there can change it.
-const REASONS = {
+export const REASONS = {
   no_trust: { text: 'the server did not say who wrote this turn, so it is treated as open' },
   guests: { text: 'a share-link guest wrote part of this turn' },
   outside_authors: { text: "someone outside this machine's trusted list wrote part of this turn", set: ['trust-team', 'HANDLE,...'] },
@@ -67,7 +67,8 @@ const REASONS = {
     set: ['approvals', 'owner'],
   },
   edits_off: { text: 'a command that changes files, or a full shell, needs edits, and edits are off here' },
-  machine_handoff_none: { text: 'this machine allows no handoff', set: ['handoff-hops', '1'] },
+  // Handing work to another agent is not built yet: no setting turns it on.
+  machine_handoff_none: { text: 'handing work to another agent is not available yet' },
   machine_shell_off: { text: 'this machine allows no commands', set: ['shell', 'sandboxed'] },
   server_shell_off: { text: "limited by this project's setting", server: true },
   no_named_commands: { text: 'the config names no commands (add "commands" to shapewall.config.json)' },
@@ -78,7 +79,9 @@ const REASONS = {
   machine_shell_commands: { text: 'this machine allows named commands only', set: ['shell', 'sandboxed'] },
   team_shell_off: { text: 'the team gets no full shell unless this machine says so', set: ['trust-team-shell', 'on'] },
   open_tier_shell: { text: 'open turns get no full shell' },
-  no_exact_commands: { text: 'no exact commands are allowed', set: ['allow-command', '"COMMAND"'] },
+  // Exact commands are dropped for every agent in this release (agent-connect.js COMMANDS_PROVEN),
+  // so no setting turns them on.
+  no_exact_commands: { text: 'exact commands are not available for connected agents in this release' },
   machine_browser_off: { text: 'this machine allows no browser', set: ['browser', 'on'] },
   server_browser_off: { text: "limited by this project's setting", server: true },
   login_not_this_tier: { text: 'the logged-in browser is not for this tier, so the browser starts without a login' },
@@ -137,7 +140,7 @@ export function extensionsText(ext) {
   const tools = ext.tools.length
     ? `Tools it may call: ${list(ext.tools)}; every other tool of those servers is refused.`
     : servers.length
-      ? 'None of their tools is allowed yet (--allow-tool).'
+      ? 'None of their tools is allowed yet (shapewall agent set allow-tool mcp__SERVER__TOOL).'
       : ''
   return `From its agent config folder: ${held}.${tools ? ` ${tools}` : ''}`
 }
@@ -189,7 +192,7 @@ function lineFor(caps, id) {
       state = { sandboxed: 'on', unsandboxed: 'on', container: 'on', exact: 'ask', off: 'off' }[caps.shell.mode] || 'off'
       text = {
         sandboxed: `A full shell in the fix copy, inside an OS sandbox (network: ${caps.shell.network}).`,
-        unsandboxed: `A full shell WITHOUT an OS sandbox (the owner chose --shell-unsandboxed; network: ${caps.shell.network}).`,
+        unsandboxed: `A full shell WITHOUT an OS sandbox (the owner ran agent set shell-unsandboxed on; network: ${caps.shell.network}).`,
         container: 'Commands inside its container.',
         exact: `Only these exact commands, each asked on the board: ${list(caps.shell.exact.map((item) => `"${item}"`))}.`,
         off: 'No shell.',
