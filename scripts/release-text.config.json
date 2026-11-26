@@ -1,0 +1,75 @@
+{
+  "$comment": "Lists for scripts/check-release-text.mjs. This file is never checked itself, so it may name what it bans. Patterns are JavaScript regular expressions, matched case-insensitively. Paths are repository paths; a path ending in / covers the folder.",
+  "phrases": [
+    {
+      "pattern": "(feedback|review)[ -]tools?\\b",
+      "why": "positioning: Shapewall steers and builds with agents, it is not a feedback or review tool"
+    },
+    { "pattern": "website[ -]review", "why": "positioning" },
+    { "pattern": "tested with automated browsers|not yet verified|is planned|has not launched", "why": "a process note, not product copy" },
+    { "pattern": "in today's fast-paced world", "why": "filler" },
+    { "pattern": "game[ -]changing", "why": "filler" },
+    { "pattern": "\\bsynergy\\b", "why": "filler" },
+    { "pattern": "\\bunlock(s|ed|ing)? (your|the|new|a)\\b", "why": "filler" },
+    {
+      "pattern": "\\bvs\\.? (marker\\.io|bugherd|userback|usersnap|ruttl|pastel|percy|chromatic|applitools)\\b",
+      "why": "no competitor callouts"
+    }
+  ],
+  "names": [
+    { "name": "Dayforce", "kind": "employer" },
+    { "name": "Ceridian", "kind": "employer" },
+    { "name": "OpenLoop", "kind": "employer" },
+    { "name": "Marker.io", "kind": "competitor" },
+    { "name": "BugHerd", "kind": "competitor" },
+    { "name": "Userback", "kind": "competitor" },
+    { "name": "Usersnap", "kind": "competitor" },
+    { "name": "Ruttl", "kind": "competitor" },
+    { "name": "Markup.io", "kind": "competitor" },
+    { "name": "Percy", "kind": "competitor" },
+    { "name": "Applitools", "kind": "competitor" },
+    { "name": "Stagewise", "kind": "competitor" },
+    { "name": "Agentation", "kind": "competitor" },
+    { "name": "Onlook", "kind": "competitor" }
+  ],
+  "exclude": ["scripts/release-text.config.json", "test/release-text.test.js", "package-lock.json", "website/package-lock.json"],
+  "dashesAllowed": {
+    "$comment": "Code that has to name the characters themselves: text-to-speech splitting, SEO width tables, an en dash as an empty cell, and tests that assert there is none.",
+    "paths": [
+      "client/src/chat/tts/",
+      "client/src/console/usage/",
+      "client/src/console/pages/agent-feedback.jsx",
+      "src/checks/seo-analysis.js",
+      "test/brackwell.test.js",
+      "test/e2e/demo-usage.e2e.test.js",
+      "test/remote-agent-connect.test.js",
+      "test/v1-decisions.test.js",
+      "website/test/build.test.js"
+    ]
+  },
+  "phrasesAllowed": {
+    "$comment": "Tests that check the same phrases themselves. Names are still checked here.",
+    "paths": ["test/plugin-manifests.test.js", "website/test/build.test.js"]
+  },
+  "binaryExtensions": [
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".ico",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".otf",
+    ".mp4",
+    ".webm",
+    ".mp3",
+    ".wav",
+    ".pdf",
+    ".zip",
+    ".gz",
+    ".onnx",
+    ".bin"
+  ]
+}

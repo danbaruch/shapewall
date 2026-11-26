@@ -71,6 +71,7 @@
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "check:text": "node scripts/check-release-text.mjs",
     "check:pack": "node scripts/check-pack.js",
     "fresh-install": "bash scripts/fresh-install.sh",
     "demo": "node scripts/demo.js",
