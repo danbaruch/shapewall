@@ -454,17 +454,126 @@ test('the browser_* tools: page data comes back quoted, screenshots are capped P
   }
 })
 
-test('the session dev server joins the allowlist live; only a loopback origin with a port', async () => {
+test('a dev server joins live, only through the token of one the tool host started, even mid-launch', async () => {
   const agent = createAgentBrowser({ browser: caps({ allow: [] }), tmpRoot })
   try {
-    await assert.rejects(agent.allowSessionOrigin('https://example.com'), /loopback/)
-    await assert.rejects(agent.allowSessionOrigin('http://127.0.0.1'), /loopback/)
-    await agent.allowSessionOrigin(appOrigin)
+    await assert.rejects(agent.allowSessionOrigin(appOrigin), /Not a dev server this session started/)
+    await agent.allowSessionOrigin(agent.registerSpawned(appPort))
     assert.equal((await agent.navigate(appOrigin + '/')).status, 200)
-    await agent.allowSessionOrigin(otherOrigin)
+    await agent.allowSessionOrigin(agent.registerSpawned(otherPort))
     assert.equal((await agent.navigate(otherOrigin + '/')).title, 'Other')
   } finally {
     await agent.close()
     otherHits.length = 0
   }
+  // Added while the browser is still starting: not lost.
+  for (const delay of [0, 50, 300]) {
+    const racing = createAgentBrowser({ browser: caps(), tmpRoot })
+    try {
+      const starting = racing.page()
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      await racing.allowSessionOrigin(racing.registerSpawned(otherPort))
+      await starting
+      assert.ok(racing.allowed().includes(otherOrigin), `added after ${delay} ms`)
+      assert.equal((await racing.navigate(otherOrigin + '/')).title, 'Other')
+    } finally {
+      await racing.close()
+      otherHits.length = 0
+    }
+  }
+})
+
+test('loopback stays behind the proxy with PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK set', async () => {
+  const saved = process.env.PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK
+  process.env.PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK = '1'
+  const agent = createAgentBrowser({ browser: caps(), tmpRoot })
+  try {
+    await agent.navigate(appOrigin + '/')
+    const flags = chromiumFor(agent.dir).flatMap((proc) => proc.cmd.filter((arg) => arg.startsWith('--proxy-bypass-list')))
+    assert.ok(flags.length && flags.every((flag) => flag === '--proxy-bypass-list=<-loopback>'), JSON.stringify(flags))
+    const p = await agent.page()
+    const hop = await p.goto(appOrigin + '/redirect?to=' + encodeURIComponent(otherOrigin + '/env-redirect')).then(
+      (response) => response?.status(),
+      (error) => error.message,
+    )
+    assert.notEqual(hop, 200)
+    const fetched = await p
+      .evaluate(
+        (to) =>
+          fetch('/redirect?to=' + encodeURIComponent(to)).then(
+            (r) => r.status,
+            () => 'failed',
+          ),
+        otherOrigin + '/env-fetch',
+      )
+      .catch(() => 'failed')
+    assert.equal(fetched, 'failed')
+    assert.deepEqual(otherHits, [], 'nothing reached the off-list port')
+  } finally {
+    await agent.close()
+    if (saved === undefined) delete process.env.PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK
+    else process.env.PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK = saved
+  }
+})
+
+test('without Chromium sandbox only with allowNoSandbox, and the tool output says so', async () => {
+  const { chromium } = await import('playwright')
+  const starts = []
+  // Chromium's sandbox "cannot start" here: a forced launch error.
+  const forced = {
+    launchPersistentContext(dir, options) {
+      starts.push(options.chromiumSandbox)
+      if (options.chromiumSandbox) return Promise.reject(new Error('No usable sandbox! (forced by the test)'))
+      return chromium.launchPersistentContext(dir, options)
+    },
+  }
+  const refusing = createAgentBrowser({ browser: caps(), tmpRoot, chromium: forced, chromiumSandbox: true })
+  await assert.rejects(refusing.navigate(appOrigin + '/'), /stays off/)
+  assert.deepEqual(starts, [true])
+  const agent = createAgentBrowser({ browser: caps({ allowNoSandbox: true }), tmpRoot, chromium: forced, chromiumSandbox: true })
+  try {
+    const tools = Object.fromEntries(browserTools(agent).map((tool) => [tool.name, tool]))
+    const nav = await tools.browser_navigate.handler({ url: appOrigin + '/' })
+    assert.equal(nav.isError, undefined)
+    assert.match(
+      nav.content.at(-1).text,
+      /^Shapewall: Chromium's own sandbox could not start on this machine; this browser runs without it/,
+    )
+    assert.deepEqual(starts, [true, true, false])
+  } finally {
+    await agent.dispose()
+  }
+  assert.deepEqual(fs.readdirSync(browserRoot(tmpRoot)), [])
+})
+
+test('a tool call racing dispose: it ends, nothing restarts, nothing is left', async () => {
+  const agent = createAgentBrowser({ browser: caps(), tmpRoot })
+  await agent.navigate(appOrigin + '/')
+  const inFlight = agent.navigate(appOrigin + '/form').then(
+    () => 'done',
+    (error) => error.message,
+  )
+  const disposing = agent.dispose()
+  const after = agent.screenshot().then(
+    () => 'shot',
+    (error) => error.message,
+  )
+  await disposing
+  await inFlight
+  assert.match(await after, /ended with its task/)
+  assert.equal(agent.open, false)
+  await assert.rejects(agent.navigate(appOrigin + '/'), /ended with its task/)
+  assert.deepEqual(fs.readdirSync(browserRoot(tmpRoot)), [])
+
+  // dispose() while the browser is still starting: it never serves a call.
+  const starting = createAgentBrowser({ browser: caps(), tmpRoot })
+  const first = starting.navigate(appOrigin + '/').then(
+    () => 'served',
+    (error) => error.message,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  await starting.dispose()
+  assert.match(await first, /ended with its task/)
+  assert.equal(starting.open, false)
+  assert.ok(await until(() => fs.readdirSync(browserRoot(tmpRoot)).length === 0), 'its folder went too')
 })

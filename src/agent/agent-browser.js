@@ -12,9 +12,14 @@
 //     that runs the agent's session does this once per session.
 //   - `checkout` is that same project folder; a recorded login
 //     (`browser.auth`) is read from its `.shapewall-auth/<name>.auth.json`.
-//   - `allowSessionOrigin(origin)` adds the session's own dev server
-//     (`http://127.0.0.1:<port>`), called by start_dev_server once the port
-//     is known. Only a loopback origin with a port is taken there.
+//   - The session's own dev server: the tool host's dev server supervisor
+//     (start_dev_server, wired in Q2/Q4) calls `registerSpawned(port)` for
+//     a server it started itself and passes the token it gets to
+//     `allowSessionOrigin(token)`. No raw origin is taken there, and the
+//     agent's tools never see a token.
+//   - `denyPorts`: Shapewall's own server port, never opened, like the
+//     debugging ports in DENIED_LOOPBACK_PORTS.
+//   - `dispose()` at task end; nothing starts afterwards.
 //
 // What it enforces, in Shapewall code, not in the model:
 //   - Every request the page makes (page loads, fetch, XHR, workers,
@@ -40,6 +45,7 @@
 //     markBrowserProfile(), holds the marker, not a real browser's folder).
 import fs from 'node:fs'
 import os from 'node:os'
+import net from 'node:net'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import * as z from 'zod'
@@ -47,7 +53,7 @@ import { cleanBrowserProfile, cleanOrigin } from './capabilities.js'
 import { processStartTime } from '../lock.js'
 import { fitPng } from '../png.js'
 import { quoteData } from './context.js'
-import { hostPort, pinHost, startEgressProxy } from './browser-egress.js'
+import { addressKind, hostPort, pinHost, startEgressProxy } from './browser-egress.js'
 
 export const BROWSER_DIR_NAME = 'shapewall-agent-browser'
 export const SCREENSHOT_MAX_BYTES = 1024 * 1024
@@ -62,7 +68,45 @@ const VIEWPORT = { width: 1280, height: 800 }
 // Main-frame addresses that are not a network load and are fine to sit on.
 const SAFE_PAGES = new Set(['about:blank', 'chrome-error://chromewebdata/'])
 
-export const browserRoot = (tmpRoot = os.tmpdir()) => path.join(tmpRoot, BROWSER_DIR_NAME)
+// Ports on this machine no allowlist opens: browser debugging (9222, the
+// usual Chrome DevTools port) and Node's inspector (9229, 9230). The tool
+// host adds Shapewall's own server port (`denyPorts`).
+export const DENIED_LOOPBACK_PORTS = Object.freeze([9222, 9229, 9230])
+
+const uid = () => (typeof process.getuid === 'function' ? process.getuid() : null)
+const defaultWarn = (line) => process.stderr.write(`shapewall: ${line}\n`)
+
+// The per-user folder the session folders live in: under `tmpRoot` when
+// given (tests, or a tool host's own private folder), else under
+// $XDG_RUNTIME_DIR (private to this user), else the system temp folder
+// with this user's id in the name.
+export function browserRoot(tmpRoot = null) {
+  if (tmpRoot) return path.join(tmpRoot, BROWSER_DIR_NAME)
+  const runtime = process.env.XDG_RUNTIME_DIR
+  if (runtime && path.isAbsolute(runtime)) return path.join(runtime, BROWSER_DIR_NAME)
+  return path.join(os.tmpdir(), `${BROWSER_DIR_NAME}-${uid() ?? 'user'}`)
+}
+
+// Makes the root (0700) or checks the one there: a real folder, not a
+// link, owned by this user, with no access for anyone else. Throws otherwise.
+export function ensureBrowserRoot(root) {
+  try {
+    fs.mkdirSync(root, { mode: 0o700 })
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error
+  }
+  const stat = fs.lstatSync(root)
+  const refuse = (why) => {
+    throw new Error(`Refused the agent browser folder ${root}: ${why}. Remove it, or fix it, and try again.`)
+  }
+  if (stat.isSymbolicLink()) refuse('it is a symbolic link')
+  if (!stat.isDirectory()) refuse('it is not a folder')
+  if (uid() !== null) {
+    if (stat.uid !== uid()) refuse('another user owns it')
+    if (stat.mode & 0o077) refuse(`other users can use it (mode ${(stat.mode & 0o777).toString(8)})`)
+  }
+  return root
+}
 
 // ---- Leftover folders ----
 
@@ -76,8 +120,9 @@ function alive(pid, start) {
   return start === 'x' || processStartTime(pid) === start
 }
 // Removes session folders under `root` whose process is gone (a SIGKILL
-// leaves its folder behind). Returns the folders removed.
-export function sweepAgentBrowserDirs({ root = browserRoot() } = {}) {
+// leaves its folder behind). Returns the folders removed. One that cannot
+// be removed is reported through `warn` and skipped: it never stops a launch.
+export function sweepAgentBrowserDirs({ root = browserRoot(), warn = defaultWarn } = {}) {
   let names = []
   try {
     names = fs.readdirSync(root)
@@ -89,8 +134,12 @@ export function sweepAgentBrowserDirs({ root = browserRoot() } = {}) {
     const match = SESSION_RE.exec(name)
     if (!match || alive(Number(match[1]), match[2])) continue
     const dir = path.join(root, name)
-    fs.rmSync(dir, { recursive: true, force: true })
-    removed.push(dir)
+    try {
+      fs.rmSync(dir, { recursive: true, force: true })
+      removed.push(dir)
+    } catch (error) {
+      warn(`could not remove the old agent browser folder ${dir} (${error.code || error.message}); skipped`)
+    }
   }
   return removed
 }
@@ -98,7 +147,13 @@ export function sweepAgentBrowserDirs({ root = browserRoot() } = {}) {
 const liveDirs = new Set()
 let hooked = false
 function removeLive() {
-  for (const dir of liveDirs) fs.rmSync(dir, { recursive: true, force: true, maxRetries: 2 })
+  for (const dir of liveDirs) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 2 })
+    } catch {
+      // the next start's sweep tries again
+    }
+  }
   liveDirs.clear()
 }
 const SIGNALS = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 }
@@ -134,10 +189,6 @@ function originOfUrl(value) {
     return null
   }
 }
-const isLoopbackDev = (origin) => {
-  const url = new URL(origin)
-  return url.protocol === 'http:' && Boolean(url.port) && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
-}
 
 // A launch error that says Chromium's own sandbox could not start.
 const SANDBOX_ERROR_RE = /sandbox|namespace|setuid|zygote/i
@@ -167,25 +218,50 @@ const clip = (text, max = LOG_LINE_MAX) => {
   return value.length > max ? value.slice(0, max) + '...' : value
 }
 
+// Two-label suffixes anyone can register under: a cookie for one of these
+// (or for a single label such as "com") would reach every site below it.
+// A small list on purpose: a parent domain must be at least as specific as
+// one of these, plus a label.
+const PUBLIC_SUFFIXES = new Set(
+  [
+    'co.uk ac.uk gov.uk org.uk me.uk ltd.uk plc.uk net.uk',
+    'com.au net.au org.au edu.au gov.au co.nz org.nz net.nz',
+    'co.jp ne.jp or.jp com.br com.cn com.mx com.tr co.in co.za co.kr com.sg com.hk',
+    'github.io gitlab.io pages.dev workers.dev netlify.app vercel.app herokuapp.com web.app firebaseapp.com',
+    'azurewebsites.net cloudfront.net appspot.com blogspot.com ts.net ngrok.io ngrok.app fly.dev onrender.com',
+  ]
+    .join(' ')
+    .split(' '),
+)
+// May a stored cookie for `domain` load, given the allowed hosts? Its exact
+// host, or a parent domain of an allowed host that is not a public suffix.
+// A cookie has no port: one for a loopback address is kept only when that
+// address is allowed, and the proxy keeps every other port on it unreachable.
+export function cookieAllowed(domain, hosts) {
+  const value = String(domain || '').toLowerCase()
+  const host = value.replace(/^\./, '').replace(/^\[|\]$/g, '')
+  if (!host) return false
+  if (hosts.has(host)) return true
+  if (net.isIP(host) || !host.includes('.') || PUBLIC_SUFFIXES.has(host)) return false
+  return [...hosts].some((allowed) => !net.isIP(allowed) && allowed.endsWith('.' + host))
+}
+
 // A recorded login, read from the checkout, kept to the allowed origins.
 export function readAuthState(checkout, name, origins) {
   if (typeof checkout !== 'string' || !path.isAbsolute(checkout)) throw new Error('A recorded login needs the project folder.')
   if (typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/.test(name)) throw new Error('Not a recorded login name.')
-  const folder = fs.realpathSync(path.join(checkout, '.shapewall-auth'))
+  const folder = path.join(checkout, '.shapewall-auth')
+  const folderStat = fs.lstatSync(folder)
+  if (folderStat.isSymbolicLink() || !folderStat.isDirectory()) throw new Error('.shapewall-auth is not a plain folder in the project.')
   const file = path.join(folder, `${name}.auth.json`)
   const stat = fs.lstatSync(file)
   if (!stat.isFile()) throw new Error(`${name}.auth.json is not a plain file.`)
   if (stat.size > AUTH_FILE_MAX) throw new Error(`${name}.auth.json is over ${AUTH_FILE_MAX} bytes.`)
   const state = JSON.parse(fs.readFileSync(file, 'utf8'))
-  const hosts = new Set(origins.map((origin) => new URL(origin).hostname.toLowerCase()))
-  const cookieFor = (domain) => {
-    const host = String(domain || '')
-      .replace(/^\./, '')
-      .toLowerCase()
-    return [...hosts].some((allowed) => allowed === host || allowed.endsWith('.' + host))
-  }
+  const hosts = new Set(origins.map((origin) => hostPort(origin).host))
+  const cookieFor = (cookie) => cookieAllowed(cookie?.domain, hosts)
   return {
-    cookies: (Array.isArray(state?.cookies) ? state.cookies : []).filter((cookie) => cookieFor(cookie?.domain)),
+    cookies: (Array.isArray(state?.cookies) ? state.cookies : []).filter(cookieFor),
     origins: (Array.isArray(state?.origins) ? state.origins : []).filter((entry) => origins.includes(originOfUrl(entry?.origin))),
   }
 }
@@ -193,20 +269,32 @@ export function readAuthState(checkout, name, origins) {
 // ---- The browser ----
 
 // One agent browser for one task. Nothing starts until the first tool call
-// (open() or page()). `chromium` and `lookup` are for tests.
+// (open() or page()).
+//   - `denyPorts`: more loopback ports never to open (the tool host passes
+//     Shapewall's own server port), besides DENIED_LOOPBACK_PORTS.
+//   - `browser.allowNoSandbox`: only when true may the browser start without
+//     Chromium's own sandbox where it cannot start (the machine policy key
+//     arrives with Q4); the tool output then says so. Otherwise it refuses.
+//   - `chromium`, `lookup`, `warn` are for tests.
+// close() ends the current browser (the next tool call starts a fresh one);
+// dispose() ends it for good, at the end of the task.
 export function createAgentBrowser({
   browser,
   checkout = null,
-  tmpRoot = os.tmpdir(),
+  tmpRoot = null,
   chromium = null,
   lookup = undefined,
   headless = true,
   chromiumSandbox = process.platform === 'linux' || process.platform === 'darwin',
   screenshotMaxBytes = SCREENSHOT_MAX_BYTES,
+  denyPorts = [],
+  warn = defaultWarn,
 } = {}) {
   if (!browser || browser.on !== true) throw new Error('The browser is off for this turn.')
   if (browser.realChrome) throw new Error('An agent never gets your own Chrome.')
+  const allowNoSandbox = browser.allowNoSandbox === true
   const root = browserRoot(tmpRoot)
+  const denied = new Set([...DENIED_LOOPBACK_PORTS, ...(Array.isArray(denyPorts) ? denyPorts : []).filter(Number.isInteger)])
   // origin -> { host, port, protocol }
   const allowed = new Map()
   // host -> pinned address
@@ -218,17 +306,21 @@ export function createAgentBrowser({
     if (origin) given.push(origin)
     else refused.push({ origin: String(value).slice(0, 200), why: 'not an exact http(s) origin' })
   }
+  // token -> origin, for dev servers the tool host started (registerSpawned).
+  const spawned = new Map()
   const blocked = []
   const errors = []
   const notes = []
   let state = null
   let opening = null
+  let disposed = false
 
   const record = (list, entry) => {
     list.push(entry)
     if (list.length > LOG_MAX) list.splice(0, list.length - LOG_MAX)
   }
   const block = (url, by) => record(blocked, { url: clip(url, 300), by, at: new Date().toISOString() })
+  const deniedPort = (address, port) => addressKind(address) === 'loopback' && denied.has(port)
 
   async function allowOrigin(origin) {
     const { host, port, protocol } = hostPort(origin)
@@ -239,6 +331,10 @@ export function createAgentBrowser({
         return false
       }
       pins.set(host, pin.address)
+    }
+    if (deniedPort(pins.get(host), port)) {
+      refused.push({ origin, why: `port ${port} on this machine is never opened (debugging or Shapewall's own server)` })
+      return false
     }
     allowed.set(origin, { host, port, protocol })
     return true
@@ -254,7 +350,8 @@ export function createAgentBrowser({
       // A plain request is only for an http origin; a tunnel is TLS for an
       // https origin, or a WebSocket to either.
       if (!tunnel && entry.protocol !== 'http:') continue
-      return pins.get(host) || null
+      const address = pins.get(host)
+      return address && !deniedPort(address, port) ? address : null
     }
     return null
   }
@@ -274,8 +371,8 @@ export function createAgentBrowser({
   }
 
   async function launch() {
-    fs.mkdirSync(root, { recursive: true, mode: 0o700 })
-    sweepAgentBrowserDirs({ root })
+    ensureBrowserRoot(root)
+    sweepAgentBrowserDirs({ root, warn })
     const dir = path.join(root, `${process.pid}-${processStartTime(process.pid) ?? 'x'}-${randomBytes(4).toString('hex')}`)
     fs.mkdirSync(dir, { mode: 0o700 })
     liveDirs.add(dir)
@@ -308,16 +405,20 @@ export function createAgentBrowser({
         deviceScaleFactor: 1,
         permissions: [],
         ignoreHTTPSErrors: false,
-        proxy: { server: `http://127.0.0.1:${proxy.port}` },
+        // Loopback goes through the proxy too, said here rather than left to
+        // Playwright's default (an environment variable turns that off).
+        proxy: { server: `http://127.0.0.1:${proxy.port}`, bypass: '<-loopback>' },
         env: cleanEnv(dir),
         // Chromium resolves nothing itself (the proxy does, at pinned
         // addresses); the proxy's own address is the one exception. WebRTC
-        // may not use UDP outside the proxy.
+        // may not use UDP outside the proxy. The bypass list again, last,
+        // so no earlier flag can widen it.
         args: [
           '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
           '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
           '--disable-background-networking',
           '--no-first-run',
+          '--proxy-bypass-list=<-loopback>',
         ],
         timeout: NAVIGATION_TIMEOUT,
         handleSIGINT: false,
@@ -328,7 +429,13 @@ export function createAgentBrowser({
         context = await engine.launchPersistentContext(userDataDir, options(chromiumSandbox))
       } catch (error) {
         if (!chromiumSandbox || !SANDBOX_ERROR_RE.test(String(error?.message))) throw error
-        notes.push("Chromium's own sandbox could not start on this machine; the browser runs without it.")
+        if (!allowNoSandbox)
+          throw new Error(
+            "Chromium's own sandbox could not start on this machine, so the agent browser stays off. " +
+              'The machine owner can allow a browser without it (allowNoSandbox); pages then run with less isolation.',
+            { cause: error },
+          )
+        notes.push("Chromium's own sandbox could not start on this machine; this browser runs without it (allowNoSandbox).")
         context = await engine.launchPersistentContext(userDataDir, options(false))
       }
       hookExit()
@@ -397,7 +504,11 @@ export function createAgentBrowser({
     } catch (error) {
       await context?.close().catch(() => {})
       await proxy?.close().catch(() => {})
-      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 2 })
+      try {
+        fs.rmSync(dir, { recursive: true, force: true, maxRetries: 2 })
+      } catch {
+        // the next start's sweep tries again
+      }
       liveDirs.delete(dir)
       throw error
     }
@@ -408,16 +519,29 @@ export function createAgentBrowser({
     if (finished.has(current)) return
     finished.add(current)
     current.proxy.close().catch(() => {})
-    fs.rmSync(current.dir, { recursive: true, force: true, maxRetries: 2 })
+    try {
+      fs.rmSync(current.dir, { recursive: true, force: true, maxRetries: 2 })
+    } catch (error) {
+      warn(`could not remove the agent browser folder ${current.dir} (${error.code || error.message})`)
+    }
     liveDirs.delete(current.dir)
   }
 
+  const ended = () => new Error('This agent browser has ended with its task.')
   async function open() {
+    if (disposed) throw ended()
     if (state) return state
     opening ||= launch().finally(() => {
       opening = null
     })
-    state = await opening
+    const current = await opening
+    if (disposed) {
+      // dispose() came while the browser started: it never serves a call.
+      await current.context.close().catch(() => {})
+      finish(current)
+      throw ended()
+    }
+    state = current
     return state
   }
   const page = async () => {
@@ -433,9 +557,21 @@ export function createAgentBrowser({
     blocked: since(blocked, from),
   })
 
+  async function close() {
+    if (opening) await opening.catch(() => {})
+    const current = state
+    state = null
+    if (!current) return
+    await current.context.close().catch(() => {})
+    finish(current)
+  }
+
   return {
     get open() {
       return Boolean(state)
+    },
+    get disposed() {
+      return disposed
     },
     get dir() {
       return state?.dir || null
@@ -443,10 +579,26 @@ export function createAgentBrowser({
     allowed: () => [...allowed.keys()],
     refused: () => [...refused],
     notes: () => [...notes],
-    async allowSessionOrigin(value) {
-      const origin = cleanOrigin(value)
-      if (!origin || !isLoopbackDev(origin)) throw new Error('A session origin is a loopback http origin with a port.')
+    // For the tool host's dev server supervisor only: a port that a dev
+    // server it started itself listens on. Returns the token that
+    // allowSessionOrigin takes; the agent's tools never see it. Q2/Q4 wire
+    // the caller (start_dev_server). A denied port is refused here too.
+    registerSpawned(port) {
+      if (disposed) throw ended()
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('A dev server port is a number from 1 to 65535.')
+      if (denied.has(port)) throw new Error(`Port ${port} on this machine is never opened in the agent browser.`)
+      const token = randomBytes(16).toString('hex')
+      spawned.set(token, `http://127.0.0.1:${port}`)
+      return token
+    },
+    // Adds the dev server registerSpawned() returned `token` for. Live when
+    // the browser runs, or with the next start; never a port it was not given.
+    async allowSessionOrigin(token) {
+      const origin = typeof token === 'string' ? spawned.get(token) : undefined
+      if (!origin) throw new Error('Not a dev server this session started.')
       if (!given.includes(origin)) given.push(origin)
+      // A start in progress has read `given` already, or will.
+      if (opening) await opening.catch(() => {})
       if (state) return allowOrigin(origin)
       return true
     },
@@ -523,16 +675,13 @@ export function createAgentBrowser({
     },
     // Console errors, page errors and blocked requests since the last call.
     consoleErrors() {
-      const out = { errors: errors.splice(0), blocked: blocked.splice(0) }
-      return out
+      return { errors: errors.splice(0), blocked: blocked.splice(0) }
     },
-    async close() {
-      if (opening) await opening.catch(() => {})
-      const current = state
-      state = null
-      if (!current) return
-      await current.context.close().catch(() => {})
-      finish(current)
+    close,
+    async dispose() {
+      disposed = true
+      spawned.clear()
+      await close()
     },
   }
 }
@@ -550,12 +699,31 @@ export const BROWSER_TOOL_NAMES = [
 ]
 
 const data = (tool, payload) => ({ content: [{ type: 'text', text: quoteData('agent-browser', { tool }, payload) }] })
-const failure = (error) => ({ isError: true, content: [{ type: 'text', text: clip(error?.message || error, 2000) }] })
-const handle = (fn) => async (args) => {
-  try {
-    return await fn(args || {})
-  } catch (error) {
-    return failure(error)
+// A tool error, first line only: Playwright appends a call log that can
+// carry the page's own HTML, and even the first line may quote the page,
+// so it comes back inside the untrusted element too.
+export function toolError(tool, error) {
+  const line = String(error?.message ?? error ?? 'failed')
+    .split('\n')[0]
+    .trim()
+  return {
+    isError: true,
+    content: [{ type: 'text', text: quoteData('agent-browser', { tool, outcome: 'error' }, { error: clip(line, 500) }) }],
+  }
+}
+// Every tool: arguments defaulted, errors as toolError, and Shapewall's own
+// notes about this browser (a browser without Chromium's sandbox) appended.
+function wrap(agentBrowser, tool, fn) {
+  return async (args) => {
+    let result
+    try {
+      result = await fn(args || {})
+    } catch (error) {
+      result = toolError(tool, error)
+    }
+    const notes = agentBrowser.notes?.() || []
+    if (notes.length) result = { ...result, content: [...result.content, { type: 'text', text: 'Shapewall: ' + notes.join(' ') }] }
+    return result
   }
 }
 const selectorArg = z.string().min(1).max(500).describe('A Playwright selector: CSS, text=..., role=button[name="Save"].')
@@ -575,7 +743,7 @@ export function browserTools(agentBrowser) {
         'status, title and any requests the allowlist blocked.',
       inputSchema: { url: z.string().min(1).max(2000).describe('An absolute http(s) URL on the allowlist, or a path.') },
       annotations: { readOnlyHint: false, openWorldHint: false },
-      handler: handle(async ({ url }) => data('browser_navigate', await agentBrowser.navigate(url))),
+      handler: async ({ url }) => data('browser_navigate', await agentBrowser.navigate(url)),
     },
     {
       name: 'browser_screenshot',
@@ -583,7 +751,7 @@ export function browserTools(agentBrowser) {
       description: `A PNG of the current page (the viewport, or the whole page up to ${SCREENSHOT_MAX_HEIGHT} px tall), scaled down to stay under ${SCREENSHOT_MAX_BYTES} bytes.`,
       inputSchema: { fullPage: z.boolean().optional().describe('The whole page instead of the viewport.') },
       annotations: { readOnlyHint: true, openWorldHint: false },
-      handler: handle(async ({ fullPage }) => {
+      handler: async ({ fullPage }) => {
         const shot = await agentBrowser.screenshot({ fullPage: Boolean(fullPage) })
         return {
           content: [
@@ -591,7 +759,7 @@ export function browserTools(agentBrowser) {
             { type: 'text', text: quoteData('agent-browser', { tool: 'browser_screenshot' }, { url: shot.url, scale: shot.scale }) },
           ],
         }
-      }),
+      },
     },
     {
       name: 'browser_click',
@@ -599,7 +767,7 @@ export function browserTools(agentBrowser) {
       description: 'Clicks the first element matching the selector on the current page.',
       inputSchema: { selector: selectorArg },
       annotations: { readOnlyHint: false, openWorldHint: false },
-      handler: handle(async ({ selector }) => data('browser_click', await agentBrowser.click(selector))),
+      handler: async ({ selector }) => data('browser_click', await agentBrowser.click(selector)),
     },
     {
       name: 'browser_type',
@@ -611,9 +779,8 @@ export function browserTools(agentBrowser) {
         submit: z.boolean().optional(),
       },
       annotations: { readOnlyHint: false, openWorldHint: false },
-      handler: handle(async ({ selector, text, submit }) =>
+      handler: async ({ selector, text, submit }) =>
         data('browser_type', await agentBrowser.type(selector, text, { submit: Boolean(submit) })),
-      ),
     },
     {
       name: 'browser_text',
@@ -621,7 +788,7 @@ export function browserTools(agentBrowser) {
       description: `The visible text of the page, or of the first element matching the selector (up to ${TEXT_MAX} characters). The text is the page's, untrusted.`,
       inputSchema: { selector: selectorArg.optional() },
       annotations: { readOnlyHint: true, openWorldHint: false },
-      handler: handle(async ({ selector }) => data('browser_text', await agentBrowser.text(selector || null))),
+      handler: async ({ selector }) => data('browser_text', await agentBrowser.text(selector || null)),
     },
     {
       name: 'browser_console',
@@ -629,7 +796,7 @@ export function browserTools(agentBrowser) {
       description: 'Console errors, uncaught page errors and requests the allowlist blocked since the last call.',
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: false },
-      handler: handle(async () => data('browser_console', agentBrowser.consoleErrors())),
+      handler: async () => data('browser_console', agentBrowser.consoleErrors()),
     },
     {
       name: 'browser_close',
@@ -637,10 +804,10 @@ export function browserTools(agentBrowser) {
       description: 'Closes the browser and deletes its profile. The next browser_navigate starts a fresh one.',
       inputSchema: {},
       annotations: { readOnlyHint: false, openWorldHint: false },
-      handler: handle(async () => {
+      handler: async () => {
         await agentBrowser.close()
         return { content: [{ type: 'text', text: 'Closed.' }] }
-      }),
+      },
     },
-  ]
+  ].map((tool) => ({ ...tool, handler: wrap(agentBrowser, tool.name, tool.handler) }))
 }

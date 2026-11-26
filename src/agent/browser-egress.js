@@ -31,25 +31,58 @@ export function localName(host) {
 
 const bare = (host) => String(host || '').replace(/^\[|\]$/g, '')
 
-// 'loopback', 'link-local', 'unspecified' or null for any other address.
+function ipv4Kind([a, b]) {
+  if (a === 127) return 'loopback'
+  if (a === 0) return 'unspecified'
+  if (a === 169 && b === 254) return 'link-local'
+  if (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) return 'private'
+  if (a === 100 && b >= 64 && b <= 127) return 'private' // CGNAT 100.64/10 (tailnets too)
+  return null
+}
+
+// The 16 bytes of an IPv6 address (with or without a dotted IPv4 tail), or null.
+export function ipv6Bytes(value) {
+  const ip = bare(value).toLowerCase().replace(/%.*$/, '')
+  if (net.isIP(ip) !== 6) return null
+  let text = ip
+  const tail = /(\d+\.\d+\.\d+\.\d+)$/.exec(text)
+  if (tail) {
+    const [a, b, c, d] = tail[1].split('.').map(Number)
+    text = text.slice(0, -tail[1].length) + ((a << 8) | b).toString(16) + ':' + ((c << 8) | d).toString(16)
+  }
+  const [head, rest] = text.split('::')
+  const left = head ? head.split(':') : []
+  const right = rest === undefined ? [] : rest ? rest.split(':') : []
+  const groups = rest === undefined ? left : [...left, ...Array(8 - left.length - right.length).fill('0'), ...right]
+  if (groups.length !== 8) return null
+  const out = []
+  for (const group of groups) {
+    const word = parseInt(group, 16)
+    out.push(word >> 8, word & 0xff)
+  }
+  return out
+}
+
+// 'loopback', 'link-local', 'unspecified', 'private' (RFC 1918, CGNAT
+// 100.64/10, IPv6 ULA fc00::/7) or null for a public address. An IPv4
+// address inside IPv6 (mapped ::ffff:a.b.c.d in any spelling, NAT64
+// 64:ff9b::/96, compatible ::a.b.c.d) is judged as that IPv4 address.
 export function addressKind(address) {
   const ip = bare(address).toLowerCase()
   const family = net.isIP(ip)
-  if (family === 4) {
-    const [a, b] = ip.split('.').map(Number)
-    if (a === 127) return 'loopback'
-    if (a === 0) return 'unspecified'
-    if (a === 169 && b === 254) return 'link-local'
-    return null
-  }
-  if (family === 6) {
-    if (ip === '::1') return 'loopback'
-    if (ip === '::') return 'unspecified'
-    if (/^fe[89ab]/.test(ip)) return 'link-local'
-    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(ip)
-    if (mapped) return addressKind(mapped[1])
-    return null
-  }
+  if (family === 4) return ipv4Kind(ip.split('.').map(Number))
+  if (family !== 6) return null
+  const bytes = ipv6Bytes(ip)
+  if (!bytes) return null
+  const zero = (from, to) => bytes.slice(from, to).every((byte) => byte === 0)
+  if (zero(0, 16)) return 'unspecified'
+  if (zero(0, 15) && bytes[15] === 1) return 'loopback'
+  const mapped = zero(0, 10) && bytes[10] === 0xff && bytes[11] === 0xff
+  const nat64 = bytes[0] === 0 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && zero(4, 12)
+  const compatible = zero(0, 12)
+  if (mapped || nat64 || compatible) return ipv4Kind(bytes.slice(12)) || (compatible && !mapped ? 'unspecified' : null)
+  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return 'link-local'
+  if ((bytes[0] & 0xfe) === 0xfc) return 'private'
   return null
 }
 
@@ -81,8 +114,13 @@ export async function pinHost(host, { lookup = dns.promises.lookup } = {}) {
   for (const address of list) {
     const kind = addressKind(address)
     if (kind === 'link-local' || kind === 'unspecified') return { refused: `${name} resolves to a ${kind} address (${address})` }
-    if (kind === 'loopback' && !localName(name))
-      return { refused: `${name} resolves to this machine (${address}); a public name pointing at loopback is refused` }
+    // A public name pointing inside (this machine, a private network, a
+    // tailnet) is the rebinding move; a local name may do it on purpose.
+    // The owner who means it writes the address itself as the origin.
+    if ((kind === 'loopback' || kind === 'private') && !localName(name))
+      return {
+        refused: `${name} resolves to a ${kind === 'loopback' ? 'loopback' : 'private network'} address (${address}); a public name pointing there is refused (allow the address itself instead)`,
+      }
   }
   return { address: list[0] }
 }
