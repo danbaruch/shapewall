@@ -8,14 +8,14 @@ A running `shapewall serve` watches the file and applies edits to `title`, the p
 each board (including a board's own `viewports`, `block`, `setup` and `auth`), `viewports`, `concurrency`, `capturePacing`, `timeouts`,
 `block`, `reducedMotion`, `keepVersions` and `checks` on the next refresh of the board (a `checks` edit applies to the next **Run checks**). An edit with a problem is reported
 in the serve log and the board keeps the last good config. `outputDir`, `boardUrl`, `auth`, `browser`, `liveHtml`, `agent`,
-`starterAgent`, `notifications` and `github` still need a restart (the log says so).
+`starterAgent`, `commands`, `notifications` and `github` still need a restart (the log says so).
 
 `ci` is in neither list, so an edit to it is not picked up and the log says nothing about it; `ci` is read by `shapewall ci` in its
 own run, so a running board never uses it anyway.
 
 A key Shapewall does not use (a typo like `"viewport"` for `"viewports"`, or a page key such as `waitFor` set at the top level) is
 ignored, and `shapewall doctor`, `capture` and `serve` warn about it with the key it most likely meant; the config still loads.
-Unknown keys are refused outright only inside `capturePacing`, `checks`, `setup`, `ci`, an action's options and a page's `seo`,
+Unknown keys are refused outright only inside `capturePacing`, `checks`, `setup`, `ci`, a named command, `agent.browser`, an action's options and a page's `seo`,
 plus the secret, command and sandbox keys that `agent`, `github`, notification channels and `starterAgent` refuse. A required key under the wrong case (`"baseURL"`) is an error that
 says to rename it. `$schema` is allowed anywhere.
 
@@ -50,6 +50,7 @@ says to rename it. `$schema` is allowed anywhere.
 | `github`        | object                | none                                | GitHub connect: `repo`, `boardUrl`, `labels`. See [GitHub](#github) below.                                                                                                                                                                                                                                                                                  |
 | `agent`         | object                | none                                | The board chat's model endpoint. See [Agent](#agent) below.                                                                                                                                                                                                                                                                                                 |
 | `starterAgent`  | object                | none                                | The sandboxed starter agent: who may dispatch work, tests, budgets. See [Sandboxed starter agent](starter-agent.md).                                                                                                                                                                                                                                        |
+| `commands`      | object                | none                                | Named commands (`test`, `build`, `dev`, `lint`, ...) an agent may run through Shapewall. See [Commands](#commands) below.                                                                                                                                                                                                                                   |
 | `sitemap`       | URL, file or object   | none                                | Default source for `shapewall sitemap`. See [Sitemap import](#sitemap-import).                                                                                                                                                                                                                                                                              |
 | `checks`        | object                | none                                | Defaults for page checks. Only `seo` and `budgets` are accepted. See [Checks SEO](#checks-seo) and [Checks budgets](#checks-budgets) below.                                                                                                                                                                                                                 |
 | `ci`            | object                | none                                | Capture on pull requests: threshold, pages, ignore selectors, build and serve commands. See [CI](#ci) below.                                                                                                                                                                                                                                                |
@@ -470,6 +471,47 @@ How fixes run, both off by default and also on the Agents page of the Workspace 
 `branchMode` (`true` runs an agent CLI's fixes on a branch of their own) with `branchPrefix` (default `"shapewall/"`), see
 [Work on a branch](agents.md#work-on-a-branch); and `batchFixes` (`{ "enabled": true, "max": 5 }`, `max` from 1 to 20), see
 [Fix several comments at once](agents.md#fix-several-comments-at-once).
+
+What an agent's tools may reach (1.4.0, see [what each turn may do](agent-hardening.md#what-each-turn-may-do)):
+
+- `browser.allow`: origins the agent's throwaway browser may load besides the app's own addresses (every `baseUrl` and `publicUrl`
+  of the config, its boards and environments). Up to 40 exact http(s) origins, such as `"https://staging.example.com"`: no path, no
+  user or password. The machine has the last word: its own `browser` setting switches the browser off whatever the config says, and
+  on a machine that gives the browser a login (`browserAuth` or `browserProfile`) these extra origins are left out.
+- `fixIn`: `"copy"` (the default, every fix in a fix copy of its own) or `"checkout"`, which lets a local board's owner keep solo
+  fixes in this checkout. Every other tier and every hosted path still uses a fix copy.
+
+```json
+{ "agent": { "browser": { "allow": ["https://staging.example.com"] }, "fixIn": "copy" } }
+```
+
+## Commands
+
+```json
+{
+  "commands": {
+    "test": { "run": "npm test", "inputs": ["package.json", "package-lock.json", "test/**"] },
+    "build": "npm run build",
+    "dev": { "run": "npm run dev -- --port $PORT", "ready": "http://127.0.0.1:$PORT" },
+    "lint": { "run": "npm run lint", "mutating": false }
+  }
+}
+```
+
+The commands an agent may run by name, through Shapewall (never through its own shell). Up to 20, each named with lowercase letters,
+digits and dashes. A string is short for `{ "run": "..." }`. Each takes:
+
+| Key        | Type     | Default                                    | Notes                                                                                                                               |
+| ---------- | -------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `run`      | string   | required                                   | One command line, run without a shell: no pipes, `;`, `&`, redirects or backticks, and no `$` except `$PORT`. Up to 500 characters. |
+| `inputs`   | string[] | manifests, lockfiles, configs, named files | Project-relative paths or globs whose content an approval covers: when the agent changes one, the next run asks again. Up to 50.    |
+| `mutating` | boolean  | `true`                                     | `false`: the command only reads (a linter, a type check). Hosted chat runs only these, and only on its owner's turns.               |
+| `args`     | boolean  | `false`                                    | `true`: the agent may add arguments to it.                                                                                          |
+| `ready`    | URL      | none                                       | For a dev server: the loopback URL that answers once it is up. `$PORT` is the free port Shapewall picks.                            |
+
+Whether a command runs at once or waits for a card on the board depends on who wrote the turn and what the machine running the agent
+allows, not on this file: see [what each turn may do](agent-hardening.md#what-each-turn-may-do). `starterAgent.testCommand` still
+works; `commands.test` wins when both are set. A change needs a restart of `serve`.
 
 ## Auth
 

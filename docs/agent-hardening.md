@@ -451,6 +451,76 @@ What to do:
 - **Leave `--auto` off** unless everyone who may press Fix is someone you would let edit the project unseen. Even then the fix
   waits on the machine until someone looks at its whole diff.
 
+### What each turn may do
+
+From 1.4.0 one function on the machine that runs the agent decides what it may do on each turn (`src/agent/capabilities.js`):
+which tools, whether commands run at once or wait for a card, whether it gets a shell and a browser. The console's "What it can do"
+card, `shapewall agent status` and the block the agent gets after its instruction files are three views of that one answer. This
+release builds the decision and its three renderings; the tools that use it (named commands, the sandboxed shell, the throwaway
+browser) arrive with the rest of 1.4.0.
+
+It is decided by **who wrote the turn**, not by whether the board is local or hosted:
+
+| Tier     | Who wrote the text that reaches the turn                                               | How it is reached                                                 |
+| -------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| **solo** | only the person who connected the agent (on a local board: its owner)                  | the agent's audience is the owner, and every author is the owner  |
+| **team** | only people on this machine's trusted list (and the owner)                             | the machine names a team (`trustTeam`), and every author is on it |
+| **open** | anyone else, a share-link guest, or a turn the server's trust block does not vouch for | every other turn                                                  |
+
+A thread that once carried text from outside the list keeps the tier that text allowed. What each tier gets by default:
+
+| What                                                            | solo                                                     | team                                            | open                        |
+| --------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------- | --------------------------- |
+| Named commands (config `commands`)                              | run, asked again when the command or its inputs change   | the same                                        | each after a card           |
+| Shell                                                           | a full shell in the fix copy, inside an OS sandbox       | exact commands only (`trustTeamShell` for more) | exact commands, each a card |
+| Browser                                                         | a throwaway headless one, limited to the app's addresses | the same                                        | the same                    |
+| Logged-in browser (`browserAuth`, `browserProfile`)             | opt-in                                                   | opt-in (`browserProfileTeam`)                   | never                       |
+| Extensions from the agent config folder                         | on if there is one                                       | only if every author is in `extensionsFor`      | never                       |
+| Automatic memory, editing its own instructions, your own Chrome | never                                                    | never                                           | never                       |
+
+Hosted chat answers only: no edits, and on solo turns only the commands marked `"mutating": false` and the browser. No OS sandbox on
+the machine (Windows, no bubblewrap) means no full shell: commands fall back to a card each, and the line says why.
+
+**The machine sets the ceiling, the server can only lower it.** A project's agent policy on the server (Workspace Console, Agent
+policy) can set `maxTier` (`"solo"`, `"team"` or `"open"`), `shell: false` and `browser: false`, for the project and per board; a
+board's own setting can only narrow the project's. The server sends this at hello and again with every turn, and the machine applies
+the narrower of the two. Nothing the server sends can add a capability: a test feeds the resolver random server input and checks
+that every line stays at or below what it was without it.
+
+**The machine's keys** (`agent-policy.json` version 2, beside the version 1 keys above; the same keys go in a project's `capabilities`
+entry in `agents.json` for a local board):
+
+| Key                  | Values                                                      | Default        | Narrowest (an unknown value) |
+| -------------------- | ----------------------------------------------------------- | -------------- | ---------------------------- |
+| `trustTeam`          | `"none"`, `"members"`, or a list of handles                 | `"none"`       | `"none"`                     |
+| `trustTeamShell`     | `true` / `false`                                            | `false`        | `false`                      |
+| `shell`              | `"sandboxed"`, `"commands"` (named and exact only), `"off"` | `"sandboxed"`  | `"off"`                      |
+| `shellNetwork`       | `"registries"`, `"open"`, `"none"`                          | `"registries"` | `"none"`                     |
+| `shellUnsandboxed`   | `true` / `false` (solo only, shown loudly)                  | `false`        | `false`                      |
+| `commandApproval`    | `"tier"` (as in the table), `"always"` (a card each)        | `"tier"`       | `"always"`                   |
+| `browser`            | `"on"` / `"off"`                                            | `"on"`         | `"off"`                      |
+| `browserAllow`       | exact http(s) origins, up to 40                             | `[]`           | `[]`                         |
+| `browserAuth`        | a recorded auth name                                        | none           | none                         |
+| `browserProfile`     | an absolute folder, never a real browser's own profile      | none           | none                         |
+| `browserProfileTeam` | `true` / `false`                                            | `false`        | `false`                      |
+| `extensionsFor`      | `"owner"` and handles                                       | `["owner"]`    | `[]`                         |
+| `allowTool`          | exact `mcp__server__tool` names, up to 20                   | `[]`           | `[]`                         |
+| `handoffHops`        | 0 to 2                                                      | `0`            | `0`                          |
+
+A key that is missing reads as its default; a key that is there with a value this version does not know reads as its narrowest, and
+the connector names it. A missing or malformed trust block reads as open. In `agents.json` a key it does not know at all is an
+error for that project, so a typo cannot fall back to a wider default.
+
+**Upgrading from version 1.** A version 1 `agent-policy.json` is read as exactly what it allowed before: no shell, no browser, no
+extensions, and a card for every command (`shell: "commands"` with `commandApproval: "always"` where it listed exact commands,
+`shell: "off"` otherwise). The next time `agent connect` saves the file, every entry in it is written back as version 2 with those
+values spelled out, so an entry nobody touched does not pick up the new defaults. A connection the file never had (a new name, or
+one that never changed a flag) gets the version 2 defaults above.
+
+**What the board learns.** At hello the machine sends a summary per tier, for chat and for Fix with: one on, ask or off per line,
+no commands, handles, folders or origins. The server keeps it for display only, cleaned to the known lines (your own Chrome is
+always off), and an older hello of the same process arriving late does not replace a newer one.
+
 ### What Shapewall cannot do
 
 - **The agent's own tools.** An ACP agent is still a program running as you. Claude Code's Bash and Edit, Codex's sandbox, goose's
