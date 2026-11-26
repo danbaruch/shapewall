@@ -20,6 +20,7 @@
 // sandbox mode, network, read only) and never for an open turn or a command
 // outside the OS sandbox (exec-mcp.js mayRun).
 
+import { ownersComment } from './watch-capabilities.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { hostPlatform, namedCommands, resolveCapabilities } from './capabilities.js'
@@ -333,6 +334,7 @@ export function localOwnerOnly({ ownerWrites, kind, thread = null, comment = nul
   if (kind === 'chat') return thread?.owner === 'owner'
   const gated = ownerGate && acp && !accounts
   if (kind === 'board') return gated
-  if (kind === 'comment') return gated && comment?.byOwner === true && (comment.replies || []).every((reply) => reply?.agent === true)
+  // The same rule as every other "is this the owner's" check (Q7 A3).
+  if (kind === 'comment') return gated && ownersComment(comment)
   return false
 }

@@ -401,9 +401,12 @@ export function cleanCapabilityKeys(entry, { defaults = CAPABILITY_DEFAULTS, war
   bool('browserNoSandbox', "off (the browser never starts without Chromium's own sandbox)")
   list('extensionsFor', (item) => (item === 'owner' ? 'owner' : cleanHandle(item)), TRUST_TEAM_MAX, 'empty (no extensions)')
   list('allowTool', (item) => (typeof item === 'string' && TOOL_RE.test(item) ? item : null), ALLOW_TOOL_MAX, 'empty')
+  // Handing work to another agent is not built yet (Q7 F3): only 0 is a
+  // value this version takes; any other reads as 0, and is said.
   if (!has('handoffHops')) out.handoffHops = defaults.handoffHops
-  else if (Number.isInteger(object.handoffHops) && object.handoffHops >= 0 && object.handoffHops <= HANDOFF_HOPS_MAX)
-    out.handoffHops = object.handoffHops
+  else if (object.handoffHops === 0) out.handoffHops = 0
+  else if (Number.isInteger(object.handoffHops) && object.handoffHops > 0 && object.handoffHops <= HANDOFF_HOPS_MAX)
+    narrow('handoffHops', '0 (handing work to another agent is not available yet)')
   else narrow('handoffHops', '0 (no handoff)')
   return out
 }
@@ -489,6 +492,14 @@ export function tierOf({ trust, audience, machine = {}, server = null } = {}) {
     } else why = block.authors.every((author) => author.owner) ? 'audience_not_owner' : 'outside_authors'
     if (block.taint && tierRank(block.taint) < tierRank(tier)) {
       tier = block.taint
+      why = 'thread_taint'
+    }
+    // A thread state that says the thread carried text nobody vouches for
+    // caps the turn at "open", whatever its authors say (Q7 N3, defense in
+    // depth: the server folds that state into the authors as well). A trust
+    // block without a thread state is not read as tainted here.
+    if (trust.thread !== undefined && block.thread.tainted && tier !== 'open') {
+      tier = 'open'
       why = 'thread_taint'
     }
   }
@@ -988,7 +999,9 @@ function resolveForTier(
     author.owner ? m.extensionsFor.includes('owner') : author.handle !== null && m.extensionsFor.includes(author.handle)
   if (!known) off('extensions', 'unknown_path')
   else if (!EXTENSION_PATHS.includes(where)) off('extensions', 'path_no_extensions')
-  else if (tier === 'open') off('extensions', 'open_tier_extensions')
+  // A tainted thread is open for that reason (tierOf, Q7 N3): said as such.
+  else if (tier === 'open')
+    off('extensions', block && trust?.thread !== undefined && block.thread.tainted ? 'thread_tainted' : 'open_tier_extensions')
   // Only Claude Code's hardened sessions take them (acp.js withExtensions):
   // said here, so the card, `agent status` and the prompt read one answer.
   else if (agent && agent.kind !== 'claude') off('extensions', 'agent_not_claude')
@@ -1021,9 +1034,10 @@ function resolveForTier(
   else if (hosted && !m.remote) off('push', 'machine_remote_none')
   else push = { on: true, card: true, remote: hosted ? m.remote : null }
 
-  // Handing the work to another agent: off unless this machine allows hops.
-  const hops = known ? Math.min(m.handoffHops, HANDOFF_HOPS_MAX) : 0
-  if (!hops) off('handoff', known ? 'machine_handoff_none' : 'unknown_path')
+  // Handing the work to another agent: not built yet, so off on every path
+  // whatever the machine says (Q7 F3); the panel never says "on" for it.
+  const hops = 0
+  off('handoff', known ? 'machine_handoff_none' : 'unknown_path')
 
   const narrowed = []
   if (narrowing) {

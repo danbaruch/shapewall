@@ -694,6 +694,10 @@ export function createApp({
   // Who changed a comment, for its events: the name the board sends (the
   // commenter's saved name), like the author of a reply. Display text only.
   const actorOf = (author) => (typeof author === 'string' ? author : null)
+  // Whose text a comment change is (store.js updateComment `by`): the owner's,
+  // the owner's agent's (the agent header from the owner's own machine), or
+  // nobody's the server can vouch for.
+  const textBy = (req) => (!ownerRequest(req) ? null : fromAgent(req) ? 'agent' : 'owner')
   app.get(
     '/api/boards/:id/comments',
     withBoard((req, res, board) => {
@@ -722,7 +726,7 @@ export function createApp({
         board.id,
         req.params.cid,
         { body, status, resolution, agentStatus, fixRef },
-        { actor: actorOf(author) },
+        { actor: actorOf(author), by: textBy(req) },
       )
       res.json({ comment })
     }),
@@ -736,7 +740,7 @@ export function createApp({
         author,
         images,
         drawing,
-        ...(fromAgent(req) ? { agent: true } : {}),
+        ...(fromAgent(req) ? { agent: true, ...(ownerRequest(req) ? {} : { unvouched: true }) } : {}),
       })
       res.status(201).json({ comment, reply })
     }),
@@ -760,7 +764,7 @@ export function createApp({
           board.id,
           req.params.cid,
           { status: 'resolved', resolution, fixRef },
-          { actor: actorOf(author) },
+          { actor: actorOf(author), by: textBy(req) },
         ),
       })
     }),

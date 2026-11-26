@@ -162,7 +162,7 @@ export const SECTIONS = {
       --as NAME             which connection (default "default")   --json  machine-readable
   agent set KEY VALUE       change one line without reconnecting, for example: agent set browser off,
                             agent set shell commands, agent set trust-team ada,bo. With --remote URL (and --as NAME)
-                            a connected agent's setting, read when it connects again; without it, this project's
+                            a connected agent's setting (narrower: from its next turn); without it, this project's
                             local board, read by the next turn. "agent status" lists the keys under each line.
                             Extensions: agent set agent-config DIR (a local board's skills and MCP servers),
                             agent set extensions-for owner,HANDLE, agent set allow-tool mcp__SERVER__TOOL

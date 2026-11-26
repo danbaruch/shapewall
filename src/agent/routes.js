@@ -392,10 +392,14 @@ export function agentRouter({
         // Files capture runs or logs in with: a write needs an approval card.
         sensitivePaths: () => authFiles(config),
         mcpServersFor: ownerWrites
-          ? (thread) =>
+          ? (thread, { sessionKey = null } = {}) =>
               ownerMcpServers(config, thread.split('/')[0], {
                 allowCapture,
                 env,
+                // A session for turns above "open" (its key is the turn's
+                // tier, turnTools): the board reads give the owner's own
+                // comments only (Q7 N1).
+                ownersOnly: sessionKey !== 'open',
                 // Whose replies these are, so they are signed with its name.
                 agent: {
                   which: live.profileId || (['flag', 'env'].includes(live.sources?.acpCommand) ? 'fixed' : 'default'),
@@ -747,7 +751,11 @@ export function agentRouter({
       // taints the thread for good, so taking that reply away again never
       // makes it clean.
       let trust = stored.trust
-      if (!readThreadTrust(trust).tainted && quotesOutside({ config, board, threadId, messages: stored.messages })) {
+      // The same answer decides the turn's tier (Q7 F1): a prompt that
+      // quotes someone else's comment is not the owner's alone, so the turn
+      // is "open" (an outside author), whatever kind of thread it is in.
+      const quoted = quotesOutside({ config, board, threadId, messages: stored.messages, reachable: shared || Boolean(accountUser) })
+      if (!readThreadTrust(trust).tainted && quoted) {
         try {
           await markThreadTainted(config, board.id, threadId, 'outside')
           stored = readThread(config, board.id, threadId)
@@ -764,15 +772,20 @@ export function agentRouter({
         thread: trust,
         key,
         agent: localAgentOf(config, current),
-        owner: localOwnerOnly({
-          ownerWrites,
-          kind,
-          thread: stored,
-          comment,
-          ownerGate,
-          accounts: Boolean(accountUser),
-          acp: backend.id === 'acp',
-        }),
+        // A thread that ever carried someone else's text (a board read, a
+        // mention, a reply) stays open for good, as on a hosted board (Q7 N1).
+        owner:
+          !quoted &&
+          !readThreadTrust(trust).tainted &&
+          localOwnerOnly({
+            ownerWrites,
+            kind,
+            thread: stored,
+            comment,
+            ownerGate,
+            accounts: Boolean(accountUser),
+            acp: backend.id === 'acp',
+          }),
         shared,
         comment: kind !== 'chat',
         root,
@@ -807,7 +820,8 @@ export function agentRouter({
         relay = null
       }
     }
-    return { tools, relay, mcpServers, extensions: tools?.extensions || null }
+    // The session a turn may reuse is one of the same tier (acp.js sameSession, Q7 F2).
+    return { tools, relay, mcpServers, extensions: tools?.extensions || null, sessionKey: tools?.caps?.tier || null }
   }
   const endTurnTools = async (key, { tools, relay }) => {
     if (relay && relays.get(key) === relay) await relay.setHost(null).catch(() => {})
@@ -1253,7 +1267,7 @@ export function agentRouter({
         const key = [board.id, threadId].join('/')
         const cards = {}
         res.locals.run.cards = cards
-        const { tools, relay, mcpServers, extensions } = await turnTools({
+        const { tools, relay, mcpServers, extensions, sessionKey } = await turnTools({
           req,
           board,
           threadId,
@@ -1291,14 +1305,20 @@ export function agentRouter({
             agentName: current.label || null,
             capabilities: tools?.prompt || '',
             quoteOthers: !tools || tools.caps.tier === 'open',
+            reachable: shared || Boolean(accountUser),
+            sessionKey,
             mcpServers,
             execHost: backend.id === 'acp' ? null : tools?.exec?.host || null,
             cards,
             // Skills and MCP servers from the agent config folder, on a clean owner's turn only.
             extensions: backend.id === 'acp' ? extensions : null,
-            // A board tool brought other people's text in: the thread is tainted for good.
-            onTaint: (why) =>
-              markThreadTainted(config, board.id, threadId, why).catch((error) => log(`chat: taint not saved: ${error.message}`)),
+            // A board tool brought other people's text in: the thread is tainted for good,
+            // and on a turn above "open" an ACP agent's commands and browser (the
+            // thread's relay) are off for the rest of the turn (Q7 N1).
+            onTaint: (why) => {
+              if (tools && tools.caps.tier !== 'open') relay?.setHost(null).catch(() => {})
+              return markThreadTainted(config, board.id, threadId, why).catch((error) => log(`chat: taint not saved: ${error.message}`))
+            },
           })
         } finally {
           await endTurnTools(key, { tools, relay })
@@ -1955,6 +1975,7 @@ export function agentRouter({
             signal: admission.signal,
             mcpServers: prepared.mcpServers,
             extensions: prepared.extensions || null,
+            sessionKey: prepared.sessionKey || null,
           })
         } finally {
           await endTurnTools(key, prepared)

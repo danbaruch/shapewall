@@ -216,6 +216,8 @@ export function feedbackItem(context, comment) {
         ...(reply.guest ? { authorGuest: true } : {}),
         ...(reply.handle ? { authorHandle: reply.handle } : {}),
         ...(reply.agent ? { authorAgent: true } : {}),
+        // An agent header the server did not see the owner's machine send.
+        ...(reply.unvouched ? { authorUnvouched: true } : {}),
         body: reply.body,
         createdAt: reply.createdAt,
         drawing: drawn.drawing,

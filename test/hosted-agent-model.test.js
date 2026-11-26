@@ -1230,6 +1230,36 @@ test('an older watcher nobody used in 90 days is hidden, not deleted; the Tokens
   for (const made of [dusty, recent, quiet]) assert.equal((await api(ada, 'DELETE', consoleUrl(`/tokens/${made.id}`))).status, 200)
 })
 
+test('Q7 F8: an agent hidden, used again and then quiet once more is said hidden again', async () => {
+  const days = (n) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString()
+  const made = await makeToken(ada, 'Comeback')
+  hosted.db.prepare('DELETE FROM agents WHERE token_id = ?').run(made.id)
+  const age = (n) => {
+    hosted.db.prepare('UPDATE api_tokens SET last_used_at = ?, created_at = ? WHERE id = ?').run(days(n), days(n + 300), made.id)
+    hosted.db.prepare('UPDATE agents SET last_seen_at = ?, created_at = ? WHERE token_id = ?').run(days(n), days(n + 300), made.id)
+  }
+  const listed = async () => (await consoleAgents()).agents.some((agent) => agent.name === 'Comeback')
+  const hidden = (id) => hosted.db.prepare("SELECT at FROM audit_log WHERE action = 'agent_hidden' AND target = ? ORDER BY id").all(id)
+  assert.equal((await tokenCall(hosted, made.token, 'GET', '/api/v1/project')).status, 200)
+  const row = hosted.db.prepare('SELECT id FROM agents WHERE token_id = ?').get(made.id)
+  // Quiet for 200 days: hidden, said once however often it is listed.
+  age(200)
+  assert.equal(await listed(), false)
+  await consoleAgents()
+  assert.equal(hidden(row.id).length, 1)
+  // That was long ago; it came back since (used 100 days ago), and has been quiet again for 100 days.
+  hosted.db.prepare("UPDATE audit_log SET at = ? WHERE action = 'agent_hidden' AND target = ?").run(days(150), row.id)
+  assert.equal((await tokenCall(hosted, made.token, 'GET', '/api/v1/project')).status, 200)
+  assert.equal(await listed(), true, 'used again: listed')
+  age(100)
+  assert.equal(await listed(), false)
+  await consoleAgents()
+  assert.equal(hidden(row.id).length, 2, 'hidden again, and said again')
+  await consoleAgents()
+  assert.equal(hidden(row.id).length, 2, 'once for this time')
+  assert.equal((await api(ada, 'DELETE', consoleUrl(`/tokens/${made.id}`))).status, 200)
+})
+
 test('a token without the claim scope is not an agent and is not routed: it reads every comment, as before', async () => {
   const reader = await makeToken(ada, 'Reporter', ['read', 'reply', 'status'])
   const fixerAgent = await agentNamed('Fixer')

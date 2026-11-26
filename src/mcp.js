@@ -53,6 +53,10 @@ const failure = (message) => ({ content: [{ type: 'text', text: message }], isEr
 // Comment lists and comments go out with the trust fields first, like
 // `comments --json`: their text is data from the people on the board and captured pages.
 const untrusted = (value) => json(untrustedJson(value))
+// A comment (feedback.js feedbackItem) whose every word is the local owner's:
+// made by the owner (byOwner, store.js createComment), every reply the agent's.
+export const ownersItem = (item) =>
+  item?.byOwner === true && (item.replies || []).every((reply) => reply?.authorAgent === true && reply.authorUnvouched !== true)
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 export const SCREENSHOT_MAX = 32 * 1024 * 1024
@@ -203,6 +207,11 @@ export function createMcpServer({
   fixServer = null,
   // The clock "today" is read from (tests set it).
   now = () => Date.now(),
+  // The board's own agent on a turn above "open" (owner-mcp.js, Q7 N1):
+  // list_comments and get_comment give the owner's own comments only and
+  // count the rest, as the turn's prompt does (run.js modelMessages
+  // quoteOthers), so other people's text never reaches a solo turn.
+  ownersOnly = false,
 }) {
   const signed = (author) => ({ author: (agentAuthor ? agentAuthor() : author) || 'agent', agent: true })
   const server = new McpServer(
@@ -253,7 +262,21 @@ export function createMcpServer({
     },
     tool(({ board }) => {
       const target = boardFor(board)
-      return json({ board: boardRef(target), journeys: listJourneys(config, target) })
+      // A journey made on the board is anyone's who reaches it: above "open"
+      // its words (name, description, fork labels) are not shown, only the
+      // pages it goes through (Q7 audit).
+      const journeys = listJourneys(config, target).map((journey) =>
+        ownersOnly && journey.source === 'board'
+          ? {
+              id: journey.id,
+              source: journey.source,
+              pages: journey.pages,
+              branching: journey.branching,
+              withheld: 'made on the board: its name, description and fork labels are not shown on this turn',
+            }
+          : journey,
+      )
+      return json({ board: boardRef(target), journeys })
     }),
   )
 
@@ -310,8 +333,12 @@ export function createMcpServer({
         comments = comments.filter((item) => ids.has(item.page?.id || item.variant?.pageId))
       }
       if (agentStatus) comments = comments.filter((item) => (item.agentStatus || 'none') === agentStatus)
+      // Above "open": the owner's own comments only, the rest counted (Q7 N1).
+      const withheld = ownersOnly ? comments.filter((item) => !ownersItem(item)).length : 0
+      if (ownersOnly) comments = comments.filter(ownersItem)
       const listed = narrowComments(comments, { author: who, range, q: q ?? null, limit, cursor: cursor ?? null })
       return untrusted({
+        ...(withheld ? { notShown: `${withheld} comment${withheld === 1 ? '' : 's'} by other people, not shown on this turn` } : {}),
         ...report,
         ...statedFilters({ author: who, range, q, page, pageName }),
         total: listed.total,
@@ -398,6 +425,8 @@ export function createMcpServer({
     tool(({ board, id, image = 'crop' }) => {
       const target = boardFor(board)
       const item = feedbackItem(feedbackContext(config, target), getComment(config, target.id, id))
+      // Above "open": someone else's comment (or one with their reply) is not shown (Q7 N1).
+      if (ownersOnly && !ownersItem(item)) return json({ id: item.id, withheld: 'by someone other than the owner, not shown on this turn' })
       const result = json(commentJson(target, { ...item, link: links.comment(target.id, item) }))
       // files.screenshot comes from resolveFile (allowlisted name inside the board folder) or is null.
       if (image !== 'none' && item.files.screenshot) {
@@ -695,7 +724,7 @@ export function createMcpServer({
           target.id,
           id,
           { status: 'resolved', resolution: note, agentStatus: 'done', ...(fixRef ? { fixRef } : {}) },
-          { actor: 'agent' },
+          { actor: 'agent', by: 'agent' },
         )
         return json({
           id: comment.id,

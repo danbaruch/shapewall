@@ -1272,10 +1272,12 @@ test('capability summary: what changed between two hellos, line by line', () => 
   assert.ok(changed.every((item) => item === 'team' || /^(chat|fix)\.(solo|team|open)\.[a-z]+$/.test(item)))
   assert.ok(summaryChanges(null, wide).length > 0)
   assert.ok(summaryChanges(narrow, { ...narrow, team: 'members' }).includes('team'))
-  // The handoff line is in every view.
+  // The handoff line is in every view, and off: handing work on is not built
+  // yet, so no machine setting turns it on (Q7 F3).
   const caps = resolve('solo', 'hosted-fix', PLATFORMS['linux sandbox'], { machine: optIn({ approvals: 'owner', handoffHops: 2 }) })
-  assert.equal(lineStates(caps).handoff, 'on')
-  assert.ok(toCli(caps).some((line) => line.includes('at most 2 hops')))
+  assert.equal(lineStates(caps).handoff, 'off')
+  assert.equal(caps.handoff.hops, 0)
+  assert.ok(!toCli(caps).some((line) => line.includes('hops deep')))
   assert.match(toPrompt(caps), /Hand off to another agent/)
   assert.ok('handoff' in wide.fix.solo)
   // A machine that sends no handoff line (older) reads as unknown on the server, not off.

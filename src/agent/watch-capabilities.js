@@ -49,4 +49,5 @@ export function writeCapabilitiesFile(dir, id, caps) {
 }
 
 // Whether a local comment is all its owner's words (watch.js).
-export const ownersComment = (comment) => comment?.byOwner === true && (comment.replies || []).every((reply) => reply?.agent === true)
+export const ownersComment = (comment) =>
+  comment?.byOwner === true && (comment.replies || []).every((reply) => reply?.agent === true && reply.unvouched !== true)

@@ -129,13 +129,17 @@ test("a local owner's own chat gets the folder's extensions; someone else's comm
   const theirs = `comment-${entry.other.id}`
   assert.ok(!hasExtensions(await sessionOf(entry, theirs)))
 
-  // Mid-turn: a board tool's result comes in, the extension tool is refused, the thread is tainted.
+  // Mid-turn: a board read on a solo turn. Its board server gives the owner's
+  // own comments only (owner-mcp.js ownersOnly, Q7 N1), so nobody else's text
+  // comes in: the extension tool is still allowed and the thread stays clean.
+  // (acp.js still refuses them after a board read on a server that is not
+  // limited this way: such a read taints the thread.)
   const tool = 'chat-cccccccccccccccc'
   assert.ok(hasExtensions(await sessionOf(entry, tool)))
-  const refused = await send(entry, tool, { text: 'extcall mcp__brain__search mcp__shapewall__list_comments' })
-  assert.match(refused.text, /extcall mcp__brain__search: reject/)
-  assert.equal(readThread(entry.config, 'sample', tool).trust.tainted, true)
-  assert.ok(!hasExtensions(await sessionOf(entry, tool)))
+  const allowed = await send(entry, tool, { text: 'extcall mcp__brain__search mcp__shapewall__list_comments' })
+  assert.match(allowed.text, /extcall mcp__brain__search: allow/)
+  assert.equal(readThread(entry.config, 'sample', tool).trust.tainted, false)
+  assert.ok(hasExtensions(await sessionOf(entry, tool)))
 })
 
 // Review of PR #41, F1: a person mention quotes that person's open comments

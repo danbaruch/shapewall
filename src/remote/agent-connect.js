@@ -573,6 +573,8 @@ export async function agentConnect(
   process.once('SIGINT', stop)
   process.once('SIGTERM', stop)
   const remote = createRemote({ origin, token, source, fetchImpl })
+  // What the policy file said that was not understood, said once while this runs.
+  const warnedAgain = new Set()
   let ended = null
   try {
     ended = await runAgentLink({
@@ -596,6 +598,18 @@ export async function agentConnect(
       },
       hello: { kind, machine: os.hostname().split('.')[0] || 'this computer', version: VERSION, maxTurns: concurrency },
       policy,
+      // `agent set` while this runs: read again before each turn, and only
+      // a narrower value applies before the next connect (agent-link.js).
+      reloadPolicy: () => {
+        const read = readMachinePolicy(origin, slug, env, {
+          warn: (text) => {
+            if (warnedAgain.has(text)) return
+            warnedAgain.add(text)
+            log(`Not understood, so read as the narrowest setting: ${text}`)
+          },
+        })
+        return COMMANDS_PROVEN.includes(kind) ? read : { ...read, commands: [], auto: read.auto.filter((item) => item !== 'commands') }
+      },
       remote,
       takeover: Boolean(flags.takeover),
       signal: controller.signal,
