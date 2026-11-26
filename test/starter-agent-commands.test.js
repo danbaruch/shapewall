@@ -97,7 +97,7 @@ test('starterCapabilities: commands from the checkout config, a card each on ope
     starterAgent: { trusted: ['dan'], testCommand: 'node other-tests.js' },
     commands: {
       test: 'node t.js',
-      build: { run: 'node b.js', inputs: ['b.config.js'] },
+      build: { run: 'node b.js', inputs: ['b.options.js'] },
       dev: 'node server.js',
       lint: { run: 'node l.js', mutating: false },
     },
@@ -121,7 +121,7 @@ test('starterCapabilities: commands from the checkout config, a card each on ope
       ['lint', false],
     ],
   )
-  assert.deepEqual(team.commands.find((item) => item.name === 'build').inputs, ['b.config.js'])
+  assert.deepEqual(team.commands.find((item) => item.name === 'build').inputs, ['b.options.js'])
   // The config's loopback baseUrl is the container itself there: not opened. The
   // public origin is, because the egress allowlist has its host and port.
   assert.deepEqual(team.browser, { allow: ['https://app.example.com'], allowNoSandbox: true })
@@ -151,7 +151,7 @@ test('starterCapabilities: commands from the checkout config, a card each on ope
 function commandProject(name) {
   const root = fs.realpathSync(tempDir(name))
   fs.writeFileSync(path.join(root, 'package.json'), '{}\n')
-  fs.writeFileSync(path.join(root, 'b.config.js'), 'module.exports = {}\n')
+  fs.writeFileSync(path.join(root, 'b.options.js'), 'module.exports = {}\n')
   fs.writeFileSync(
     path.join(root, 'b.js'),
     "require('fs').mkdirSync('dist', { recursive: true }); require('fs').writeFileSync('dist/out.txt', 'built')\n",
@@ -162,7 +162,7 @@ function commandProject(name) {
 }
 const COMMANDS = [
   { name: 'test', argv: ['node', '-e', 'process.exit(0)'], inputs: null, mutating: true, args: false, ready: null, needsCard: false },
-  { name: 'build', argv: ['node', 'b.js'], inputs: ['b.config.js'], mutating: true, args: false, ready: null, needsCard: false },
+  { name: 'build', argv: ['node', 'b.js'], inputs: ['b.options.js'], mutating: true, args: false, ready: null, needsCard: false },
   { name: 'lint', argv: ['node', 'l.js'], inputs: null, mutating: false, args: false, ready: null, needsCard: false },
   { name: 'gen', argv: ['node', 'gen.js'], inputs: null, mutating: true, args: false, ready: null, needsCard: false },
 ]
@@ -206,21 +206,21 @@ test('the re-ask rule: a changed input, a file a command changed, a shell comman
   // A changed input of build (its `inputs`): asked, and denied means not run.
   let { asked, rpc } = asking(false)
   let tools = createTools({ root, rpc, commands: COMMANDS, shell: true, remainingMs: () => 60000 })
-  await tools.run({ name: 'write_file', args: { path: 'b.config.js', content: 'module.exports = { evil: true }\n' } })
+  await tools.run({ name: 'write_file', args: { path: 'b.options.js', content: 'module.exports = { evil: true }\n' } })
   let result = await tools.run({ name: 'run_named_command', args: { name: 'build' } })
   assert.equal(result.ok, false)
   assert.match(result.text, /Not run/)
   assert.equal(asked.length, 1)
   assert.equal(asked[0].params.command, 'node b.js')
-  assert.match(asked[0].params.reason, /changed b\.config\.js, which decides what the "build" command runs/)
+  assert.match(asked[0].params.reason, /changed b\.options\.js, which decides what the "build" command runs/)
   assert.equal(fs.existsSync(path.join(root, 'dist', 'out.txt')), false, 'not run')
-  // lint does not depend on b.config.js: runs without asking.
+  // lint does not depend on b.options.js: runs without asking.
   assert.equal((await tools.run({ name: 'run_named_command', args: { name: 'lint' } })).ok, true)
   assert.equal(asked.length, 1)
   // Approved: runs.
   ;({ asked, rpc } = asking(true))
   tools = createTools({ root, rpc, commands: COMMANDS, shell: true, remainingMs: () => 60000 })
-  await tools.run({ name: 'edit_file', args: { path: 'b.config.js', oldText: 'evil', newText: 'fine' } })
+  await tools.run({ name: 'edit_file', args: { path: 'b.options.js', oldText: 'evil', newText: 'fine' } })
   result = await tools.run({ name: 'run_named_command', args: { name: 'build' } })
   assert.equal(result.ok, true, result.text)
   assert.equal(fs.readFileSync(path.join(root, 'dist', 'out.txt'), 'utf8'), 'built')
@@ -614,4 +614,32 @@ test('a run: the checkout config decides the commands, the container offers them
   const devText = JSON.stringify(stub.calls[2].body.messages.at(-1))
   assert.match(devText, /Your browser tools can open http:\/\/127\.0\.0\.1:\d+/)
   assert.equal(getComment(config, 'site', comment.id).agentStatus, 'needs-human')
+})
+
+test('Q7 C6: a dev server that exits on its own leaves the browser allowlist at once, not only at stop', posix, async (t) => {
+  const root = devProject('starter-dev-quit')
+  fs.writeFileSync(
+    path.join(root, 'server.js'),
+    "require('http').createServer((q, r) => { r.end('bye'); if (q.url === '/quit') setTimeout(() => process.exit(0), 20) }).listen(Number(process.env.PORT), '127.0.0.1')\n",
+  )
+  const browser = createAgentBrowser({
+    browser: { on: true, allow: [], auth: null, profile: null, allowNoSandbox: false, realChrome: false },
+    tmpRoot: fs.realpathSync(tempDir('starter-dev-quit-browser')),
+    chromium: { launchPersistentContext: async () => assert.fail('no launch') },
+    warn: () => {},
+  })
+  const revoked = []
+  const revoke = browser.revokeSpawned
+  browser.revokeSpawned = (token) => (revoked.push(token), revoke(token))
+  const { rpc } = asking(false)
+  const tools = createTools({ root, rpc, commands: [DEV], browser, shell: true, remainingMs: () => 60000 })
+  t.after(() => tools.close())
+  const result = await tools.run({ name: 'run_named_command', args: { name: 'dev' } })
+  const port = Number(/Your browser tools can open http:\/\/127\.0\.0\.1:(\d+)/.exec(result.text)?.[1])
+  assert.ok(port > 0, result.text)
+  assert.equal(revoked.length, 0)
+  await new Promise((resolve) => http.get(`http://127.0.0.1:${port}/quit`, (res) => res.resume().on('end', resolve)))
+  const until = Date.now() + 5000
+  while (!revoked.length && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 50))
+  assert.equal(revoked.length, 1, 'revoked when it exited, before any stop')
 })

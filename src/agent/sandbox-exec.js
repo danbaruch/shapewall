@@ -42,9 +42,12 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn, spawnSync } from 'node:child_process'
+import { execFile, spawn, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { randomBytes } from 'node:crypto'
+import { markRunning } from './acp/sandbox.js'
+import { markCommand } from './command-marks.js'
+export { commandsRunningIn } from './command-marks.js'
 
 const require = createRequire(import.meta.url)
 
@@ -73,6 +76,10 @@ export const SANDBOX_LIMITS = {
   fileBytes: 2 * 1024 * 1024 * 1024,
   // The session temp (caches, HOME): emptied after a command that leaves more.
   tmpBytes: 2 * 1024 * 1024 * 1024,
+  // A fix copy that grows past this stops taking commands (Q7 B6).
+  copyBytes: 8 * 1024 * 1024 * 1024,
+  // Where systemd runs (Linux): the share of CPU a command's scope gets against others (100 is the default).
+  cpuWeight: 50,
 }
 
 export class SandboxRefusal extends Error {
@@ -256,6 +263,14 @@ export function commandEnv({ env = process.env, tmp, extra = {} }) {
     npm_config_update_notifier: 'false',
     npm_config_fund: 'false',
     npm_config_audit: 'false',
+    // Tools that put a cache in node_modules (read only when it is the
+    // checkout's, shared into a fix copy) or the project, where an env var
+    // alone moves it: into this session's temp (Q7 round 3). The rest
+    // (Vite's node_modules/.vite, the ESLint cache) is config only: see
+    // docs/agent-hardening.md.
+    BABEL_CACHE_PATH: path.join(tmp, 'cache', 'babel.json'),
+    NX_CACHE_DIRECTORY: path.join(tmp, 'cache', 'nx'),
+    TURBO_CACHE_DIR: path.join(tmp, 'cache', 'turbo'),
     CI: '1',
     NO_COLOR: '1',
     TERM: 'dumb',
@@ -264,6 +279,116 @@ export function commandEnv({ env = process.env, tmp, extra = {} }) {
     ...extra,
   })
   return out
+}
+
+// ---- Caps for the whole command (Linux, systemd) ----
+
+// Each sandboxed command in a systemd scope of its own, where this
+// machine's user manager makes one: its memory, its number of processes
+// and its CPU weight capped for the command and everything it starts
+// together (ulimit caps each process alone). The scope goes in the slice
+// this process runs in, so a cap set around Shapewall still holds. Where
+// there is no systemd user manager (a container, CI, macOS) commands run
+// with the ulimit caps only. -> { available, slice }
+// Asked once per process, without blocking it (the answer is kept):
+// -> Promise of { available, slice, program }. `run(program, args, options)`
+// -> { status } (or a promise of it). systemd before 254 has no
+// --expand-environment, so the probe fails there and commands run without
+// a scope.
+let scopeProbe = null
+const runAsync = (program, args, { timeout, env }) =>
+  new Promise((resolve) => {
+    execFile(program, args, { timeout, env }, (error) => resolve({ status: error ? (typeof error.code === 'number' ? error.code : 1) : 0 }))
+  })
+export function probeScope(options = {}) {
+  if (options.fresh) return probeScopeNow(options)
+  if (!scopeProbe) scopeProbe = probeScopeNow(options)
+  return scopeProbe
+}
+async function probeScopeNow({ platform = process.platform, env = process.env, run = runAsync, cgroup = null } = {}) {
+  let result = { available: false, slice: null, program: null }
+  if (platform === 'linux') {
+    const program = onPath('systemd-run', env)
+    if (program) {
+      const slice = sliceOf(cgroup ?? readCgroup())
+      const tried = await run(
+        program,
+        // --expand-environment=no (systemd 254 and later): systemd-run would
+        // otherwise read every $NAME in the command as its own variable.
+        // Where it is not known, no scope.
+        [
+          '--user',
+          '--scope',
+          '--quiet',
+          '--collect',
+          '--expand-environment=no',
+          ...(slice ? [`--slice=${slice}`] : []),
+          '-p',
+          'MemoryMax=64M',
+          '-p',
+          'TasksMax=16',
+          'true',
+        ],
+        { stdio: 'ignore', timeout: 10_000, env: scopeEnv(env) },
+      )
+      if (tried?.status === 0) result = { available: true, slice, program }
+    }
+  }
+  return result
+}
+function readCgroup() {
+  try {
+    return fs.readFileSync('/proc/self/cgroup', 'utf8')
+  } catch {
+    return ''
+  }
+}
+// The user manager's slice this process is in ("agent-work.slice"), or null.
+export function sliceOf(cgroup) {
+  const line = String(cgroup || '')
+    .split('\n')
+    .find((entry) => entry.startsWith('0::'))
+  if (!line) return null
+  const parts = line.slice(3).split('/')
+  const manager = parts.findIndex((part) => /^user@\d+\.service$/.test(part))
+  if (manager < 0) return null
+  const slices = parts.slice(manager + 1).filter((part) => /^[A-Za-z0-9:_.\\-]+\.slice$/.test(part))
+  return slices.at(-1) || null
+}
+// What systemd-run needs to reach the user manager, and nothing else.
+function scopeEnv(env) {
+  const out = { PATH: env.PATH || '/usr/bin:/bin' }
+  for (const name of ['XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS']) if (typeof env[name] === 'string') out[name] = env[name]
+  return out
+}
+// argv inside a scope of its own with the session's caps (probeScope said yes).
+export function scopeArgv(argv, { scope, limits = SANDBOX_LIMITS, unit }) {
+  return [
+    scope.program,
+    '--user',
+    '--scope',
+    '--quiet',
+    '--collect',
+    '--expand-environment=no',
+    `--unit=${unit}`,
+    ...(scope.slice ? [`--slice=${scope.slice}`] : []),
+    '-p',
+    `MemoryMax=${limits.memoryBytes}`,
+    '-p',
+    'MemorySwapMax=0',
+    '-p',
+    `TasksMax=${limits.processes}`,
+    '-p',
+    `CPUWeight=${limits.cpuWeight ?? 50}`,
+    '--',
+    // The user manager's address is systemd-run's, never the command's.
+    'env',
+    '-u',
+    'XDG_RUNTIME_DIR',
+    '-u',
+    'DBUS_SESSION_BUS_ADDRESS',
+    ...argv,
+  ]
 }
 
 // ---- Running one command ----
@@ -285,7 +410,18 @@ function collect(stream, budget, sink) {
 // -> { code, signal, output, cut, timedOut, stopped, ms }
 export function runProcess(
   argv,
-  { cwd, env, timeoutMs = SANDBOX_LIMITS.timeoutMs, outputBytes = SANDBOX_LIMITS.outputBytes, signal = null, onStart = () => {} },
+  {
+    cwd,
+    env,
+    timeoutMs = SANDBOX_LIMITS.timeoutMs,
+    outputBytes = SANDBOX_LIMITS.outputBytes,
+    signal = null,
+    onStart = () => {},
+    // macOS: a command's processes share no namespace that ends with it, and
+    // one can leave its process group (setsid). Its descendants are listed
+    // while it runs and every one still there is killed when it ends.
+    trackDescendants = process.platform === 'darwin',
+  },
 ) {
   return new Promise((resolve) => {
     const began = Date.now()
@@ -309,6 +445,17 @@ export function runProcess(
     collect(child.stderr, budget, parts)
     let timedOut = false
     let stopped = false
+    const seen = new Set()
+    let watcher = null
+    if (trackDescendants && child.pid) {
+      const look = () =>
+        listProcesses().then((table) => {
+          for (const pid of descendantsOf(child.pid, table, seen)) seen.add(pid)
+        })
+      look()
+      watcher = setInterval(look, 200)
+      watcher.unref?.()
+    }
     const kill = () => {
       try {
         if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL')
@@ -334,19 +481,68 @@ export function runProcess(
       signal?.removeEventListener('abort', onAbort)
       // The group too: a command that left children behind does not keep them.
       kill()
-      resolve({
-        code,
-        signal: sig,
-        output: (error ? `Could not start: ${error.message}\n` : '') + Buffer.concat(parts).toString('utf8'),
-        cut: budget.cut,
-        timedOut,
-        stopped,
-        ms: Date.now() - began,
-      })
+      if (watcher) {
+        clearInterval(watcher)
+        return listProcesses().then((table) => {
+          // Every descendant seen, and those of them still parented here or orphaned.
+          for (const pid of descendantsOf(child.pid, table, seen)) seen.add(pid)
+          const alive = new Map(table)
+          for (const pid of seen) {
+            if (!alive.has(pid)) continue
+            try {
+              process.kill(pid, 'SIGKILL')
+            } catch {
+              /* gone */
+            }
+          }
+          finish()
+        })
+      }
+      finish()
+      function finish() {
+        resolve({
+          code,
+          signal: sig,
+          output: (error ? `Could not start: ${error.message}\n` : '') + Buffer.concat(parts).toString('utf8'),
+          cut: budget.cut,
+          timedOut,
+          stopped,
+          ms: Date.now() - began,
+        })
+      }
     }
     child.once('error', (error) => done(null, null, error))
     child.once('close', (code, sig) => done(code, sig))
   })
+}
+
+// pid -> parent pid of every process this user can see (ps), or empty.
+export function listProcesses() {
+  return new Promise((resolve) => {
+    execFile('ps', ['-A', '-o', 'pid=,ppid='], { timeout: 5000 }, (error, stdout) => {
+      const table = new Map()
+      if (!error)
+        for (const line of String(stdout).split('\n')) {
+          const [pid, ppid] = line.trim().split(/\s+/).map(Number)
+          if (Number.isInteger(pid) && Number.isInteger(ppid)) table.set(pid, ppid)
+        }
+      resolve(table)
+    })
+  })
+}
+// The processes below `root` (or below one already `known`) in `table`.
+export function descendantsOf(root, table, known = new Set()) {
+  const out = new Set()
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const [pid, ppid] of table)
+      if (!out.has(pid) && pid !== root && (ppid === root || out.has(ppid) || (known.has(ppid) && ppid !== 1))) {
+        out.add(pid)
+        grew = true
+      }
+  }
+  return out
 }
 
 // ---- Sessions ----
@@ -458,8 +654,51 @@ export function commandLimits(platform = process.platform, limits = SANDBOX_LIMI
 // the account's own entry say it), the person's absolute XDG folders, every
 // shared temp folder (other sessions' temps, other programs' sockets and
 // files), /run/user/<uid>, removable and mounted disks, and the folder of
-// fix copies (the other fixes). The session's own folders are allowed back
-// inside these (srt allowRead within denyRead). -> real paths that exist.
+// fix copies (the other fixes), and the folder that holds every account's
+// home (/home, /Users: other people's homes are not listed either, Q7 B7).
+// The session's own folders are allowed back inside these (srt allowRead
+// within denyRead), and so are programs on PATH installed in another
+// account's home (homebrew on Linux: homesToolchain). -> real paths that exist.
+const HOMES = new Set(['/home', '/Users', '/var/home'])
+// The folder of every account's home, when this account's home is in one.
+export function homesRoot(home = os.homedir()) {
+  let real
+  try {
+    real = realpath(home)
+  } catch {
+    return null
+  }
+  const parent = path.dirname(real)
+  return HOMES.has(parent) ? parent : null
+}
+// PATH folders inside another account's home (/home/linuxbrew/.linuxbrew/bin):
+// their install prefix stays readable, so the programs there still run.
+export function homesToolchain({ env = process.env, home = os.homedir() } = {}) {
+  const homes = homesRoot(home)
+  if (!homes) return []
+  let own = null
+  try {
+    own = realpath(home)
+  } catch {
+    /* none */
+  }
+  const out = []
+  for (const dir of String(env.PATH || '').split(path.delimiter)) {
+    if (!dir || !path.isAbsolute(dir)) continue
+    let real
+    try {
+      real = realpath(dir)
+    } catch {
+      continue
+    }
+    if (!isInside(homes, real) || (own && isInside(own, real))) continue
+    const prefix = path.basename(real) === 'bin' ? path.dirname(real) : real
+    // At least two levels below the homes folder: never a whole home.
+    if (path.relative(homes, prefix).split(path.sep).length < 2) continue
+    if (!out.includes(prefix)) out.push(prefix)
+  }
+  return out
+}
 const SYSTEM_DIRS = [
   '/usr',
   '/etc',
@@ -498,6 +737,7 @@ export function deniedRoots({ env = process.env, within = null, platform = proce
     wanted.push('/private/tmp', '/private/var/tmp')
   }
   if (within) wanted.push(within)
+  wanted.push(homesRoot())
   const out = []
   for (const item of wanted) {
     if (typeof item !== 'string' || !path.isAbsolute(item)) continue
@@ -549,6 +789,15 @@ export function bridgeSockets(box) {
 }
 
 // The size of a folder (no links followed), stopping past `limit`.
+// Free bytes on the disk `dir` is on, or null.
+function freeBytes(dir) {
+  try {
+    const stat = fs.statfsSync(dir)
+    return stat.bavail * stat.bsize
+  } catch {
+    return null
+  }
+}
 function sizeOf(dir, limit) {
   let total = 0
   const stack = [dir]
@@ -633,8 +882,12 @@ export async function createCommandSession({
     if (parent === real || !isInside(parent, real))
       throw new SandboxRefusal('bad_root', 'The sandbox starts only inside the folder Shapewall keeps fix copies in.')
   }
+  // The person's own checkout, when the commands run in a copy of it: never
+  // the root, and never readable (wherever it is: outside the home folder
+  // too, Q7 B3).
+  let project = null
   if (checkout) {
-    let project = checkout
+    project = checkout
     try {
       project = realpath(checkout)
     } catch {
@@ -644,13 +897,25 @@ export async function createCommandSession({
       throw new SandboxRefusal('bad_root', "The sandbox never writes in the person's own checkout.")
   }
   if (!['sandboxed', 'host', 'host-shell'].includes(mode)) throw new SandboxRefusal('bad_mode', 'Unknown sandbox mode.')
+  // Read only and the folders no command may read are the OS sandbox's to
+  // keep: without one a command could write and read anything the person
+  // can, so a session that promises read only does not start (Q7 B7).
+  if (readOnly && mode !== 'sandboxed')
+    throw new SandboxRefusal('no_sandbox_read_only', 'Read-only commands need the OS sandbox, and there is none here.')
   if (!['registries', 'none'].includes(network))
     throw new SandboxRefusal('bad_network', 'Commands get the package registries or no network.')
   // Real paths: Seatbelt matches them, and /var is a link to /private/var on macOS.
   const tmp = fs.mkdtempSync(path.join(realpath(tmpParent || within || os.tmpdir()), '.shapewall-cmd-'))
   fs.chmodSync(tmp, 0o700)
   const vendor = runtimeVendorDir()
-  const denied = [...new Set([home, ...deniedRoots({ env, within }), ...denyRead.filter((dir) => path.isAbsolute(dir))])]
+  const denied = [
+    ...new Set([
+      home,
+      ...deniedRoots({ env, within }),
+      ...(project && path.isAbsolute(project) ? [project] : []),
+      ...denyRead.filter((dir) => path.isAbsolute(dir)),
+    ]),
+  ]
   const toolchain = toolchainDir({ denied })
   if (toolchain.refused)
     log(`sandbox: Node runs from ${toolchain.refused}, a shared folder; it stays unreadable, so commands need a Node installed elsewhere`)
@@ -664,29 +929,83 @@ export async function createCommandSession({
     fs.rmSync(tmp, { recursive: true, force: true })
     throw error
   }
+  // Run at close, before the temp goes: the session's dev servers (dev-server.js).
+  const closers = []
+  // The checkout's node_modules for a fix copy without one (in the OS sandbox only).
+  let sharedModules = null
+  if (boxed && project && !readOnly) {
+    try {
+      const modules = realpath(path.join(project, 'node_modules'))
+      if (fs.statSync(modules).isDirectory() && !fs.existsSync(path.join(real, 'node_modules')) && isInside(project, modules))
+        sharedModules = modules
+    } catch {
+      sharedModules = null
+    }
+  }
   const filesystem = () => ({
     denyRead: denied,
     allowRead: [
       real,
       tmp,
       ...(toolchain.dir ? [toolchain.dir] : []),
+      ...homesToolchain({ env }),
       ...(vendor ? [vendor] : []),
       // srt's proxy bridge sockets live in the system temp, which is denied.
       ...bridgeSockets(box),
       ...readPaths.filter((dir) => path.isAbsolute(dir)),
+      ...(sharedModules ? [sharedModules] : []),
     ],
     allowWrite: readOnly ? [tmp] : [real, tmp],
-    denyWrite: denyWrite.filter((dir) => path.isAbsolute(dir)),
+    // A list, or a function asked before each run.
+    denyWrite: (typeof denyWrite === 'function' ? denyWrite() : denyWrite).filter((dir) => typeof dir === 'string' && path.isAbsolute(dir)),
   })
   const list = () => networkList(network)
+  // The caps for a whole command (systemd scope), where this machine has them.
+  const scope = boxed && process.platform === 'linux' && limits.scope !== false ? await probeScope({ env }) : { available: false }
+  // The person's own node_modules, read only, where a fix copy has none
+  // (fix copies leave it out): a team turn's commands get no network, so
+  // they could not install it themselves (Q7 re-review 6). A write there
+  // fails; an install is the owner's (solo turns reach the registries).
+  if (sharedModules) {
+    try {
+      fs.symlinkSync(sharedModules, path.join(real, 'node_modules'))
+      closers.push(() => {
+        try {
+          const link = path.join(real, 'node_modules')
+          if (fs.lstatSync(link).isSymbolicLink() && fs.readlinkSync(link) === sharedModules) fs.rmSync(link)
+        } catch {
+          /* gone */
+        }
+      })
+    } catch {
+      /* the agent made its own: that one stays */
+    }
+  }
+  // The fix copy's size is measured when the disk lost a lot since the last
+  // look, or a minute went by: not by a walk after every command.
+  let measured = { at: 0, free: freeBytes(real) }
+  // A fix copy that grew past its cap takes no more commands.
+  let overgrown = false
   let closed = false
-  // Run at close, before the temp goes: the session's dev servers (dev-server.js).
-  const closers = []
   // The kill of every run still going: close() stops them all, whatever
   // signal their caller holds (a command never outlives its session).
   const live = new Set()
+  function copyCheckDue() {
+    const free = freeBytes(real)
+    const due = Date.now() - measured.at > 60_000 || free === null || measured.free === null || measured.free - free > limits.copyBytes / 8
+    if (due) measured = { at: Date.now(), free }
+    return due
+  }
   // A command that left the session temp over its cap: emptied (a fresh HOME).
   function capTmp(result) {
+    // A fix copy (not the person's own checkout, not read only) is measured after each run.
+    if (within && !readOnly && copyCheckDue() && sizeOf(real, limits.copyBytes) > limits.copyBytes) {
+      overgrown = true
+      result = {
+        ...result,
+        output: `${result.output}\n[Shapewall: the fix copy went over ${Math.round(limits.copyBytes / 1024 / 1024 / 1024)} GB; it takes no more commands]`,
+      }
+    }
     if (sizeOf(tmp, limits.tmpBytes) <= limits.tmpBytes) return result
     for (const name of fs.readdirSync(tmp)) fs.rmSync(path.join(tmp, name), { recursive: true, force: true })
     return {
@@ -698,6 +1017,11 @@ export async function createCommandSession({
   // argv (no shell) or { shell: "..." } (the solo full shell). -> runProcess's result.
   async function run(command, options = {}) {
     if (closed) throw new SandboxRefusal('closed', 'This session has ended.')
+    if (overgrown)
+      throw new SandboxRefusal(
+        'copy_too_big',
+        `Not run: the fix copy is over ${Math.round(limits.copyBytes / 1024 / 1024 / 1024)} GB, so it takes no more commands.`,
+      )
     let kill = null
     const started = (handle) => {
       kill = handle.kill
@@ -705,9 +1029,14 @@ export async function createCommandSession({
       else live.add(kill)
       options.onStart?.(handle)
     }
+    // While it runs, the agent's file access through Shapewall knows (acp/sandbox.js commandRunningIn).
+    const done = markRunning(real)
+    const unmark = markCommand(real, process.env)
     try {
       return await runInSession(command, { ...options, onStart: started })
     } finally {
+      unmark()
+      done()
       if (kill) live.delete(kill)
     }
   }
@@ -736,8 +1065,17 @@ export async function createCommandSession({
     box.registerCommandNetworkLists(commandId, { allowedDomains: list() })
     try {
       // srt puts its proxy settings in the wrapped command; the host side gets only PATH.
+      const argv = scope.available
+        ? scopeArgv(wrapped.argv, { scope, limits, unit: `shapewall-cmd-${randomBytes(8).toString('hex')}` })
+        : wrapped.argv
       return capTmp(
-        await runProcess(wrapped.argv, { cwd: real, env: { PATH: env.PATH || '/usr/bin:/bin' }, timeoutMs: time, signal, onStart }),
+        await runProcess(argv, {
+          cwd: real,
+          env: scope.available ? scopeEnv(env) : { PATH: env.PATH || '/usr/bin:/bin' },
+          timeoutMs: time,
+          signal,
+          onStart,
+        }),
       )
     } finally {
       box.unregisterCommandNetworkLists(commandId)
@@ -769,5 +1107,5 @@ export async function createCommandSession({
   }
   log(`sandbox: ${boxed ? 'OS sandbox' : 'no OS sandbox (a card each)'} in ${real}`)
   const onClose = (fn) => (closed ? fn() : closers.push(fn))
-  return { root: real, tmp, mode, network, readOnly, denied, run, close, onClose }
+  return { root: real, tmp, mode, network, readOnly, denied, scoped: Boolean(scope.available), run, close, onClose }
 }

@@ -213,7 +213,7 @@ async function hostedSend(thread, body) {
 
 // Chats first: an open turn quotes the board's other comments (the pickups' included).
 for (const tier of ['solo', 'team', 'open']) {
-  test(`hosted-chat ${tier}: the prompt says ${tier}; only solo gets commands that change no files`, async () => {
+  test(`hosted-chat ${tier}: the prompt says ${tier}; no read-only commands without the OS sandbox`, async () => {
     const agent = agents[tier]
     const said = await hostedChat(agent, 'echo')
     assert.equal(said.status, 'done', JSON.stringify(said.error))
@@ -223,13 +223,9 @@ for (const tier of ['solo', 'team', 'open']) {
     assert.equal(tierIn(caps.text), tier)
     assert.match(caps.text, /Edits: .*|No edits|answers only/i)
     const tool = await hostedChat(agent, 'exec shapewall_capabilities')
-    if (tier === 'solo') {
-      // Read-style commands only: `lint` (mutating: false), never `test`, never the shell.
-      assert.match(tool.text, /^exec shapewall_capabilities ok: On this board \(tier: solo\)/)
-      assert.match(tool.text, /"name": "lint"/)
-      assert.doesNotMatch(tool.text, /"name": "test"/)
-      assert.match(tool.text, /"mode": "off"/)
-    } else assert.equal(tool.text, 'exec: no exec tools in this session')
+    // An answer's commands are read only, and read only needs the OS sandbox
+    // (Q7 B7): on this platform (none) no tier gets a command session.
+    assert.equal(tool.text, 'exec: no exec tools in this session')
   })
 }
 
@@ -263,7 +259,8 @@ for (const tier of ['solo', 'team', 'open']) {
       throw new Error(error.message + '\n' + agent.link.logs.join('\n'))
     })
     const reply = answered.replies.at(-1).body
-    if (reply.startsWith('exec: no exec tools')) assert.notEqual(tier, 'solo')
+    // Answer only, so read only: without the OS sandbox no tier gets commands (Q7 B7).
+    if (reply.startsWith('exec: no exec tools')) assert.ok(!PLATFORM.sandbox || tier !== 'solo')
     else {
       assert.match(reply, new RegExp(`^exec shapewall_capabilities ok: On this board \\(tier: ${tier}\\)`))
       assert.doesNotMatch(reply, /"name": "test"/)

@@ -3,6 +3,7 @@
 import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createApp, stopChildren } from '../src/server/app.js'
@@ -12,7 +13,7 @@ import { beginAgentOperation } from '../src/agent/control.js'
 import { ACP_PREAMBLE } from '../src/agent/context.js'
 import { acpCommand, acpLabel, agentEnv, extraVarNames } from '../src/agent/acp/command.js'
 import { createSandbox, inside } from '../src/agent/acp/sandbox.js'
-import { DETAIL_MAX, promptBlocks, sessionChoices, showable } from '../src/agent/backends/acp.js'
+import { DETAIL_MAX, TERMINAL_REFUSALS, promptBlocks, sessionChoices, showable, terminalsOff } from '../src/agent/backends/acp.js'
 import { checkAcpAgent } from '../src/doctor.js'
 import { acpFlag, remoteAgentProblem } from '../src/cli.js'
 import { createComment } from '../src/store.js'
@@ -58,7 +59,29 @@ function projectConfig(name, agent = undefined) {
 }
 
 // A board with chat on the stub agent. Returns { port, app, config, backend(), close() }.
-async function board(name, { env = {}, limits = {}, acp = STUB, config = projectConfig(name) } = {}) {
+// `branch`: Work on a branch (a git checkout, each turn in a worktree), where
+// an ACP agent gets a terminal; in the checkout itself it gets none (Q7 round 3).
+async function board(name, { env = {}, limits = {}, acp = STUB, config = projectConfig(name), branch = false } = {}) {
+  if (branch) {
+    const git = (...args) =>
+      execFileSync('git', args, {
+        cwd: config.dir,
+        stdio: 'ignore',
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 'T',
+          GIT_AUTHOR_EMAIL: 't@example.com',
+          GIT_COMMITTER_NAME: 'T',
+          GIT_COMMITTER_EMAIL: 't@example.com',
+        },
+      })
+    fs.writeFileSync(path.join(config.dir, 'index.html'), '<h1>Hi</h1>\n')
+    fs.writeFileSync(path.join(config.dir, '.gitignore'), '.shapewall/\n.shapewall-auth/\n')
+    git('init', '-q', '-b', 'main')
+    git('add', 'index.html', '.gitignore')
+    git('commit', '-q', '-m', 'init')
+    env = { ...env, SHAPEWALL_AGENT_BRANCH_MODE: '1' }
+  }
   // Comment threads need their comments.
   for (let index = 0; index < 2; index += 1) {
     await createComment(config, config.boards[0], { pageId: 'home', viewport: 'desktop', x: 5, y: 5, body: `Comment ${index}` })
@@ -313,7 +336,38 @@ test('streams text and thinking, shows tool cards and the plan, reuses one proce
 
   const caps = JSON.parse((await send(entry, 'board', 'caps')).done.text)
   assert.deepEqual(caps.fs, { readTextFile: true, writeTextFile: true })
-  assert.equal(caps.terminal, true)
+  // Edits in the checkout itself: no terminal (Q7 round 3; below).
+  assert.equal(caps.terminal, false)
+})
+
+test('Q7 round 3 item 3: an ACP agent editing in the checkout gets no terminal; on a branch it does; without fd checks never', async () => {
+  // In place (the default): not offered, and refused when asked anyway.
+  const inPlace = await board('acp-terminal-in-place')
+  assert.equal(JSON.parse((await send(inPlace, 'board', 'caps')).done.text).terminal, false)
+  const marker = path.join(inPlace.config.dir, 'ran')
+  let asked = false
+  const refused = await send(inPlace, 'board', `run ${process.execPath} -e require('fs').writeFileSync(${JSON.stringify(marker)},'x')`, {
+    onEvent: async ({ event, data }) => {
+      if (event === 'tool' && data.kind === 'permission' && data.state === 'pending') asked = true
+    },
+  })
+  assert.match(refused.done.text, /^Run refused: .*Work on a branch/)
+  assert.equal(asked, false, 'no card')
+  assert.equal(fs.existsSync(marker), false)
+  // agent.localSession "own" (the 1.2.0 session) is no different.
+  const own = await board('acp-terminal-own', { config: projectConfig('acp-terminal-own', { localSession: 'own' }) })
+  assert.equal(JSON.parse((await send(own, 'board', 'caps')).done.text).terminal, false)
+  // Work on a branch: offered (still card-gated, see "terminal: every command needs approval").
+  const branch = await board('acp-terminal-branch', { branch: true })
+  assert.equal(JSON.parse((await send(branch, 'board', 'caps')).done.text).terminal, true)
+  // The rule itself, with the platform as a test input.
+  assert.equal(terminalsOff({}, null), 'in_place_commands')
+  assert.equal(terminalsOff({}, { root: '/x' }), null)
+  assert.equal(terminalsOff({ remoteEdit: { commands: ['test'] } }, null), null)
+  assert.equal(terminalsOff({}, { root: '/x' }, { fdChecks: false }), 'edits_without_fd_checks')
+  assert.equal(terminalsOff({ remoteEdit: { commands: ['test'] } }, { root: '/x' }, { fdChecks: false }), 'edits_without_fd_checks')
+  assert.equal(terminalsOff({ readOnly: true }, null, { fdChecks: false }), null)
+  assert.match(TERMINAL_REFUSALS.edits_without_fd_checks, /gets no commands/)
 })
 
 test('prompt: preamble and quoted board data on a new session, no preamble after', async () => {
@@ -490,7 +544,7 @@ test('fs: reads and writes inside the project; traversal, symlink escape and .gi
 })
 
 test('terminal: every command needs approval in the panel', async () => {
-  const entry = await board('acp-terminal', { limits: { acp: { permissionMs: 400 } } })
+  const entry = await board('acp-terminal', { limits: { acp: { permissionMs: 400 } }, branch: true })
   const approve =
     (optionId) =>
     async ({ event, data }) => {
@@ -635,7 +689,7 @@ test('review 1: the agent starts outside the project, so repo .npmrc and the lik
 })
 
 test('review 2: terminal env that changes what runs is refused; harmless names are shown on the card', async () => {
-  const entry = await board('acp-review-env', { limits: { acp: { permissionMs: 2000 } } })
+  const entry = await board('acp-review-env', { limits: { acp: { permissionMs: 2000 } }, branch: true })
   let asked = 0
   const count = pendingPermission(async () => {
     asked += 1
@@ -665,7 +719,7 @@ test('review 2: terminal env that changes what runs is refused; harmless names a
 })
 
 test('review 3: the card shows the whole command with its argument count; longer than that is denied unasked', async () => {
-  const entry = await board('acp-review-long', { limits: { acp: { permissionMs: 2000 } } })
+  const entry = await board('acp-review-long', { limits: { acp: { permissionMs: 2000 } }, branch: true })
   const long = 'x'.repeat(1500)
   let detail = null
   await send(entry, 'board', `run node -e void0 ${long} ${long}`, {
@@ -740,7 +794,10 @@ test('review 5: a folder swapped for a symlink while the parents are made does n
     return original(dir, options)
   }
   try {
-    assert.throws(() => sandbox.write({ path: path.join(root, 'new', 'deep', 'file.txt'), content: 'x' }), /outside the project/)
+    assert.throws(
+      () => sandbox.write({ path: path.join(root, 'new', 'deep', 'file.txt'), content: 'x' }),
+      /outside the project|changed while it was opened/,
+    )
   } finally {
     fs.mkdirSync = original
   }
@@ -787,7 +844,7 @@ test('review 7: --chat with an ACP agent on a shared board needs --allow-remote-
 
 for (const kind of ['terminal', 'write'])
   test(`${kind} approval that resolves during teardown cannot cause a late side effect`, async () => {
-    const entry = await board(`acp-late-${kind}-approval`)
+    const entry = await board(`acp-late-${kind}-approval`, { branch: kind === 'terminal' })
     const marker = path.join(entry.config.dir, kind === 'write' ? 'package.json' : 'should-not-run')
     const before = '{"name":"fictional-package"}\n'
     if (kind === 'write') fs.writeFileSync(marker, before)
@@ -822,7 +879,7 @@ test(
   { skip: process.platform !== 'linux', timeout: 10000 },
   async (t) => {
     const env = { ...BASE_ENV, HOME: tempDir('terminal-descendant-home') }
-    const entry = await board('terminal-descendant', { env })
+    const entry = await board('terminal-descendant', { env, branch: true })
     const dir = tempDir('terminal-descendant-writer')
     const wrapper = path.resolve('test/fixtures/acp-descendant.mjs')
     const pid = (name) => Number(fs.readFileSync(path.join(dir, `${name}.pid`), 'utf8'))
@@ -860,7 +917,10 @@ test(
     const release = await beginAgentOperation(entry.config, env, 'settings')
     assert.ok(release)
     await release()
-    assert.equal(pidOf((await send(entry, 'board', 'pid')).done), agentPid, 'healthy native session remains reusable')
+    // Work on a branch (where a terminal is offered): each turn has its own
+    // worktree and agent process; the next turn still runs.
+    assert.ok(agentPid > 0)
+    assert.equal((await send(entry, 'board', 'pid')).done.status, 'done', 'the next turn runs')
   },
 )
 

@@ -9,6 +9,7 @@ import { cliCommand } from '../invocation.js'
 import { durationFlag } from '../cli/duration.js'
 import { absoluteProgram } from '../which.js'
 import { SAFE_GIT_FLAGS } from '../agent/starter/worktree.js'
+import { commandsRunningIn } from '../agent/command-marks.js'
 
 export const AUTH_FLAGS = ['board', 'env', 'url', 'timeout', 'overwrite']
 export const AUTH_BOOLEAN_FLAGS = ['overwrite']
@@ -255,6 +256,10 @@ export async function recordCaptureAuth({
     throw fail('auth_terminal', 'Run auth record in an interactive terminal on the desktop where you will sign in.')
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 1800000)
     throw fail('auth_timeout', 'Recording timeout must be between 1 and 1800000 milliseconds.')
+  // A command an agent runs in the project could race the save of a login
+  // there: no recording while one runs (Q7 C4).
+  if (config?.dir && commandsRunningIn(config.dir, env).length)
+    throw fail('auth_busy', 'An agent command is running in this project. Record the sign-in once it ends. Nothing was saved.')
   const board = getBoard(config, boardId)
   const environment = getEnvironment(board, envId)
   let target

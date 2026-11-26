@@ -45,8 +45,8 @@ import {
   resolveCapabilities,
 } from '../agent/capabilities.js'
 import { approvalsDir, createApprovalStore } from '../agent/command-approvals.js'
-import { createThreadRelay, startExecSession } from '../agent/exec-mcp.js'
-import { commandReadDenied } from '../agent/local-tools.js'
+import { createThreadRelay, offeredCapabilities, startExecSession } from '../agent/exec-mcp.js'
+import { checkoutReadDenied } from '../agent/local-tools.js'
 import { loadConfig } from '../config.js'
 import { capabilitySummary, toPrompt } from '../agent/capability-render.js'
 import { turnExtensions } from '../agent/agent-config-folder.js'
@@ -811,7 +811,8 @@ export async function runAgentLink({
           expect: prepared.work.tree.projectDir,
           within: prepared.work.root,
           checkout: fix.config.dir,
-          network: caps.shell.mode !== 'off' ? caps.shell.network : view.shellNetwork,
+          // Named commands get the machine's network on the owner's own turn only (Q7 B4).
+          network: caps.shell.mode !== 'off' ? caps.shell.network : caps.tier === 'solo' ? view.shellNetwork : 'none',
           approvals: createApprovalStore(approvalsDir(agent?.id, fix.env)),
           scope: JSON.stringify([origin, agent?.workspace?.id, agent?.project?.id, agent?.id, fix.config.dir]),
           ask: policy.approvals === 'none' ? null : (card) => askBoard(card, limit.commandCardMs),
@@ -838,7 +839,8 @@ export async function runAgentLink({
               : 'Commands are off for this fix: the command session did not start on this machine',
           })
         fixTurn = {
-          capabilities: toPrompt(caps),
+          // What the tool host actually offers (a session that did not start offers no commands).
+          capabilities: toPrompt(offeredCapabilities(caps, exec)),
           sessionKey: sessionKeyOf(caps),
           extensions: extensionsOf(caps, job, fix.env),
           workdir: exec ? { ...prepared.workdir, mcpServers: exec.servers } : prepared.workdir,
@@ -909,7 +911,8 @@ export async function runAgentLink({
               checkout: null,
               browserCheckout: answerConfig.dir,
               readOnly: true,
-              denyRead: commandReadDenied(answerConfig, answerConfig.dir),
+              // The logins folder made first, so it is hidden from the first command (Q7 round 3).
+              denyRead: checkoutReadDenied(answerConfig),
               network: 'none',
               approvals: createApprovalStore(approvalsDir(agent?.id, answerEnv)),
               scope: JSON.stringify([origin, agent?.workspace?.id, agent?.project?.id, agent?.id, answerConfig.dir]),
@@ -945,6 +948,8 @@ export async function runAgentLink({
             }
           }
         }
+        // The prompt says what the tool host offers, not what was asked for.
+        fixTurn.capabilities = toPrompt(offeredCapabilities(caps, exec))
       }
       const reply = await runTurn({
         config: null,

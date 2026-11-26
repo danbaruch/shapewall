@@ -31,7 +31,9 @@ import { testInput } from './starter/tools.js'
 export const APPROVAL_LIMITS = {
   keepMs: 7 * 24 * 60 * 60 * 1000,
   inputFiles: 400,
-  inputBytes: 8 * 1024 * 1024,
+  // Every byte of every input is read: past this the inputs count as
+  // UNBOUNDED (the command asks every time).
+  inputBytes: 256 * 1024 * 1024,
   walkFiles: 20000,
 }
 const sha256 = (data) => createHash('sha256').update(data).digest('hex')
@@ -103,23 +105,44 @@ export function namedFiles(argv) {
   return out
 }
 
-// What a command's run depends on, in `root`: the manifests, lockfiles and
-// configs (testInput), plus the files its `inputs` name (globs); always plus the files argv names, the relative program first
-// of all. -> sha256 over each path, its kind and its bytes. A symbolic link
-// counts as its target text (where it points), never followed.
-export function inputsDigest(root, command) {
+// The inputs of a command in `root`: the manifests, lockfiles and configs
+// (testInput), the files its `inputs` name (globs), and the files argv
+// names, the relative program first of all. -> { files (sorted), complete }:
+// `complete` is false when there were more than Shapewall checks (then no
+// answer is ever remembered for it: inputsDigest says UNBOUNDED).
+export function inputFiles(root, command) {
   const argv = Array.isArray(command.argv) ? command.argv : []
-  const named = namedFiles(argv)
   const globs = Array.isArray(command.inputs) ? command.inputs.map(globRe) : null
-  const files = new Set(named)
-  for (const rel of walk(root)) {
+  const files = new Set(namedFiles(argv))
+  const listed = walk(root)
+  let complete = listed.length < APPROVAL_LIMITS.walkFiles
+  for (const rel of listed) {
     // The manifests, lockfiles and .npmrc always count; `inputs` adds to them.
     if (testInput(rel, argv) || globs?.some((re) => re.test(rel))) files.add(rel)
-    if (files.size >= APPROVAL_LIMITS.inputFiles) break
+    if (files.size > APPROVAL_LIMITS.inputFiles) {
+      complete = false
+      break
+    }
   }
-  const hash = createHash('sha256').update('shapewall-inputs-1\0')
+  return { files: [...files].sort(), complete }
+}
+
+// The digest of a command's inputs whose content Shapewall could not all
+// read (too many files, or too many bytes): it matches no record and no
+// base, so such a command asks every time (Q7 B5).
+export const UNBOUNDED = 'unbounded'
+
+// sha256 over each input's path, its kind and its bytes, all of them (read
+// in chunks: never a size and a time instead of the content, Q7 B5). A
+// symbolic link counts as its target text (where it points), never followed.
+// -> hex, or UNBOUNDED.
+export function inputsDigest(root, command) {
+  const { files, complete } = inputFiles(root, command)
+  if (!complete) return UNBOUNDED
+  const hash = createHash('sha256').update('shapewall-inputs-2\0')
   let bytes = 0
-  for (const rel of [...files].sort()) {
+  const chunk = Buffer.alloc(256 * 1024)
+  for (const rel of files) {
     const file = path.join(root, rel)
     hash.update(`${rel}\0`)
     let stat
@@ -129,17 +152,92 @@ export function inputsDigest(root, command) {
       hash.update('missing\0')
       continue
     }
-    if (stat.isSymbolicLink()) hash.update(`link\0${fs.readlinkSync(file)}\0`)
-    else if (stat.isFile() && bytes + stat.size <= APPROVAL_LIMITS.inputBytes) {
-      bytes += stat.size
-      hash.update(`file\0${stat.mode & 0o111 ? 'x' : '-'}\0`)
-      hash.update(fs.readFileSync(file))
-      hash.update('\0')
-    } else hash.update(`other\0${stat.size}\0${stat.mtimeMs}\0`)
+    if (stat.isSymbolicLink()) {
+      hash.update(`link\0${fs.readlinkSync(file)}\0`)
+      continue
+    }
+    if (!stat.isFile()) {
+      hash.update(`other\0${stat.isDirectory() ? 'dir' : 'special'}\0`)
+      continue
+    }
+    hash.update(`file\0${stat.mode & 0o111 ? 'x' : '-'}\0`)
+    let fd
+    try {
+      fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0))
+    } catch {
+      hash.update('unreadable\0')
+      continue
+    }
+    try {
+      for (;;) {
+        const read = fs.readSync(fd, chunk, 0, chunk.length, null)
+        if (!read) break
+        bytes += read
+        if (bytes > APPROVAL_LIMITS.inputBytes) return UNBOUNDED
+        hash.update(chunk.subarray(0, read))
+      }
+    } finally {
+      fs.closeSync(fd)
+    }
+    hash.update('\0')
   }
   return hash.digest('hex')
 }
 
+// The id git gives a blob of `content` (sha1 or sha256 repositories).
+const blobId = (content, format) =>
+  createHash(format === 'sha256' ? 'sha256' : 'sha1')
+    .update(`blob ${content.length}\0`)
+    .update(content)
+    .digest('hex')
+
+// Whether every input of `command` in `root` (a checkout with its own Git
+// repository) is exactly as committed in HEAD: same content, same kind and
+// executable bit, nothing new. A local board in place keeps the agent's
+// edits of earlier turns in the checkout, so only the committed state may
+// stand in for "the person's own" there (Q7 B7). No Git, an unreadable
+// HEAD, or any doubt: false. `git`: starter/worktree.js git (tests pass one).
+export async function inputsCommitted(root, command, { git }) {
+  const { files, complete } = inputFiles(root, command)
+  if (!complete) return false
+  if (!files.length) return true
+  let format = 'sha1'
+  let listing
+  try {
+    format = (await git(['rev-parse', '--show-object-format'], { cwd: root, timeoutMs: 20000 })).trim() || 'sha1'
+    // Paths and names relative to `root`, wherever it is in its repository.
+    listing = await git(['ls-tree', '-r', '-z', 'HEAD', '--', ...files], { cwd: root, timeoutMs: 20000 })
+  } catch {
+    return false
+  }
+  const committed = new Map()
+  for (const line of listing.split('\0')) {
+    const match = /^(\d+) (\w+) ([0-9a-f]+)\t(.*)$/s.exec(line)
+    if (match) committed.set(match[4], { mode: match[1], type: match[2], id: match[3] })
+  }
+  for (const rel of files) {
+    const entry = committed.get(rel)
+    const file = path.join(root, rel)
+    let stat
+    try {
+      stat = fs.lstatSync(file)
+    } catch {
+      // Missing now: as committed only if HEAD has no such file either.
+      if (entry) return false
+      continue
+    }
+    if (!entry || entry.type !== 'blob') return false
+    if (stat.isSymbolicLink()) {
+      if (entry.mode !== '120000' || entry.id !== blobId(Buffer.from(fs.readlinkSync(file)), format)) return false
+      continue
+    }
+    if (!stat.isFile()) return false
+    if (entry.mode !== (stat.mode & 0o111 ? '100755' : '100644')) return false
+    if (stat.size > APPROVAL_LIMITS.inputBytes) return false
+    if (entry.id !== blobId(fs.readFileSync(file), format)) return false
+  }
+  return true
+}
 // The key of one approval.
 // It names where the command runs too (the tier of the turn, the session
 // mode, its network and whether it may write): an answer given for a

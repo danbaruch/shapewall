@@ -26,7 +26,7 @@ import path from 'node:path'
 import { hostPlatform, namedCommands, resolveCapabilities } from './capabilities.js'
 import { createApprovalStore } from './command-approvals.js'
 import { toPrompt } from './capability-render.js'
-import { startExecSession } from './exec-mcp.js'
+import { offeredCapabilities, startExecSession } from './exec-mcp.js'
 import { localMachinePolicy, userAgentEntry } from './user-settings.js'
 import { authFiles, loadConfig } from '../config.js'
 import { policyExtensions, turnExtensions } from './agent-config-folder.js'
@@ -82,6 +82,9 @@ export function localAgent(config, env = process.env, { acp = null } = {}) {
   }
 }
 
+// The folder of recorded logins for the agent browser (agent-browser.js readAuthState).
+export const AUTH_DIR = '.shapewall-auth'
+
 // The folder a local approval record lives in: the board's project, never the server.
 export const localApprovalsDir = (config) => path.join(config.outputDir, 'agent', 'approvals')
 
@@ -92,6 +95,25 @@ export const localApprovalsDir = (config) => path.join(config.outputDir, 'agent'
 // worktree of it (the same path relative to config.dir). Only paths that
 // exist and are inside root (the sandbox denies the rest of the home folder
 // anyway).
+// The recorded logins' folder in `dir`, made (0700) when missing: a folder
+// the sandbox can hide from commands from their start. A link or a file
+// in its place is left alone (it is denied by its path all the same).
+export function ensureAuthDir(dir) {
+  try {
+    fs.mkdirSync(path.join(dir, AUTH_DIR), { mode: 0o700 })
+  } catch {
+    /* there already, or not ours to make */
+  }
+}
+
+// A read-only command session in the checkout itself (a hosted board's Q&A
+// turn): the logins folder is made first, then hidden with the rest.
+export function checkoutReadDenied(config) {
+  if (!config?.dir) return []
+  ensureAuthDir(config.dir)
+  return commandReadDenied(config, config.dir)
+}
+
 export function commandReadDenied(config, root) {
   if (!root || !config) return []
   let real
@@ -116,6 +138,27 @@ export function commandReadDenied(config, root) {
     if (inside(resolved) && resolved !== real) out.add(resolved)
   }
   if (config.outputDir) add(path.resolve(config.outputDir))
+  // The recorded logins the agent browser loads (.shapewall-auth/<name>.auth.json), always (Q7 C4),
+  // listed even before the folder exists: a rule by path (Seatbelt) then still
+  // covers the folder a later sign-in makes (Q7 round 3).
+  const authIn = (dir) => {
+    let parent
+    try {
+      parent = fs.realpathSync(dir)
+    } catch {
+      return
+    }
+    const folder = path.join(parent, AUTH_DIR)
+    let resolved = folder
+    try {
+      resolved = fs.realpathSync(folder)
+    } catch {
+      resolved = folder
+    }
+    if (inside(resolved) && resolved !== real) out.add(resolved)
+  }
+  authIn(real)
+  if (config.dir) authIn(path.resolve(config.dir))
   for (const file of authFiles(config)) {
     const absolute = path.resolve(config.dir || real, file)
     add(absolute)
@@ -217,7 +260,6 @@ export async function startLocalTools({
     failed = true
     caps = resolve(config)
   }
-  const prompt = toPrompt(caps)
   // `commands` come from the checkout's config, read again for each check.
   const fresh = () => {
     if (!config.file) return config
@@ -233,8 +275,16 @@ export async function startLocalTools({
   } catch {
     real = null
   }
-  // A local checkout keeps its repository and Shapewall's folder read only for commands.
-  const denyWrite = real ? [path.join(real, '.git'), path.resolve(config.outputDir)].filter((dir) => fs.existsSync(dir)) : []
+  // The recorded logins' folder exists before any command does, so the
+  // sandbox can hide it (it hides only what is there when it starts: Q7 C4).
+  // In the checkout only: a branch copy (Shapewall's own folder) is removed whole after Apply.
+  if (config.dir) ensureAuthDir(config.dir)
+  // A local checkout keeps its repository, Shapewall's folder and the
+  // recorded logins read only for commands. Commands never run in the
+  // checkout itself (capabilities.js: in_place_commands), only in a copy.
+  const denyWrite = real
+    ? [path.join(real, '.git'), path.resolve(config.outputDir), path.join(real, AUTH_DIR)].filter((dir) => fs.existsSync(dir))
+    : []
   const exec = await startExecSession({
     capabilities: caps,
     platform,
@@ -259,12 +309,16 @@ export async function startLocalTools({
     shellCard: caps.shell.mode !== 'off' && localMachinePolicy(userAgentEntry(config.dir, env).entry).commandApproval === 'always',
     // Local edits are the agent's own: the run summary and Undo see the checkout as it is.
     onChanged: () => {},
+    // In place, the checkout holds the agent's earlier edits: the base is what is committed (Q7 B7).
+    committedBase: Boolean(inPlace && real),
     browserCheckout: real,
     denyPorts,
     serve,
     env,
     log,
   })
+  // What the tool host offers, not what was asked for (a session that did not start offers no commands).
+  const prompt = toPrompt(offeredCapabilities(caps, exec))
   return { caps, prompt, exec, extensions }
 }
 

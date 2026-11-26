@@ -129,8 +129,16 @@ line run without a shell. The agent runs one with `run_named_command { name }` (
 
 - **Solo and team, in the OS sandbox:** a command runs without a card while it and its inputs are as you approved them. The
   approval is kept on the machine for that exact line, the tier, the sandbox mode, the network and the content of its inputs (the
-  manifests, lockfiles and `.npmrc` always among them). When the agent changes an input, or the line changes, the next run asks
-  again.
+  manifests, lockfiles, `.npmrc` and every `*.config.*` file always among them, every byte of each). When the agent changes an
+  input, or the line changes, the next run asks again. A command with more inputs than Shapewall checks asks every time.
+- **A local board in place** (edits land in your checkout itself) gets no commands, no shell and no ACP terminal: turn on Work
+  on a branch, and commands run in the branch copy.
+- **On macOS, an agent that edits cannot run commands in 1.4.0:** no commands, no shell and no ACP terminal on any tier, since
+  Shapewall cannot check there where a file write lands once a command has run. The one exception is a solo owner's
+  `agent set shell-unsandboxed on` shell, an opt-in that already runs outside every check, with its warning. Read-only turns
+  keep their read-only commands in the OS sandbox.
+- **Network:** a command gets the package registries (where `shell-network` says so) on your own solo turns only; on team turns
+  it gets no network, since a registry takes uploads too.
 - **Open turns, or no OS sandbox:** each run waits for a card. That answer is for one run and is never kept.
 - **`command-approval always`** makes every run on every tier wait for a card.
 - **`dev`** starts with `start_dev_server { name }` on a free port (`$PORT`), checked at its `ready` URL, stopped with
@@ -148,8 +156,9 @@ which empties a saved list, is taken), so there it takes none.
 
 The OS sandbox is bubblewrap on Linux and Seatbelt on macOS, through the open-source sandbox runtime. A command in it writes only
 in the fix copy and its own tmp folder, cannot read your home folder, `~/.ssh`, `~/.config` or your agent's settings, gets a clean
-environment with no `SHAPEWALL_*` tokens, reaches only the package registries (or nothing), and stops after 10 minutes with its
-output capped at 64 KB. On Linux it needs `bubblewrap`, `socat` and `ripgrep` (and `nsenter` for dev servers). The full list of
+environment with no `SHAPEWALL_*` tokens, reaches only the package registries on solo turns (nothing on team turns), and stops
+after 10 minutes with its output capped at 64 KB. On Linux with a systemd user manager each command runs in a scope of its own,
+capped for memory, processes and CPU together. A card shows the whole command line; one too long to show whole is refused. On Linux it needs `bubblewrap`, `socat` and `ripgrep` (and `nsenter` for dev servers). The full list of
 what it holds is in [commands through Shapewall](agent-hardening.md#commands-through-shapewall).
 
 | Setting             | Values                         | What it does                                                                                      |
@@ -172,14 +181,19 @@ removes it, profile and all, when the task ends.
 - **It opens only the app's addresses:** every `baseUrl` and `publicUrl` in your config, the origins the machine allows
   (`browser-allow`, and the config's `agent.browser.allow` where the machine allows them too), and the session's own dev server.
   Every request and connection is checked by Shapewall, not by the model.
-- **An address on your machine** that a committed config names (loopback, `localhost`, a local name such as `app.test`) counts
-  below your own solo turn only where `browser-allow` lists that exact origin. The Browser line names what it held back and the
-  command that lists it.
+- **An address on your machine** that a committed config names (loopback, `localhost`, a local name such as `app.test`, this
+  machine's LAN or tailnet address) counts below your own solo turn only where `browser-allow` lists that exact origin, or it is
+  the session's dev server. A public name that resolves to this machine is refused there. The Browser line names what it held
+  back and the command that lists it.
 - **No debugging port,** no service workers, no downloads, no `file:` or `data:` pages, and never your own Chrome or its profile.
 - **A login** only where the tier allows it: a recorded one (`browser-auth NAME`, from `shapewall auth record`) or a profile
-  Shapewall made for the agent (`--browser-profile NAME`, kept in `$XDG_STATE_HOME/shapewall/agent-browser-profiles/`).
+  Shapewall made for the agent (`--browser-profile NAME`, kept in `$XDG_STATE_HOME/shapewall/agent-browser-profiles/`). A recorded
+  login's cookies never go to the host the session's dev server listens on.
 - **On Linux with the OS sandbox,** the browser runs inside it too. Where Chromium's own sandbox cannot start, the browser stays off
-  unless you allow it without (`browser-no-sandbox on`, solo and team turns only).
+  unless you allow it without (`browser-no-sandbox on`, solo and team turns only). On open turns Chromium's own sandbox is
+  required, so there the browser starts on your machine with it instead of inside the OS sandbox without it.
+- **A narrower line mid-turn** (a shorter allowlist, a login or profile taken away) closes the browser; the next step gets one
+  made from the line as it is now.
 
 | Setting                | Values                              | What it does                                                                    |
 | ---------------------- | ----------------------------------- | ------------------------------------------------------------------------------- |

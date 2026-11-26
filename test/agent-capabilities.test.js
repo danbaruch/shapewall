@@ -127,11 +127,12 @@ function shapeOf(caps) {
 
 // The expected grant per path, tier and whether an OS sandbox is there.
 // Spelled out, not computed: this is the plan's table (section 3.2 and 3.3).
-function expected(where, tier, box) {
+function expected(where, tier, box, os = 'linux') {
   if (where === 'hosted-chat') {
     return {
       shell: 'off',
-      commands: tier === 'solo' ? (box ? 'run lint' : 'card lint') : 'none',
+      // Read only needs the OS sandbox (Q7 B7): without one, no commands.
+      commands: tier === 'solo' && box ? 'run lint' : 'none',
       browser: tier === 'solo',
       edit: 'off',
       push: false,
@@ -150,9 +151,11 @@ function expected(where, tier, box) {
   }
   // Fix with, comment pickup, the local chat and watch --exec.
   const full = tier === 'solo' && box
+  // Edits without /proc fd checks (macOS and the rest): no commands, no shell (Q7 round 3).
+  const fdChecks = os === 'linux'
   return {
-    shell: full ? 'sandboxed' : 'exact',
-    commands: tier !== 'open' && box ? 'run test,lint' : 'card test,lint',
+    shell: !fdChecks ? 'off' : full ? 'sandboxed' : 'exact',
+    commands: !fdChecks ? 'none' : tier !== 'open' && box ? 'run test,lint' : 'card test,lint',
     browser: true,
     edit: 'copy',
     push: true,
@@ -168,7 +171,7 @@ test('capabilities: every tier x path x platform resolves to the table, fail clo
       for (const [name, platform] of Object.entries(PLATFORMS)) {
         const caps = resolve(tier, where, platform)
         assert.equal(caps.tier, tier, `${where} ${tier} ${name}: tier`)
-        assert.deepEqual(shapeOf(caps), expected(where, tier, sandboxed(platform)), `${where} ${tier} ${name}`)
+        assert.deepEqual(shapeOf(caps), expected(where, tier, sandboxed(platform), platform?.os ?? null), `${where} ${tier} ${name}`)
         // Always, everywhere.
         assert.equal(caps.browser.realChrome, false)
         assert.equal(caps.selfEdit, false)
@@ -1527,4 +1530,27 @@ test('browserNoSandbox: off by default and narrowest, on only while the browser 
   assert.deepEqual(local.problems, [])
   assert.equal(localMachinePolicy(local.entry).browserNoSandbox, true)
   assert.equal(localMachinePolicy(validateUserEntry({ capabilities: { browserNoSandbox: 'yes' } }).entry).browserNoSandbox, false)
+})
+
+test('Q7 B4: commands get the machine network on the owner turn only; team turns get none', () => {
+  const machine = optIn({
+    approvals: 'owner',
+    commands: ['npm test'],
+    trustTeam: ['robin'],
+    trustTeamShell: true,
+    shellNetwork: 'registries',
+  })
+  const at = (tier) =>
+    resolveCapabilities({
+      path: 'hosted-fix',
+      trust: TRUST[tier],
+      audience: 'owner',
+      machine,
+      config: CONFIG,
+      platform: PLATFORMS['linux sandbox'],
+    })
+  assert.equal(at('solo').shell.network, 'registries')
+  assert.notEqual(at('team').shell.mode, 'off', 'the team keeps its commands')
+  assert.equal(at('team').shell.network, 'none')
+  assert.equal(at('open').shell.network, 'none')
 })

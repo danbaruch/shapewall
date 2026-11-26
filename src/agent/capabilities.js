@@ -862,6 +862,11 @@ function resolveForTier(
     } else if (needsCard && tier !== 'open' && !contained) off('commands', 'no_sandbox')
   }
 
+  // The network a command gets: the machine's (the package registries by
+  // default) on the owner's own turn only. Registries let a command upload
+  // as well as download (npm publish, a package page), so on a team or open
+  // turn commands get none (Q7 B4); installs are the owner's.
+  const commandNetwork = tier === 'solo' ? m.shellNetwork : 'none'
   let shell = { mode: 'off', network: 'none', exact: [] }
   if (!known) off('shell', 'unknown_path')
   else if (!commandsOn) off('shell', commandsWhy)
@@ -870,14 +875,14 @@ function resolveForTier(
   else if (starter) shell = { mode: 'container', network: 'egress', exact: [] }
   else {
     const wantsFull = m.shell === 'sandboxed' && (tier === 'solo' || (tier === 'team' && m.trustTeamShell))
-    if (wantsFull && box.sandbox) shell = { mode: 'sandboxed', network: m.shellNetwork, exact: [] }
-    else if (wantsFull && unsandboxed) shell = { mode: 'unsandboxed', network: m.shellNetwork, exact: [] }
+    if (wantsFull && box.sandbox) shell = { mode: 'sandboxed', network: commandNetwork, exact: [] }
+    else if (wantsFull && unsandboxed) shell = { mode: 'unsandboxed', network: commandNetwork, exact: [] }
     else {
       if (wantsFull) off('shell', 'no_sandbox')
       else if (m.shell === 'commands') off('shell', 'machine_shell_commands')
       else if (tier === 'team') off('shell', 'team_shell_off')
       else if (tier === 'open') off('shell', 'open_tier_shell')
-      if (m.commands.length) shell = { mode: 'exact', network: box.sandbox ? m.shellNetwork : 'none', exact: m.commands }
+      if (m.commands.length) shell = { mode: 'exact', network: box.sandbox ? commandNetwork : 'none', exact: m.commands }
       else if (!wantsFull) off('shell', 'no_exact_commands')
     }
   }
@@ -885,6 +890,36 @@ function resolveForTier(
   if (!edit.on) {
     commands = commands.filter((command) => !command.mutating)
     if (shell.mode !== 'off') shell = { mode: 'off', network: 'none', exact: [] }
+  }
+  // A local board whose edits land in the checkout itself: a command there
+  // could leave files that run later on their own (Git hooks, .npmrc,
+  // node_modules/.bin, ...), which no check after the run can undo in time.
+  // Commands run only in a copy (Work on a branch): none here (Q7 re-review 1).
+  // Read-only commands (edits off) stay: they cannot write there.
+  if (local && config?.agent?.fixIn === 'checkout' && edit.on && (commands.length || shell.mode !== 'off')) {
+    commands = []
+    shell = { mode: 'off', network: 'none', exact: [] }
+    off('commands', 'in_place_commands')
+    off('shell', 'in_place_commands')
+  }
+  // A machine where Shapewall cannot check the file a write really opened
+  // (no /proc/self/fd: macOS and the rest): a process a command left behind
+  // could swap a folder for a link between the check and the write. A
+  // session that edits gets no commands and no shell there, on every tier
+  // (Q7 round 3). Read-only sessions keep read-only commands in the sandbox.
+  // Not a full shell the solo owner turned on without a sandbox
+  // (shell-unsandboxed on): that one already reaches past every check, and says so.
+  if (!starter && edit.on && box.os !== 'linux' && shell.mode !== 'unsandboxed' && (commands.length || shell.mode !== 'off')) {
+    commands = []
+    shell = { mode: 'off', network: 'none', exact: [] }
+    off('commands', 'edits_without_fd_checks')
+    off('shell', 'edits_without_fd_checks')
+  }
+  // Read only is the OS sandbox's to keep: without one no read-only command
+  // session starts (sandbox-exec.js no_sandbox_read_only), so none is offered.
+  if (!edit.on && !starter && !box.sandbox && commands.length) {
+    commands = []
+    off('commands', 'no_sandbox_read_only')
   }
 
   // The throwaway browser.
@@ -937,6 +972,14 @@ function resolveForTier(
       profile: loggedIn ? m.browserProfile : null,
       allowNoSandbox: noSandbox,
       realChrome: false,
+      // Origins that may open a port on this machine, checked again on the
+      // address each one resolves to (agent-browser.js, Q7 C1): any on the
+      // owner's own turn and the starter agent's (null), else the machine's list.
+      machineOrigins: ownersOwn || starter ? null : [...m.browserAllow],
+      // On an open turn Chromium's own sandbox is never off, not even inside
+      // the OS sandbox (where it cannot run): the browser starts on this
+      // machine with it, behind the same egress proxy, or not at all (Q7 C3).
+      chromiumSandbox: tier === 'open' ? 'required' : 'os-sandbox-instead',
     }
   }
   off('chrome', 'never_real_chrome')

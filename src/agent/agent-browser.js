@@ -316,7 +316,10 @@ export function cookieAllowed(domain, hosts) {
 }
 
 // A recorded login, read from the checkout, kept to the allowed origins.
-export function readAuthState(checkout, name, origins) {
+// `portless`: hosts a dev server of this session listens on too. A cookie
+// has no port, so one for such a host (127.0.0.1) would go to the agent's
+// own server as well: those are left out (Q7 C5).
+export function readAuthState(checkout, name, origins, { portless = [] } = {}) {
   if (typeof checkout !== 'string' || !path.isAbsolute(checkout)) throw new Error('A recorded login needs the project folder.')
   if (typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/.test(name)) throw new Error('Not a recorded login name.')
   const folder = path.join(checkout, '.shapewall-auth')
@@ -327,7 +330,8 @@ export function readAuthState(checkout, name, origins) {
   if (!stat.isFile()) throw new Error(`${name}.auth.json is not a plain file.`)
   if (stat.size > AUTH_FILE_MAX) throw new Error(`${name}.auth.json is over ${AUTH_FILE_MAX} bytes.`)
   const state = JSON.parse(fs.readFileSync(file, 'utf8'))
-  const hosts = new Set(origins.map((origin) => hostPort(origin).host))
+  const shared = new Set(portless.map((host) => String(host).toLowerCase()))
+  const hosts = new Set(origins.map((origin) => hostPort(origin).host).filter((host) => !shared.has(host)))
   const cookieFor = (cookie) => cookieAllowed(cookie?.domain, hosts)
   return {
     cookies: (Array.isArray(state?.cookies) ? state.cookies : []).filter(cookieFor),
@@ -441,6 +445,10 @@ export function createAgentBrowser({
   if (browser.realChrome) throw new Error('An agent never gets your own Chrome.')
   const allowNoSandbox = browser.allowNoSandbox === true
   const allowHostLaunch = browser.allowHostLaunch === true
+  // Inside the OS sandbox Chromium runs without its own (it cannot make its
+  // namespaces there). A turn that requires Chromium's sandbox (an open
+  // turn: capabilities.js) starts it on this machine instead, with it.
+  const chromiumRequired = browser.chromiumSandbox === 'required'
   if (osSandbox !== 'auto' && osSandbox !== true && osSandbox !== false) throw new Error('osSandbox is "auto", true or false.')
   const plan = sandboxPlan({ osSandbox, stand: Boolean(chromium) })
   if (osSandbox === true && !plan.use) throw new Error(`The OS sandbox for the browser is not available here (${plan.why}).`)
@@ -470,6 +478,7 @@ export function createAgentBrowser({
   }
   // token -> origin, for dev servers the tool host started (registerSpawned).
   const spawned = new Map()
+  const spawnedHosts = () => [...new Set([...spawned.values()].map((origin) => hostPort(origin).host))]
   const configured = new Set(given)
   const blocked = []
   const errors = []
@@ -486,17 +495,30 @@ export function createAgentBrowser({
   // A denied port on this machine: on loopback, and on its own LAN and
   // tailnet addresses too (a server there answers on all of them).
   const own = ownAddresses(interfaces)
-  const deniedPort = (address, port) => (addressKind(address) === 'loopback' || isOwnAddress(address, own)) && denied.has(port)
+  const onThisMachine = (address) => addressKind(address) === 'loopback' || isOwnAddress(address, own)
+  const deniedPort = (address, port) => onThisMachine(address) && denied.has(port)
+  // Which origins may open a port on this machine (Q7 C1): any, on the
+  // owner's own turn (browser.machineOrigins null or absent); otherwise only
+  // the ones the machine lists itself, and the dev servers this session started.
+  const machineOrigins = Array.isArray(browser.machineOrigins) ? new Set(browser.machineOrigins) : null
+  const mayBeHere = (origin) => !machineOrigins || machineOrigins.has(origin) || [...spawned.values()].includes(origin)
 
   async function allowOrigin(origin) {
     const { host, port, protocol } = hostPort(origin)
     if (!pins.has(host)) {
-      const pin = await pinHost(host, { lookup })
+      const pin = await pinHost(host, { lookup, own, allowOwn: mayBeHere(origin) })
       if (pin.refused) {
         refused.push({ origin, why: pin.refused })
         return false
       }
       pins.set(host, pin.address)
+    }
+    if (onThisMachine(pins.get(host)) && !mayBeHere(origin)) {
+      refused.push({
+        origin,
+        why: `${host} is on this machine (${pins.get(host)}); on this turn only origins the machine lists itself open here`,
+      })
+      return false
     }
     if (deniedPort(pins.get(host), port)) {
       refused.push({ origin, why: `port ${port} on this machine is never opened (debugging or Shapewall's own server)` })
@@ -755,7 +777,15 @@ export function createAgentBrowser({
         handleSIGTERM: false,
         handleSIGHUP: false,
       })
-      if (plan.use) {
+      if (plan.use && chromiumRequired) {
+        if (osSandbox === true)
+          throw new Error(
+            "The agent browser stays off: inside the OS sandbox it runs without Chromium's own sandbox, which this turn does not allow.",
+          )
+        notes.push(
+          "This browser runs on this machine with Chromium's own sandbox (inside the OS sandbox it would run without it, which this turn does not allow); its network still goes through Shapewall's allowlist proxy.",
+        )
+      } else if (plan.use) {
         try {
           ;({ context, proxy, box } = await launchBoxed({ engine, dir, userDataDir, profile: checked?.real || null, options }))
           isolation = 'os-sandbox'
@@ -774,9 +804,9 @@ export function createAgentBrowser({
         proxy = await startEgressProxy({ target, onBlock: ({ url }) => block(url, 'proxy') })
         const hostOptions = (sandbox) => options(sandbox, `http://127.0.0.1:${proxy.port}`, cleanEnv(dir))
         try {
-          context = await engine.launchPersistentContext(userDataDir, hostOptions(chromiumSandbox))
+          context = await engine.launchPersistentContext(userDataDir, hostOptions(chromiumSandbox || chromiumRequired))
         } catch (error) {
-          if (!chromiumSandbox || !SANDBOX_ERROR_RE.test(String(error?.message))) throw error
+          if (!(chromiumSandbox || chromiumRequired) || !SANDBOX_ERROR_RE.test(String(error?.message))) throw error
           if (!noSandboxNow)
             throw new Error(
               "Chromium's own sandbox could not start on this machine, so the agent browser stays off. " +
@@ -828,7 +858,8 @@ export function createAgentBrowser({
         block(ws.url(), 'websocket')
         return ws.close({ code: 1008, reason: 'Blocked by Shapewall' })
       })
-      if (browser.auth) await context.setStorageState(readAuthState(checkout, browser.auth, [...allowed.keys()]))
+      if (browser.auth)
+        await context.setStorageState(readAuthState(checkout, browser.auth, [...allowed.keys()], { portless: spawnedHosts() }))
       const current = { context, proxy, dir, page: null, box }
       context.on('page', (page) => {
         watch(page)
@@ -989,8 +1020,10 @@ export function createAgentBrowser({
           given.splice(given.indexOf(origin), 1)
         return false
       }
-      if (state) return allowOrigin(origin)
-      return true
+      if (!state) return true
+      // A recorded login's cookies for this host would reach the dev server's port too: dropped.
+      if (browser.auth) await state.context.clearCookies({ domain: hostPort(origin).host }).catch(() => {})
+      return allowOrigin(origin)
     },
     page,
     async navigate(url) {
