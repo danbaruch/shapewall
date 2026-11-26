@@ -48,7 +48,7 @@
 import express from 'express'
 import { listJourneys } from '../journeys.js'
 import { MENTION_HANDLE_RE } from '../mentions.js'
-import { RESPOND_MODES, agentHandles, effectiveRespond, isPrivateThread, respondLine, shouldRespond } from '../agent/triggers.js'
+import { RESPOND_MODES, effectiveRespond, isPrivateThread, respondLine, shouldRespond } from '../agent/triggers.js'
 import { FIXABLE_FROM, commentText } from '../comment-fields.js'
 import { validateFiles } from '../agent/composer.js'
 import { QUERY_MAX, THREAD_RE, CHAT_RE, threadKind } from '../agent/thread-history.js'
@@ -262,7 +262,7 @@ export function mountChatRoutes(
       shared,
       stored: shared ? threadRespond(row) : null,
       machine,
-      handles: agent ? agentHandles(agent) : ['agent'],
+      handles: agent ? agentsFor(req.t).triggerHandles(agent) : ['agent'],
       line: respondLine({ threadId, respond: threadRespond(row), machine, name: agent?.name || 'The agent' }),
       note: !shared
         ? null
@@ -827,7 +827,8 @@ export function mountChatRoutes(
       const decision = shouldRespond({
         threadId,
         message: { text, mentions },
-        handles: agentHandles(named),
+        // A member's handle is a person mention, never this agent's trigger.
+        handles: agents.triggerHandles(named),
         respond: threadRespond(at.row),
         explicit,
         machine: named ? agents.machinePolicy(agents.get(req.project.id, named.id) || named).respond : 'mention',

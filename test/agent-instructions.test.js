@@ -14,6 +14,8 @@ import {
   agentConfigDir,
   createInstructionsNote,
   importsOf,
+  instructionPaths,
+  isInstructionPath,
   instructionsLines,
   instructionsPrompt,
   instructionsStatus,
@@ -66,10 +68,11 @@ test('load order: CLAUDE.md and .claude/CLAUDE.md; AGENTS.md only when neither e
     'project:CLAUDE.md',
     'project:.claude/CLAUDE.md',
   ])
-  assert.deepEqual(loadInstructions({ root, configDir: config, mode: 'none' }), { files: [], refused: [] })
-  assert.deepEqual(loadInstructions({ root, configDir: config, mode: 'everything' }), { files: [], refused: [] })
+  assert.deepEqual(loadInstructions({ root, configDir: config, mode: 'none' }), { files: [], refused: [], named: [] })
+  assert.deepEqual(loadInstructions({ root, configDir: config, mode: 'everything' }), { files: [], refused: [], named: [] })
   // No files: nothing, and no error.
-  assert.deepEqual(loadInstructions({ root: tempDir('instr-empty') }), { files: [], refused: [] })
+  const empty = loadInstructions({ root: tempDir('instr-empty') })
+  assert.deepEqual({ files: empty.files, refused: empty.refused }, { files: [], refused: [] })
 })
 
 test('imports: followed inside their folder only, with every refusal said and the text left as it is', () => {
@@ -456,6 +459,11 @@ test('the session gets the files as an appended system prompt when the agent tak
   // Auto memory's variable is set for a connected session (read only and edits), whatever the person's environment says.
   const envOf = async (settings) => JSON.parse(await ask({ acp: { argv: [stubBin()] }, ...settings }, 'env', root))
   assert.ok((await envOf({ readOnly: true })).includes('CLAUDE_CODE_DISABLE_AUTO_MEMORY'))
+  // Every session, connected or not, is marked as an agent's process (src/agent-run.js).
+  for (const settings of [{}, { readOnly: true }]) {
+    const names = await envOf(settings)
+    assert.ok(names.includes('SHAPEWALL_AGENT_RUN') && names.includes('SHAPEWALL_AGENT_HEADER'), JSON.stringify(settings))
+  }
   const edit = await ask({ acp: { argv: [stubBin()] }, readOnly: false, remoteEdit: { commands: [], allowPaths: [] } }, 'newparams', root)
   assert.deepEqual(JSON.parse(edit)._meta.claudeCode.options.settings, { autoMemoryEnabled: false })
 
@@ -517,4 +525,27 @@ test('a fix asks to edit CLAUDE.md or AGENTS.md: refused on the machine, the fil
   assert.deepEqual(asked, [], 'refused before anyone (or any rule) is asked')
   assert.equal(fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'), 'Use tabs. See @docs/x.md\n')
   assert.equal(fs.readFileSync(path.join(root, 'docs/AGENTS.md'), 'utf8'), 'Be brief.\n')
+})
+
+test('the instruction guard covers every file a session would read, there yet or not', () => {
+  const root = tempDir('instr-guard-missing')
+  write(root, 'CLAUDE.md', 'See @docs/rules.md and @docs/later.md and @Notes/Big.md\n')
+  write(root, 'docs/rules.md', 'Deeper: @deeper/one.md\n')
+  write(root, 'Notes/Big.md', 'x'.repeat(INSTRUCTION_FILE_MAX + 1))
+  const paths = instructionPaths(root)
+  // Read files, an import that does not exist yet, one refused for its size, and one an imported file names.
+  for (const rel of ['CLAUDE.md', 'docs/rules.md', 'docs/later.md', 'Notes/Big.md', 'docs/deeper/one.md'])
+    assert.equal(isInstructionPath(paths, rel), true, rel)
+  // The top files count whether or not they are there.
+  for (const rel of ['AGENTS.md', '.claude/CLAUDE.md']) assert.equal(isInstructionPath(paths, rel), true, rel)
+  // Refused imports are never read, so they are not rules; other files are not either.
+  assert.equal(isInstructionPath(paths, 'src/app.js'), false)
+  // An empty project still guards the top files.
+  const empty = instructionPaths(tempDir('instr-guard-empty'))
+  assert.equal(isInstructionPath(empty, 'CLAUDE.md'), true)
+  assert.equal(isInstructionPath(empty, 'agents.md'), true)
+  // Nothing in `named` leaves the machine: the summary lists read files only.
+  const loaded = loadInstructions({ root, mode: 'project' })
+  assert.ok(loaded.named.some((item) => item.path === 'docs/later.md'))
+  assert.ok(!instructionsSummary(loaded).some((item) => item.path === 'docs/later.md'))
 })

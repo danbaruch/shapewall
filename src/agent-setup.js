@@ -32,7 +32,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { compareVersions, packageVersionOf, parseVersion, resolveShapewallCommand } from './shapewall-command.js'
+import { compareVersions, directCommand, packageVersionOf, parseVersion, resolveShapewallCommand } from './shapewall-command.js'
+import { AGENT_RUN_VAR } from './agent-run.js'
 import { readServer, removeServer, serverText, setServer } from './codex-toml.js'
 import { lookupProgram } from './which.js'
 
@@ -149,12 +150,20 @@ export function isOlderShapewall(entry, { tail, version }) {
 }
 
 // Claude Code on native Windows starts a .cmd program (npx.cmd, an npm
-// shim) only through "cmd /c" (its MCP docs). A committed .mcp.json keeps
-// plain npx for everyone.
-export function claudeCommand(resolved, { scope, platform = process.platform }) {
-  if (platform === 'win32' && scope !== 'project' && /\.(cmd|bat)$/i.test(resolved.command))
-    return { command: 'cmd', args: ['/c', resolved.command, ...resolved.args] }
-  return { command: resolved.command, args: resolved.args }
+// shim) only through "cmd /c" (its MCP docs), where a space, &, ^ or % in
+// its path breaks the start or runs something else. So a shapewall shim is
+// registered as node and the package's own bin file, npx.cmd as node and
+// npm's npx-cli.js (directCommand), and "cmd /c" is left only for a program
+// with no other way whose every part is plain text cmd.exe passes on as
+// written; anything else is an Error. `tail` is the "mcp ..." arguments,
+// checked with the rest. A committed .mcp.json keeps plain npx for everyone.
+export function claudeCommand(resolved, { scope, platform = process.platform, tail = [], execPath, exists, entryOf } = {}) {
+  if (platform !== 'win32' || scope === 'project') return { command: resolved.command, args: resolved.args }
+  const options = { platform, ...(execPath ? { execPath } : {}), ...(exists ? { exists } : {}), ...(entryOf ? { entryOf } : {}) }
+  const direct = directCommand(resolved.command, [...resolved.args, ...tail], options)
+  const args = direct.args.slice(0, direct.args.length - tail.length)
+  if (direct.shell) return { command: 'cmd', args: ['/c', direct.command, ...args] }
+  return { command: direct.command, args }
 }
 
 // One app's plan: { app, file, shownFile, action: 'add'|'update'|'same'|'differs'|'remove'|'absent'|'skip',
@@ -177,14 +186,16 @@ function planClaude({ dir, scope, remote, config, version, env, force, remove, c
   }
   const reach = scope === 'user' ? 'global' : scope
   const resolved = resolveShapewallCommand({ projectDir: dir, version, reach, env, platform })
-  const program = claudeCommand(resolved, { scope, platform })
   const configArg = config ? (scope === 'project' ? path.relative(dir, config) || config : config) : null
   const tail = serverArgs({ prefix: [], remote, config: configArg })
+  const program = claudeCommand(resolved, { scope, platform, tail })
+  // `shapewall mcp` marks itself as an agent's process (src/agent-run.js);
+  // the entry carries the mark too, the person's own env values kept.
   const after = {
     type: 'stdio',
     command: program.command,
     args: [...program.args, ...tail],
-    env: existing?.env || {},
+    env: { ...(existing?.env && typeof existing.env === 'object' ? existing.env : {}), [AGENT_RUN_VAR]: '1' },
   }
   notes.push(`Uses ${resolved.note}.`)
   if (scope === 'project') notes.push('Claude Code asks each person to approve the shapewall server in .mcp.json the first time.')

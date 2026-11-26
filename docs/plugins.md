@@ -67,7 +67,10 @@ Check it: in the project, `claude mcp list` shows `plugin:shapewall:shapewall ..
 
 The plugin's launcher (`bin/shapewall-mcp.mjs`, plain Node, no dependencies) starts `shapewall mcp` with the first of:
 
-1. the project's own install, `node_modules/.bin/shapewall`;
+1. the project's own install, `node_modules/.bin/shapewall`, but only a real npm install: it must resolve to the bin file of
+   `node_modules/shapewall`, whose `package.json` is named `shapewall` at the plugin's version or newer; the file must be yours (on
+   macOS and Linux); and git must track neither (a repository that commits `node_modules` gives you its code, not an install). If
+   git is not there to ask, only a folder outside any repository passes. Anything else is passed over, and `--print` says why;
 2. `shapewall` on PATH, when it is the plugin's version or newer. The plugin is installed once for every project, so it skips the
    same PATH folders as an every-project `shapewall agent setup` entry: npx's cache (an `_npx` folder), any folder under a
    `node_modules` folder (npm puts the project's and its parents' `node_modules/.bin` first, and another project's install lives
@@ -76,6 +79,11 @@ The plugin's launcher (`bin/shapewall-mcp.mjs`, plain Node, no dependencies) sta
 
 It runs in the project folder: the nearest folder at or above where the app works that has a `shapewall.config.json`, up to the
 repository root (a folder with `.git`) and never the home folder or above. So an app opened in a subfolder still finds the board.
+Outside a repository it looks only in the folder the app works in, and it never uses a folder that belongs to another user.
+
+On Windows it starts `node` with the package's own bin file (or npm's `npx-cli.js` beside `node`) rather than an npm `.cmd` shim, so
+no shell reads a path. Only when there is no other way does it go through `cmd.exe`, and then only when the program and its arguments
+have no space in the program's path and none of `" % ^ & | < > !`; otherwise it stops with an error.
 
 To see what it would run, in the project: `node <plugin folder>/bin/shapewall-mcp.mjs --print`.
 
@@ -123,9 +131,13 @@ files and the versions; a unit test fails while they are stale. Check the manife
 
 ## Safety
 
-- The launcher never takes a command from a project file. In the project it only checks whether `shapewall.config.json` and
-  `node_modules/.bin/shapewall` exist, and reads the version in `node_modules/shapewall/package.json`.
-- It runs no program to learn a version, and `npx` is pinned to an exact version.
+- What it may run from the project is exactly step 1: `node_modules/.bin/shapewall`, when it passes every check there. It reads
+  nothing else from a project file: it checks whether `shapewall.config.json` exists and reads `node_modules/shapewall/package.json`
+  for the name, version and bin file. A repository you cloned cannot hand it a program by committing one.
+- It runs no program to learn a version, and `npx` is pinned to an exact version. The one program it runs before `shapewall` is
+  `git ls-files --error-unmatch`, without a shell, with a timeout, from an absolute PATH folder outside the project.
+- What it starts is marked as an agent's (`SHAPEWALL_AGENT_RUN=1`, see [agent hardening](agent-hardening.md)), so a comment the agent
+  adds with `shapewall comments add` is signed "agent" and never carries the owner's stamp.
 - No token or password is in any plugin file or setting; hosted boards use the saved `shapewall login`.
 - Comment text stays untrusted: every skill repeats the rule from the server's instructions.
 

@@ -145,7 +145,7 @@ test('hosted compare: fitted in the cleaner workers like inline, one compare per
   const after = pattern(2000, 50, (x, y) => page(x + 1, y))
   const cleaner = createCleaner({ size: 2 })
   try {
-    const gate = hostedCompare(cleaner)('token-a')
+    const gate = hostedCompare(cleaner)({ tokenId: 'token-a', workspaceId: 'w1' })
     assert.equal(gate.maxPixels, HOSTED_COMPARE_MAX_PIXELS)
     const inWorkers = await compareImages({ beforePng: before, afterPng: after, maxPixels: gate.maxPixels, fit: gate.fit })
     const inline = compareImages({ beforePng: before, afterPng: after })
@@ -164,18 +164,135 @@ test('hosted compare: fitted in the cleaner workers like inline, one compare per
   } finally {
     await cleaner.close()
   }
-  const forToken = hostedCompare(null)
+  const forToken = hostedCompare(null, { globalMax: 3 })
   let release
-  const first = forToken('token-a').run(() => new Promise((resolve) => (release = resolve)))
+  const first = forToken({ tokenId: 'token-a', workspaceId: 'w1' }).run(() => new Promise((resolve) => (release = resolve)))
   await assert.rejects(
-    forToken('token-a').run(async () => 'second'),
-    (error) => error.code === 'busy' && /Retry/.test(error.message),
+    forToken({ tokenId: 'token-a', workspaceId: 'w1' }).run(async () => 'second'),
+    (error) => error.code === 'busy' && error.status === 429 && /this token/.test(error.message) && /Retry/.test(error.message),
   )
-  // Another token is not held up, and the slot frees when the first ends.
-  assert.equal(await forToken('token-b').run(async () => 'other'), 'other')
+  // Another workspace's token is not held up, and the slot frees when the first ends.
+  assert.equal(await forToken({ tokenId: 'token-b', workspaceId: 'w2' }).run(async () => 'other'), 'other')
   release('first')
   assert.equal(await first, 'first')
-  assert.equal(await forToken('token-a').run(async () => 'again'), 'again')
+  assert.equal(await forToken({ tokenId: 'token-a', workspaceId: 'w1' }).run(async () => 'again'), 'again')
+})
+
+// A cleaner whose jobs the test settles by hand.
+function handCleaner({ queued = 0, maxQueue = 32 } = {}) {
+  const jobs = []
+  return {
+    jobs,
+    queued,
+    clean() {
+      return new Promise((resolve, reject) => jobs.push({ resolve, reject }))
+    },
+    stats() {
+      return { busy: jobs.length, idle: 0, queued: this.queued, size: 2, maxQueue }
+    },
+  }
+}
+const fitted = () => ({ buffer: Buffer.alloc(8), pixelBytes: 4, width: 1, height: 1 })
+const holding = () => {
+  let release
+  const work = () => new Promise((resolve) => (release = resolve))
+  return { work, release: (value) => release(value) }
+}
+const tick = () => new Promise((resolve) => setImmediate(resolve))
+
+test('hosted compare: one compare on the whole server at a time, whatever the workspace or token', async () => {
+  const compare = hostedCompare(null)
+  const held = holding()
+  const first = compare({ tokenId: 'a', workspaceId: 'w1' }).run(held.work)
+  await assert.rejects(
+    compare({ tokenId: 'b', workspaceId: 'w2' }).run(async () => 'x'),
+    /another compare/,
+  )
+  await assert.rejects(
+    compare({ tokenId: 'c', workspaceId: 'w3' }).run(async () => 'x'),
+    (error) => error.status === 429,
+  )
+  held.release('done')
+  assert.equal(await first, 'done')
+  assert.equal(await compare({ tokenId: 'b', workspaceId: 'w2' }).run(async () => 'next'), 'next')
+})
+
+test('hosted compare: one compare per workspace at a time, even with room on the server', async () => {
+  const compare = hostedCompare(null, { globalMax: 4 })
+  const held = holding()
+  const first = compare({ tokenId: 'a', workspaceId: 'w1' }).run(held.work)
+  // Another token of the same workspace waits; another workspace does not.
+  await assert.rejects(
+    compare({ tokenId: 'b', workspaceId: 'w1' }).run(async () => 'x'),
+    /this workspace/,
+  )
+  assert.equal(await compare({ tokenId: 'c', workspaceId: 'w2' }).run(async () => 'other'), 'other')
+  held.release('done')
+  await first
+  assert.equal(await compare({ tokenId: 'b', workspaceId: 'w1' }).run(async () => 'now'), 'now')
+})
+
+test('hosted compare: refused while the shared queue is over half full, so pushes keep their half', async () => {
+  const cleaner = handCleaner({ queued: 16, maxQueue: 32 })
+  const compare = hostedCompare(cleaner)
+  await assert.rejects(
+    compare({ tokenId: 'a', workspaceId: 'w1' }).run(async () => 'x'),
+    (error) => error.status === 429 && /busy cleaning files/.test(error.message),
+  )
+  assert.equal(cleaner.jobs.length, 0, 'nothing went into the pool')
+  cleaner.queued = 15
+  const gate = compare({ tokenId: 'a', workspaceId: 'w1' })
+  const run = gate.run(() => gate.fit(Buffer.alloc(1), {}))
+  await tick()
+  assert.equal(cleaner.jobs.length, 1)
+  cleaner.jobs[0].resolve(fitted())
+  assert.equal((await run).width, 1)
+  // The queue filling up between a compare's two captures stops the second one.
+  const second = compare({ tokenId: 'a', workspaceId: 'w1' })
+  const both = second.run(() => Promise.all([second.fit(Buffer.alloc(1), {}), second.fit(Buffer.alloc(1), {})]))
+  await tick()
+  cleaner.queued = 20
+  cleaner.jobs[1].resolve(fitted())
+  await assert.rejects(both, (error) => error.status === 429)
+  assert.equal(cleaner.jobs.length, 2, 'the second capture never went into the pool')
+})
+
+test('hosted compare: a compare holds one worker at a time, and its slots wait for both fits to settle', async () => {
+  const cleaner = handCleaner()
+  const compare = hostedCompare(cleaner)
+  const gate = compare({ tokenId: 'a', workspaceId: 'w1' })
+  let second
+  const run = gate.run(async () => {
+    const first = gate.fit(Buffer.alloc(1), {})
+    second = gate.fit(Buffer.alloc(1), {})
+    second.catch(() => {})
+    await first
+    // The tool gives up after the first capture (an error of its own).
+    throw new Error('gave up')
+  })
+  await tick()
+  assert.equal(cleaner.jobs.length, 1, 'the captures go into the pool one after the other')
+  cleaner.jobs[0].resolve(fitted())
+  await tick()
+  assert.equal(cleaner.jobs.length, 2)
+  // The second capture is still in the pool: the slots stay taken.
+  await tick()
+  await assert.rejects(
+    compare({ tokenId: 'b', workspaceId: 'w2' }).run(async () => 'x'),
+    /another compare/,
+  )
+  cleaner.jobs[1].resolve(fitted())
+  await assert.rejects(run, /gave up/)
+  assert.equal(await compare({ tokenId: 'b', workspaceId: 'w2' }).run(async () => 'free'), 'free')
+
+  // A first capture that fails: the second is never started, and the slots free.
+  const next = compare({ tokenId: 'a', workspaceId: 'w1' })
+  const failing = next.run(() => Promise.all([next.fit(Buffer.alloc(1), {}), next.fit(Buffer.alloc(1), {})]))
+  await tick()
+  cleaner.jobs[2].reject(Object.assign(new Error('bad'), { code: 'clean_failed' }))
+  await assert.rejects(failing, /bad/)
+  assert.equal(cleaner.jobs.length, 3)
+  assert.equal(await compare({ tokenId: 'c', workspaceId: 'w3' }).run(async () => 'ok'), 'ok')
 })
 
 test('local compare: a capture that lands while the pair is read is refused, not mislabeled', () => {

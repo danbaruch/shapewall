@@ -127,13 +127,10 @@ test('resolver order: the project install, then PATH at or above this version, t
   assert.match(resolveShapewallCommand({ projectDir: old.dir, version: VERSION, env: old.env }).note, /older/)
   // A relative PATH entry never counts.
   assert.equal(pathInstall({ PATH: `.:bin:${''}` }), null)
-  // The project's own install.
+  // The project's own install (a real npm install, not committed: see the projectInstall tests).
   const own = path.join(box.dir, 'node_modules')
-  fs.mkdirSync(path.join(own, '.bin'), { recursive: true })
-  fs.mkdirSync(path.join(own, 'shapewall'))
-  fs.writeFileSync(path.join(own, 'shapewall', 'package.json'), JSON.stringify({ name: 'shapewall', version: '1.0.0' }))
-  fs.writeFileSync(path.join(own, '.bin', 'shapewall'), '#!/bin/sh\n', { mode: 0o755 })
-  assert.equal(projectInstall(box.dir).version, '1.0.0')
+  npmInstall(box.dir, VERSION)
+  assert.equal(projectInstall(box.dir, { version: VERSION }).version, VERSION)
   assert.deepEqual(pick('local'), { command: path.join(own, '.bin', 'shapewall'), args: [], how: 'project' })
   assert.deepEqual(pick('project'), { command: 'npx', args: ['shapewall'], how: 'project' })
   // Global registrations never name one project's install.
@@ -263,12 +260,17 @@ test('agent setup: Claude Code local scope and Codex, after a yes; argv, files a
   assert.equal(add.name, 'claude')
   assert.deepEqual(add.args.slice(0, 4), ['mcp', 'add-json', '-s', 'local'])
   assert.equal(add.args[4], 'shapewall')
-  assert.deepEqual(JSON.parse(add.args[5]), { type: 'stdio', command: shapewall, args: ['mcp'], env: {} })
+  assert.deepEqual(JSON.parse(add.args[5]), { type: 'stdio', command: shapewall, args: ['mcp'], env: { SHAPEWALL_AGENT_RUN: '1' } })
   assert.equal(fs.realpathSync(add.cwd), fs.realpathSync(box.dir))
   assert.deepEqual(get.args, ['mcp', 'get', 'shapewall', '--json'])
   // Never a token on a command line.
   assert.doesNotMatch(JSON.stringify(box.calls()), /swp_/)
-  assert.deepEqual(claudeEntries(box.dir, box.env).local, { type: 'stdio', command: shapewall, args: ['mcp'], env: {} })
+  assert.deepEqual(claudeEntries(box.dir, box.env).local, {
+    type: 'stdio',
+    command: shapewall,
+    args: ['mcp'],
+    env: { SHAPEWALL_AGENT_RUN: '1' },
+  })
   const claude = JSON.parse(fs.readFileSync(box.claudeFile, 'utf8'))
   assert.equal(claude.numStartups, 3)
   assert.deepEqual(claude.mcpServers, { other: { command: 'x' } })
@@ -322,7 +324,12 @@ test('agent setup: a different entry is shown and replaced only with --force; a 
     ],
   )
   // The person's env stays on the Claude entry; their timeout on the Codex one.
-  assert.deepEqual(claudeEntries(box.dir, box.env).local, { type: 'stdio', command: shapewall, args: ['mcp'], env: { A: '1' } })
+  assert.deepEqual(claudeEntries(box.dir, box.env).local, {
+    type: 'stdio',
+    command: shapewall,
+    args: ['mcp'],
+    env: { A: '1', SHAPEWALL_AGENT_RUN: '1' },
+  })
   assert.deepEqual(readServer(fs.readFileSync(box.codexFile, 'utf8')), { command: shapewall, args: ['mcp'], tool_timeout_sec: 900 })
 })
 
@@ -429,7 +436,7 @@ test('planSetup picks the apps found: codex counts when its config folder exists
 function npmInstall(root, version) {
   const pkg = path.join(root, 'node_modules', 'shapewall')
   fs.mkdirSync(path.join(pkg, 'bin'), { recursive: true })
-  fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'shapewall', version }))
+  fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'shapewall', version, bin: { shapewall: 'bin/shapewall.js' } }))
   fs.writeFileSync(path.join(pkg, 'bin', 'shapewall.js'), '#!/bin/sh\necho not this one\n', { mode: 0o755 })
   const bin = path.join(root, 'node_modules', '.bin')
   fs.mkdirSync(bin, { recursive: true })

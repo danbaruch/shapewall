@@ -277,7 +277,7 @@ test('read and answer only: the machine refuses writes, commands and permission 
   assert.deepEqual(caps, { fs: { readTextFile: true, writeTextFile: false }, terminal: false })
   // Its environment has no Shapewall token or setting.
   const names = JSON.parse((await chat(ada, chatUrl(thread, '/messages'), 'env')).final.text)
-  assert.ok(!names.some((name) => /^SHAPEWALL_/.test(name)))
+  assert.deepEqual(names.filter((name) => /^SHAPEWALL_/.test(name)).sort(), ['SHAPEWALL_AGENT_HEADER', 'SHAPEWALL_AGENT_RUN'])
   // A fix from a chat is refused with words, not attempted: a fix starts from a comment
   // (and from an agent whose machine takes edits: test/hosted-fix.test.js).
   const fix = await chat(ada, chatUrl(thread, '/messages'), { ask: true, text: 'x', fix: true })
@@ -403,6 +403,24 @@ test("shared threads answer an @mention or Send to agent; Answer every message i
     assert.equal(asked.final.role, 'assistant')
   }
   assert.equal(turns(), count + 3)
+  // A member who has the agent's handle (joined later, or changed theirs): @builder is that person, not the agent.
+  const cydHandle = hosted.db.prepare('SELECT handle FROM users WHERE id = ?').get(cyd.user.id).handle
+  hosted.db.prepare('UPDATE users SET handle = ? WHERE id = ?').run('builder', cyd.user.id)
+  try {
+    const person = await chat(cyd, chatUrl(thread, '/messages'), { text: '@builder stream' })
+    assert.equal(person.status, 200, person.text)
+    assert.equal(person.events.at(-1).name, 'posted')
+    assert.equal(person.events.at(-1).data.reason, 'not_addressed')
+    assert.equal(turns(), count + 3, 'a member mention wakes no agent')
+    view = (await cyd.browser.get(chatUrl(thread))).json
+    assert.deepEqual(view.respond.handles, ['agent'])
+    // @agent still reaches it.
+    const still = await chat(cyd, chatUrl(thread, '/messages'), { text: '@agent stream' })
+    assert.equal(still.events.at(-1).name, 'done', still.text)
+  } finally {
+    hosted.db.prepare('UPDATE users SET handle = ? WHERE id = ?').run(cydHandle, cyd.user.id)
+  }
+  assert.equal(turns(), count + 4)
   // Who may change it: the person who connected it (Ada) for "always".
   view = (await ada.browser.get(chatUrl(thread))).json
   assert.deepEqual(view.respond.canSet, { always: true, mention: true })
