@@ -722,7 +722,10 @@ test(
     await until(() => output.includes('This temporary server'))
     cli.kill('SIGINT')
     cli.kill('SIGTERM')
-    const [code, signal] = await ended
+    // And more, every millisecond, until it is gone: one that lands after
+    // cleanup, while the process is on its way out, must not kill it either.
+    const more = setInterval(() => cli.kill('SIGTERM'), 1)
+    const [code, signal] = await ended.finally(() => clearInterval(more))
     assert.equal(code, 0)
     assert.equal(signal, null)
     assert.equal(fs.existsSync(agentControlFile(b.config, b.env)), false)

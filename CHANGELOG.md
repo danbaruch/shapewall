@@ -113,6 +113,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   the full-size captures: two 3840x4166 captures took 1.25 s, now about 0.33 s, and a fraction of the memory.
 - `compare_captures` no longer labels the wrong image `current` when a capture or push lands while it reads: it asks to be called
   again (local boards re-check the version; hosted current capture URLs carry `?version=` and answer 409 once it moved).
+- `shapewall settings` exits 0 when a second Ctrl-C (or a SIGTERM right after a SIGINT) lands just as its cleanup finishes;
+  before, a signal in the last few milliseconds of shutdown ended it by signal.
 
 ### Security
 

@@ -485,20 +485,34 @@ test('columns resize and move by pointer and by keyboard; grouped rows compare w
   assert.equal(await widthOf('agent'), before + 60, 'a reload keeps it')
 
   // The same from the keyboard: the header's menu has Narrower, Wider and the moves.
-  await page.locator('[data-sw-grid-menu="agent"]').focus()
-  await page.keyboard.press('Enter')
-  await page.locator('[data-sw-grid-narrower="agent"]').waitFor()
-  await page.keyboard.press('ArrowDown')
-  await page.locator('[data-sw-grid-narrower="agent"]').focus()
-  await page.keyboard.press('Enter')
+  // Enter opens it on its first item and the arrows walk down to the one named.
+  // The menu moves the focus a moment after each key (on a timer), so each
+  // step waits for the focus to land before the next key: a key or a focus()
+  // sent meanwhile is overtaken by the move still due, and Enter then picks
+  // the item after the one that was meant.
+  const focusedItem = () =>
+    page.evaluate(() => (document.activeElement?.getAttribute('role') === 'menuitem' ? document.activeElement.textContent.trim() : null))
+  const pickFromMenu = async (id, label) => {
+    await page.locator(`[data-sw-grid-menu="${id}"]`).focus()
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => document.activeElement?.getAttribute('role') === 'menuitem')
+    for (let step = 0; (await focusedItem()) !== label; step++) {
+      assert.ok(step < 10, `${label} is in the menu`)
+      const was = await focusedItem()
+      await page.keyboard.press('ArrowDown')
+      await page.waitForFunction(
+        (was) => document.activeElement?.getAttribute('role') === 'menuitem' && document.activeElement.textContent.trim() !== was,
+        was,
+      )
+    }
+    await page.keyboard.press('Enter')
+  }
+  await pickFromMenu('agent', 'Narrower')
   await page.waitForFunction(
     (width) => Math.round(document.querySelector('[data-sw-grid-header="agent"]').getBoundingClientRect().width) === width,
     before + 28,
   )
-  await page.locator('[data-sw-grid-menu="agent"]').focus()
-  await page.keyboard.press('Enter')
-  await page.getByRole('menuitem', { name: 'Move right' }).focus()
-  await page.keyboard.press('Enter')
+  await pickFromMenu('agent', 'Move right')
   await page.waitForFunction(() => /[?&]cols=/.test(window.location.search))
   assert.deepEqual((await order()).slice(0, 4), ['started', 'kind', 'project', 'agent'])
 
