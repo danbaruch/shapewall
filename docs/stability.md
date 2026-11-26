@@ -46,7 +46,8 @@ all`), an experimental command or option ends its first line with `(experimental
   `Dockerfile.agent`, `SHAPEWALL_AGENT_IMAGE`, `SHAPEWALL_AGENT_RUNTIME`, `SHAPEWALL_AGENT_REGISTRY`, `SHAPEWALL_AGENT_EGRESS`,
   `SHAPEWALL_AGENT_KEY_HOSTS`, `SHAPEWALL_SANDBOX` and `SHAPEWALL_EGRESS_*` ([the starter agent](starter-agent.md)).
 - **The hosted agent link policy:** `agent connect --approvals`, `--auto`, `--allow-command`, `--allow-path` and `--audience`,
-  `/api/v1/agent/*` and the machine's `agent-policy.json`.
+  `/api/v1/agent/*`, the machine's `agent-policy.json` (version 2 and its capability keys) and the `capabilities` entry of a
+  project in `agents.json`.
 - **Chat internals:** `agent.branchMode`, `agent.branchPrefix`, `agent.batchFixes`, `SHAPEWALL_AGENT_BRANCH_*`,
   `SHAPEWALL_AGENT_ACP_ENV` and the chat's event stream.
 - **Tailnet sign-in:** `hosted --tailnet-sign-in`, `--tailnet-passkeys`, `--funnel` and `--funnel-port`, `hosted claim`,

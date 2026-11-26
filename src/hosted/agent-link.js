@@ -41,7 +41,8 @@ import { FRAME_LIMITS, cleanEvent, cleanReply, usageOf } from './chat-frames.js'
 import { createPermissionStore, permissionView } from './chat-permissions.js'
 import { JobError, buildJob } from './chat-job.js'
 import { INTERRUPTED_MESSAGE, threadRespond } from './chat-store.js'
-import { agentPolicy } from './agent-policy.js'
+import { agentPolicy, narrowingOf } from './agent-policy.js'
+import { cleanCapabilitySummary } from '../agent/capability-render.js'
 import { LINK_KINDS, LINK_TURNS_MAX } from './agents.js'
 import { rowToComment } from './comments.js'
 import { transaction } from './db.js'
@@ -401,6 +402,9 @@ export function cleanHello(body) {
         // Whether a thread set to answer every message is honored there ("thread"), or mentions only.
         respond: policy.respond === 'thread' ? 'thread' : 'mention',
       },
+      // What each trust tier may do on that machine, as line states (capability-render.js).
+      // Display only: the machine decides every turn itself.
+      summary: cleanCapabilitySummary(input.capabilitySummary),
     },
     // Kept in memory beside the agent's presence (agent-presence.js), never in the database.
     instructions: cleanInstructions(input.instructions),
@@ -540,6 +544,10 @@ export function mountAgentLink(
       const agents = agentsFor(req.t)
       // What the machine allows now, against what it allowed before: a change
       // is audited, and a stored "always allow" it no longer backs is reset.
+      // Which hello of which process this is: an older one of the same process
+      // arriving late does not replace what a newer one said (agents.js hello).
+      hello.capabilities.link = linkId
+      hello.capabilities.seq = hello.seq
       const row = transaction(db, () => agents.helloPolicy(req.agent, agents.hello(req.agent, hello), said(req)))
       // Which instruction files its sessions read (names and hashes): in memory, per link.
       agentPresence?.setInstructions(req.t.workspaceId, req.agent.id, hello.instructions, { link: linkId, seq: hello.seq })
@@ -553,6 +561,9 @@ export function mountAgentLink(
           // by what this machine just said).
           audience: agents.audienceOf(row).text,
         },
+        // This project's ceiling under the machine's (agent-policy.js narrowingOf).
+        // Each turn's job carries it again, per board: a change applies from the next turn.
+        narrowing: narrowingOf(req.t, req.project.id),
         limits: {
           batchBytes: FRAME_LIMITS.batchBytes,
           batchEvents: FRAME_LIMITS.batchEvents,
@@ -727,6 +738,8 @@ export function mountAgentLink(
           agent: req.agent,
           rows,
           respond: threadRespond(thread),
+          // The project's and this board's ceiling under the machine's (agent-policy.js narrowingOf).
+          narrowing: narrowingOf(req.t, req.project.id, row.board_id),
           // The same rule as sending it a comment: in its audience, and
           // trusted by the project's agent policy.
           inAudience: (userId) =>

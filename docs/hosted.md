@@ -1141,7 +1141,7 @@ comment, with a state and rules about who may use it. Nothing changes on the mac
   says otherwise: what an agent asks to do waits for a person with that role (and their passkey again when the workspace asks for it). **Allow without asking** is
   listed as not available until the agent's own machine names what may go without asking (`shapewall agent connect --approvals
 owner --auto edits`, on that machine). It is never the default and is never possible on the server's say alone. A
-  [connected agent](#connected-agents) reads and answers only until its machine switches edits on
+  [connected agent](#connected-agents) reads and answers only (no edits, commands or shell) until its machine switches edits on
   ([Edits from the board](#edits-from-the-board-the-trust-decision)).
 - **Revoke.** Revoking an agent revokes its token (and revoking the token on the Tokens page revokes the agent). What it was working
   on loses its "working" status and goes to any agent, with what waited for it; its usage records close as "revoked"; the project
@@ -1812,18 +1812,19 @@ to which), `agent_turn_started` and `agent_turn_stopped` (who, which agent, whic
 
 For edits it gains:
 
-| Entry                                                  | What it records                                                                                                      |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `agent_edit_mode_changed`                              | What the agent's machine allows changed (approvals, how many commands, what may go without asking), before and after |
-| `agent_turn_started` with kind "fix"                   | Who pressed Fix, for which agent, board and comment thread                                                           |
-| `agent_permission_asked`                               | A card arrived: the agent, the thread, the path, the card's hash                                                     |
-| `agent_permission_approved`, `agent_permission_denied` | Who answered, the path, the card's hash                                                                              |
-| `agent_permission_expired`                             | Nobody answered in time                                                                                              |
-| `agent_permission_auto`                                | An edit went without asking, under the agent's rule                                                                  |
-| `agent_permission_not_taken`                           | The machine did not take a person's "allow" (it came too late there): who answered, and what the card became         |
-| `agent_fix_branch_ready`                               | The branch name and how many files, as the agent's machine reported them                                             |
-| `agent_branch_pushed`, `agent_pull_request_opened`     | The remote, or the pull request's link, as the agent's machine reported them                                         |
-| `agent_approval_rule_changed`                          | The rule or its roles changed, by a person, or reset to "ask" because the machine no longer allows "without asking"  |
+| Entry                                                  | What it records                                                                                                                                                |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent_edit_mode_changed`                              | What the agent's machine allows changed (approvals, how many commands, what may go without asking), before and after                                           |
+| `agent_capabilities_changed`                           | What the agent's machine says each tier may do changed (its line states for chat and Fix with, and its team setting), the lines that changed, before and after |
+| `agent_turn_started` with kind "fix"                   | Who pressed Fix, for which agent, board and comment thread                                                                                                     |
+| `agent_permission_asked`                               | A card arrived: the agent, the thread, the path, the card's hash                                                                                               |
+| `agent_permission_approved`, `agent_permission_denied` | Who answered, the path, the card's hash                                                                                                                        |
+| `agent_permission_expired`                             | Nobody answered in time                                                                                                                                        |
+| `agent_permission_auto`                                | An edit went without asking, under the agent's rule                                                                                                            |
+| `agent_permission_not_taken`                           | The machine did not take a person's "allow" (it came too late there): who answered, and what the card became                                                   |
+| `agent_fix_branch_ready`                               | The branch name and how many files, as the agent's machine reported them                                                                                       |
+| `agent_branch_pushed`, `agent_pull_request_opened`     | The remote, or the pull request's link, as the agent's machine reported them                                                                                   |
+| `agent_approval_rule_changed`                          | The rule or its roles changed, by a person, or reset to "ask" because the machine no longer allows "without asking"                                            |
 
 A command would be recorded only as a hash. No entry ever holds file content or a diff. The server sees no repository: what it
 writes about a branch, a push or a pull request is the machine's own account.

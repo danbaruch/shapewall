@@ -5,6 +5,42 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+
+- Config `commands`: named commands (`test`, `build`, `dev`, `lint`, ...) an agent may run through Shapewall, each one command line
+  run without a shell (`$PORT` is the one variable), with `inputs` (what an approval covers), `mutating`, `args` and `ready` (a dev
+  server's loopback URL). `starterAgent.testCommand` still works; `commands.test` wins when both are set. See "Commands" in the
+  config docs.
+- Config `agent.browser.allow` (extra origins for the agent's throwaway browser, besides every `baseUrl` and `publicUrl`) and
+  `agent.fixIn` (`"copy"`, the default, or `"checkout"` for a local owner's own turns).
+- One capability model behind every agent path: what a turn may do follows who wrote it (solo, team or open), the machine that
+  runs the agent sets the ceiling, and a project's agent policy on a hosted server can only lower it (`maxTier`, `shell: false`,
+  `browser: false`, per project and board). Unknown values read as the narrowest. The console card, `agent status` and the agent's
+  own instructions will show the same lines (one renderer each). See "What each turn may do" in the agent hardening guide. The
+  tools that use it (named commands, the sandboxed shell, the throwaway browser) follow in this release.
+- `agent-policy.json` version 2 (experimental): `trustTeam`, `trustTeamShell`, `shell`, `shellNetwork`, `shellUnsandboxed`,
+  `commandApproval`, `browser`, `browserAllow`, `browserAuth`, `browserProfile`, `browserProfileTeam`, `extensionsFor`,
+  `allowTool` and `handoffHops`; the same keys as a project's `capabilities` entry in `agents.json`.
+- A connected agent's hello says what each tier may do on its machine, as on, ask or off per line (no commands, names or paths); the
+  console's agent list carries it, a line it cannot read shows as unknown, and a change is an `agent_capabilities_changed` audit
+  row naming each line.
+
+### Changed
+
+- A version 1 `agent-policy.json` is read as exactly what it allowed (no shell, no browser, no extensions, a card for every
+  command), and the next save writes it back as version 2. A connection with no saved entry, or one 1.3.0 saved without flags,
+  still reads and answers only: each wider capability is a key its owner sets. A version 1 entry with `approvals` "owner" (or
+  "admins") and exact commands also gets the project's named commands (config `commands`), each behind a card on the board.
+- A connected agent whose machine takes no approvals (`approvals: "none"`) gets no commands and no shell on any tier: a full shell
+  or a command that changes files counts as an edit.
+- `agent.browser.allow` in the config is capped by the machine's `browserAllow`, except on a solo turn of a machine without a
+  login for the browser.
+- `browserProfile` takes only a folder Shapewall made for the agent (marked, links resolved); any real browser's profile folder,
+  a copy of one or a link to one is refused.
+- An origin is never a wildcard, and a machine audience it cannot read is "server", not "owner".
+- The `agent_policy_changed` audit row says which settings of which board changed, not only how many boards.
+- A hello that arrives after a newer one from the same process no longer replaces what the newer one said.
+
 ## 1.3.0 - 2026-11-25
 
 ### Added

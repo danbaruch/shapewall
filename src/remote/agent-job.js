@@ -12,6 +12,7 @@
 // (src/agent/backends/acp.js readOnly).
 
 import { quoteData } from '../agent/context.js'
+import { cleanNarrowing } from '../agent/capabilities.js'
 import { THREAD_RE } from '../agent/thread-history.js'
 import { ID_RE } from '../config.js'
 
@@ -121,6 +122,9 @@ export function cleanJob(raw) {
       },
     },
     agent: { name: text(raw.agent?.name, 60) || null },
+    // The server's ceiling for this turn (src/agent/capabilities.js cleanNarrowing):
+    // null when it sent none; a field it does not understand reads narrowest.
+    narrowing: cleanNarrowing(raw.narrowing),
     asker: { name: text(raw.asker?.name, 80) || null, handle: text(raw.asker?.handle, 40) || null, owner: raw.asker?.owner === true },
     // `byOwner`: the server says the person who connected this agent set the rule themself.
     approvals: { edits: rule(raw.approvals?.edits), commands: rule(raw.approvals?.commands), byOwner: raw.approvals?.byOwner === true },

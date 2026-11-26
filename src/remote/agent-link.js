@@ -33,6 +33,8 @@ import { runTurn } from '../agent/run.js'
 import { git } from '../agent/starter/worktree.js'
 import { instructionsStatus, loadInstructions } from '../agent/instructions.js'
 import { agentHandles, shouldRespond } from '../agent/triggers.js'
+import { CAPABILITY_NARROWEST, hostPlatform } from '../agent/capabilities.js'
+import { capabilitySummary } from '../agent/capability-render.js'
 import { FixRefusal, dropFixFolder, dropHeld, finishFix, heldDiff, heldSummary, prepareFix, pushFix, readHeld } from './agent-fix.js'
 import { JobError, TURN_ID_RE, cleanJob, jobConversation } from './agent-job.js'
 import { RemoteError, badTokenMessage, readBounded } from './remote.js'
@@ -166,6 +168,10 @@ export async function runAgentLink({
   // The instruction files the chat sessions read (src/agent/instructions.js
   // createInstructionsNote): what hello lists, said again when it changes.
   instructions = null,
+  // { config, platform }: what the capability summary in hello is worked
+  // out from (src/agent/capability-render.js). The platform's sandbox reads
+  // as missing until it is said to be there.
+  capabilities = null,
 }) {
   const limit = { ...LINK_DEFAULTS, ...limits }
   // Whatever is missing reads as the narrowest: no approvals, nothing automatic.
@@ -178,6 +184,7 @@ export async function runAgentLink({
     base: null,
     remote: null,
     respond: 'thread',
+    ...CAPABILITY_NARROWEST,
     ...givenPolicy,
   }
   // Anything but "thread" reads as mentions only (src/agent/triggers.js).
@@ -892,6 +899,13 @@ export async function runAgentLink({
       },
       // The instruction files a chat session reads: names, sizes and short hashes, never content.
       instructions: instructions?.current() || [],
+      // What each trust tier may do here, as line states only (no commands, handles or paths).
+      capabilitySummary: capabilitySummary({
+        machine: policy,
+        config: capabilities?.config || fix?.config || null,
+        // The same answer turns use (capabilities.js hostPlatform; Q2 fills in the sandbox probe).
+        platform: capabilities?.platform || hostPlatform(),
+      }),
       // Counts up with every hello of this process: the server keeps the newest list.
       seq: (helloSeq += 1),
       ...(take ? { takeover: true } : {}),

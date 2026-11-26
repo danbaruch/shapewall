@@ -6,6 +6,7 @@
 // hello may claim (src/hosted/agent-link.js cleanHello), the summary of a
 // fix as the server keeps it (src/hosted/chat-frames.js cleanSummary), and
 // what a session that takes edits is started with (src/agent/backends/acp.js).
+import { upgradeV1Capabilities, CAPABILITY_NARROWEST } from '../src/agent/capabilities.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -190,6 +191,9 @@ test('the policy file: a value it does not know reads as the narrowest setting, 
     instructions: 'all',
     agentConfig: null,
     respond: 'thread',
+    // Version 2: what each trust tier may do (src/agent/capabilities.js); nothing
+    // saved reads as what version 1 allowed.
+    ...upgradeV1Capabilities('none', []),
   }
   const read = (entry) => {
     const warnings = []
@@ -243,6 +247,7 @@ test('the policy file: a value it does not know reads as the narrowest setting, 
     instructions: 'none',
     agentConfig: 'none',
     respond: 'mention',
+    ...CAPABILITY_NARROWEST,
   })
   // A respond value it does not know: mentions only.
   for (const respond of ['always', 'Thread', '', 1]) {
@@ -310,11 +315,17 @@ test('agent connect: the flags that change this machine’s policy, and what the
   assert.throws(() => policyChanges({ base: '--upload-pack=x' }, on), /--base/)
   assert.throws(() => policyChanges({ 'git-remote': '-x' }, on), /--git-remote/)
   // What the terminal says of each, and exactly who can switch "without asking" on.
-  assert.deepEqual(describeMachinePolicy(none), ['Reads and answers. No edits, no commands (this machine refuses both).'])
-  const said = describeMachinePolicy({ ...on, auto: ['edits'], allowPaths: ['package.json'], base: 'main' }).join('\n')
+  assert.deepEqual(describeMachinePolicy(none), [
+    'Reads and answers. No edits, no commands, no shell (this machine refuses all three).',
+    'Browser: none.',
+  ])
+  // As connect hands it over: the saved entry, cleaned (the capability keys follow approvals and commands).
+  const said = describeMachinePolicy(
+    cleanMachinePolicy({ approvals: 'owner', commands: ['npm test'], auto: ['edits'], allowPaths: ['package.json'], base: 'main' }),
+  ).join('\n')
   assert.match(said, /allowed by the person who connected it/)
   assert.match(said, /never in this checkout/)
-  assert.match(said, /Commands: only "npm test"/)
+  assert.match(said, /Exact commands: only "npm test"/)
   assert.match(said, /May be allowed without asking: edits, once the person who connected it \(nobody else\) switches that on/)
   assert.match(said, /never a file that runs something/)
   assert.match(said, /not pushed until a person has looked at its whole diff/)
