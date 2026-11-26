@@ -16,8 +16,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - One capability model behind every agent path: what a turn may do follows who wrote it (solo, team or open), the machine that
   runs the agent sets the ceiling, and a project's agent policy on a hosted server can only lower it (`maxTier`, `shell: false`,
   `browser: false`, per project and board). Unknown values read as the narrowest. The console card, `agent status` and the agent's
-  own instructions will show the same lines (one renderer each). See "What each turn may do" in the agent hardening guide. The
-  tools that use it (named commands, the sandboxed shell, the throwaway browser) follow in this release.
+  own instructions show the same lines (one renderer each), and named commands, the sandboxed shell and the throwaway browser all
+  follow it. See "What each turn may do" in the agent hardening guide.
 - `agent-policy.json` version 2 (experimental): `trustTeam`, `trustTeamShell`, `shell`, `shellNetwork`, `shellUnsandboxed`,
   `commandApproval`, `browser`, `browserAllow`, `browserAuth`, `browserProfile`, `browserProfileTeam`, `extensionsFor`,
   `allowTool` and `handoffHops`; the same keys as a project's `capabilities` entry in `agents.json`.
@@ -153,6 +153,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
   run in, not only in `.shapewall`.
 - An exact command or a shell command allowed on a card is checked again after the answer, and a local card's answer counts only
   while what it asked is still allowed.
+- `agent set allow-command` (and `agent set auto commands`) is refused with the same reason `agent connect` gives, instead of
+  saving commands that connect then reports as not in effect. The capability lines no longer suggest `agent set allow-command` or
+  `agent set handoff-hops` (neither turns anything on in this release), and the unsandboxed shell line names the real setting
+  (`agent set shell-unsandboxed on`).
+- The approval page no longer promises a connected agent "never runs a command" when its machine allows named commands, and the
+  chat's Connect note and the agent settings say Claude Code gets the restricted local session, while Codex, goose and Gemini CLI
+  bring their own tools.
 
 ## 1.3.0 - 2026-11-25
 
@@ -337,7 +344,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- Avatar initials use only letters and digits: an agent named "Harry (ibuypower)" shows "HI", not "H(", and a word that is only
+- Avatar initials use only letters and digits: an agent named "Scout (workbench)" shows "SW", not "S(", and a word that is only
   an emoji or punctuation is skipped.
 - Hosted: agent cards on the board no longer end with "(As before 0.4.0.)". The console's agent card says in plain words that the
   agent keeps a setting from an older version.

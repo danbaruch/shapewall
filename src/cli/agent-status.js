@@ -247,7 +247,13 @@ export async function agentSet(positional, flags, out, err, { env = process.env,
   const saved = readMachinePolicy(origin, slug, env)
   let changes
   if (CONNECT_KEYS[name]) {
-    const { policyChanges } = await import('../remote/agent-connect.js')
+    const { policyChanges, COMMANDS_PROVEN, NO_COMMANDS } = await import('../remote/agent-connect.js')
+    // The kind of agent is known only when it connects, and agent connect drops exact commands
+    // for an agent they were not proven with. While none is, saving one would only be reported
+    // "Not in effect" there, so it is refused here with the same reason ("none" still clears them).
+    const asksCommands =
+      (name === 'allow-command' && String(raw) !== 'none') || (name === 'auto' && String(raw).split(',').includes('commands'))
+    if (asksCommands && !COMMANDS_PROVEN.length) throw new Error(`${name}: ${NO_COMMANDS}`)
     changes = policyChanges({ [CONNECT_KEYS[name]]: raw }, saved, null, { cwd, env })
   } else changes = capabilityChange(name, raw, env)
   saveMachinePolicy(origin, slug, changes, env)

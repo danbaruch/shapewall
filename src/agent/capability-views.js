@@ -68,7 +68,6 @@ const SUMMARY_FIX = {
   extensions: ['agent-config', 'DIR'],
   memory: ['allow-tool', 'mcp__SERVER__TOOL'],
   push: ['remote', 'origin'],
-  handoff: ['handoff-hops', '1'],
 }
 const setCommand = ([key, value], remote) => `shapewall agent set ${key} ${value}${remote ? ` --remote ${remote}` : ''}`
 

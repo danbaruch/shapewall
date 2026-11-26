@@ -39,7 +39,7 @@ test('defaultSitemapUrl keeps the base path and drops query and hash', () => {
 })
 
 test('titleFromBaseUrl: the domain without www; localhost and IPs keep the generic title', () => {
-  assert.equal(titleFromBaseUrl('https://www.danbaruch.com'), 'danbaruch.com')
+  assert.equal(titleFromBaseUrl('https://www.example.com'), 'example.com')
   assert.equal(titleFromBaseUrl('https://apps.example.com/app'), 'apps.example.com')
   assert.equal(titleFromBaseUrl('http://localhost:3000'), null)
   assert.equal(titleFromBaseUrl('http://app.localhost:3000'), null)

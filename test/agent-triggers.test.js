@@ -433,5 +433,5 @@ test('mentions in code or quoted lines do not count; handles compare the same wa
   const long = agentHandles({ name: 'A'.repeat(60) })
   assert.equal(reason('@' + 'a'.repeat(40) + ' hi', long), 'mention')
   // A name with no letters answers @agent only.
-  assert.deepEqual(agentHandles({ name: '🦞🦞' }), ['agent'])
+  assert.deepEqual(agentHandles({ name: '🚀🚀' }), ['agent'])
 })

@@ -430,17 +430,23 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
             data-sw-settings-acp-warning="true"
           >
             <p className="flex items-center gap-1.5 font-medium">
-              <AlertTriangle size={14} className="shrink-0 text-warn" aria-hidden="true" /> An ACP agent brings its own tools
+              <AlertTriangle size={14} className="shrink-0 text-warn" aria-hidden="true" /> What an ACP agent brings with it
             </p>
             <p>
-              It runs with its own tools and extensions (a shell, browser control, MCP servers from its own config), and Shapewall does not
-              sandbox them. Whether it asks before it edits a file or runs a command is its own permission setting: in a mode that acts
-              without asking, it does, and Shapewall shows no request. Use a restricted profile:
+              Claude Code gets a restricted session here: read and edit tools plus Shapewall’s own tools for commands and the browser, never
+              a shell of its own, its own MCP servers or your Claude settings files. The config’s{' '}
+              <code className="font-mono">agent.localSession: "own"</code> gives it back its own full session.
+            </p>
+            <p>
+              Codex, goose and Gemini CLI run with their own tools and extensions (a shell, browser control, MCP servers from their own
+              config), and Shapewall does not sandbox them. Whether one asks before it edits a file or runs a command is its own permission
+              setting: in a mode that acts without asking, it does, and Shapewall shows no request. Use a restricted profile:
             </p>
             <ul className="list-disc space-y-0.5 pl-5">
               <li>
-                Claude Code: permission mode <code className="font-mono">default</code> or <code className="font-mono">plan</code> in your
-                Claude settings, never <code className="font-mono">auto</code>, <code className="font-mono">acceptEdits</code> or{' '}
+                Claude Code in its own session (<code className="font-mono">agent.localSession: "own"</code>): permission mode{' '}
+                <code className="font-mono">default</code> or <code className="font-mono">plan</code> in your Claude settings, never{' '}
+                <code className="font-mono">auto</code>, <code className="font-mono">acceptEdits</code> or{' '}
                 <code className="font-mono">bypassPermissions</code>.
               </li>
               <li>

@@ -30,7 +30,7 @@
 // the machine (the Shapewall server, debugging ports), so dev servers stay
 // off inside the sandbox there (devBridge() says why).
 //
-// Outside the sandbox (host mode, after a card, or --shell-unsandboxed) the
+// Outside the sandbox (host mode, after a card, or shell-unsandboxed on) the
 // server binds a free port itself. Before the browser gets that port the
 // supervisor checks that the listener on 127.0.0.1:PORT belongs to the
 // server's own process group (ownsPort); where that cannot be checked
