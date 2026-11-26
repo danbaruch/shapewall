@@ -103,9 +103,8 @@ export function namedFiles(argv) {
   return out
 }
 
-// What a command's run depends on, in `root`: the files its `inputs` name
-// (globs), or, without `inputs`, the manifests, lockfiles and configs
-// (testInput); always plus the files argv names, the relative program first
+// What a command's run depends on, in `root`: the manifests, lockfiles and
+// configs (testInput), plus the files its `inputs` name (globs); always plus the files argv names, the relative program first
 // of all. -> sha256 over each path, its kind and its bytes. A symbolic link
 // counts as its target text (where it points), never followed.
 export function inputsDigest(root, command) {
@@ -114,7 +113,8 @@ export function inputsDigest(root, command) {
   const globs = Array.isArray(command.inputs) ? command.inputs.map(globRe) : null
   const files = new Set(named)
   for (const rel of walk(root)) {
-    if (globs ? globs.some((re) => re.test(rel)) : testInput(rel, argv)) files.add(rel)
+    // The manifests, lockfiles and .npmrc always count; `inputs` adds to them.
+    if (testInput(rel, argv) || globs?.some((re) => re.test(rel))) files.add(rel)
     if (files.size >= APPROVAL_LIMITS.inputFiles) break
   }
   const hash = createHash('sha256').update('shapewall-inputs-1\0')
@@ -141,8 +141,23 @@ export function inputsDigest(root, command) {
 }
 
 // The key of one approval.
-export const approvalKey = ({ scope = '', name, run, inputs }) =>
-  sha256(JSON.stringify(['shapewall-command-approval-1', String(scope), String(name), sha256(String(run)), String(inputs)]))
+// It names where the command runs too (the tier of the turn, the session
+// mode, its network and whether it may write): an answer given for a
+// sandboxed run with no network is not one for a run with more.
+export const approvalKey = ({ scope = '', name, run, inputs, tier = '', mode = '', network = '', readOnly = false }) =>
+  sha256(
+    JSON.stringify([
+      'shapewall-command-approval-2',
+      String(scope),
+      String(name),
+      sha256(String(run)),
+      String(inputs),
+      String(tier),
+      String(mode),
+      String(network),
+      Boolean(readOnly),
+    ]),
+  )
 
 // The record store of one connection (or one local board).
 export function createApprovalStore(dir, { now = () => Date.now() } = {}) {

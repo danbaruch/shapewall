@@ -228,13 +228,28 @@ export function createToolHost({
   // Whether a named command may run as it is now, asking on the board when it must.
   async function mayRun({ command, resolved, argv, label }) {
     if (!session) return 'No fix copy to run it in.'
+    // The checkout's config line must still be the one this turn loaded: an
+    // edit there takes effect before anything runs, remembered or not.
+    if (!sameLine(command)) return 'Not run: its line in shapewall.config.json changed since this turn started.'
     const digest = inputsDigest(session.root, { ...command, argv })
-    const entry = { scope, name: command.name, run: showCommandLine(argv), inputs: digest }
+    const entry = {
+      scope,
+      name: command.name,
+      run: showCommandLine(argv),
+      inputs: digest,
+      tier: caps.tier,
+      mode: session.mode,
+      network: session.network,
+      readOnly: Boolean(session.readOnly),
+    }
     // Outside the OS sandbox (mode "host": Windows, no bubblewrap) nothing contains a
-    // command, so it always asks, whatever the resolver said (plan 3.5).
+    // command, so it always asks, whatever the resolver said (plan 3.5). An answer
+    // there, or on an open turn (someone outside the trusted people wrote in the
+    // thread), is for that one run: never read from or written to the store.
+    const remembers = Boolean(approvals) && session.mode !== 'host' && caps.tier !== 'open'
     const fromBase =
       session.mode !== 'host' && !resolved.needsCard && base.get(command.name) === digest && argv.length === command.argv.length
-    if (fromBase || approvals?.has(entry)) return null
+    if (fromBase || (remembers && approvals.has(entry))) return null
     if (!ask) return `"${command.name}" needs someone to allow it on the board, and this agent's machine takes no answers from the board.`
     const changedInputs = base.has(command.name) && base.get(command.name) !== digest
     const lines = [
@@ -255,7 +270,7 @@ export function createToolHost({
       return `Not run: ${state === 'denied' ? 'it was denied on the board' : state === 'expired' ? 'nobody answered in time' : 'stopped'}.`
     // Once more, now: the answer was for this line with these inputs, still allowed.
     if (!recheckCard()) return 'Not run: it changed, or is no longer allowed, since it was asked.'
-    approvals?.remember(entry)
+    if (remembers) approvals.remember(entry)
     return null
   }
 

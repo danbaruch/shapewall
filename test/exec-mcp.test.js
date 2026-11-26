@@ -166,6 +166,81 @@ test('no OS sandbox (host mode): a named command asks even on solo', async (t) =
   assert.match(asked[0].detail, /without an OS sandbox/)
 })
 
+// Review repro (t/repro-approvals.test.mjs): one card on an open turn allowed
+// the command on every later turn for 7 days, host mode included.
+for (const mode of ['host', 'sandboxed'])
+  test(`${mode}: an open-tier answer is never remembered for a later turn`, async (t) => {
+    const store = records(t)
+    let asked = 0
+    const ask = async () => (asked++, 'approved')
+    const first = fakeSession(t, { mode })
+    const one = createToolHost({ capabilities: capsOf('open'), commands: [TEST], session: first, approvals: store, scope: 'same', ask })
+    await one.call('run_named_command', { name: 'test' })
+    // Another turn, another fix copy, a test file that now runs anything.
+    const second = fakeSession(t, { mode })
+    fs.mkdirSync(path.join(second.root, 'test'))
+    fs.writeFileSync(path.join(second.root, 'test/evil.test.js'), "require('child_process').execSync('id')")
+    const two = createToolHost({ capabilities: capsOf('open'), commands: [TEST], session: second, approvals: store, scope: 'same', ask })
+    await two.call('run_named_command', { name: 'test' })
+    assert.equal(second.runs.length, 1)
+    assert.equal(asked, 2)
+    // Within one turn too: a card every time.
+    await two.call('run_named_command', { name: 'test' })
+    assert.equal(asked, 3)
+    assert.deepEqual(fs.existsSync(store.dir) ? fs.readdirSync(store.dir) : [], [])
+  })
+
+test('host mode on solo: a card every time, nothing read from or written to the store', async (t) => {
+  const store = records(t)
+  let asked = 0
+  const session = fakeSession(t, { mode: 'host' })
+  const host = createToolHost({ capabilities: capsOf('solo'), commands: [TEST], session, approvals: store, ask: async () => (asked++, 'approved') })
+  // A record that would match a sandboxed run does not count here.
+  fs.writeFileSync(path.join(session.root, 'package.json'), '{"scripts":{"test":"x"}}')
+  await host.call('run_named_command', { name: 'test' })
+  await host.call('run_named_command', { name: 'test' })
+  assert.equal(asked, 2)
+  assert.deepEqual(fs.existsSync(store.dir) ? fs.readdirSync(store.dir) : [], [])
+})
+
+test('a solo answer is kept only for the same session mode and network', async (t) => {
+  const store = records(t)
+  let asked = 0
+  const ask = async () => (asked++, 'approved')
+  const turn = (network) => {
+    const session = { ...fakeSession(t), network }
+    const host = createToolHost({ capabilities: capsOf('solo'), commands: [TEST], session, approvals: store, scope: 's', ask })
+    // Changed by the agent after the turn started: not the base, so it asks once.
+    fs.writeFileSync(path.join(session.root, 'package.json'), '{"scripts":{"test":"changed"}}')
+    return { session, host }
+  }
+  await turn('none').host.call('run_named_command', { name: 'test' })
+  await turn('none').host.call('run_named_command', { name: 'test' })
+  assert.equal(asked, 1)
+  await turn('registries').host.call('run_named_command', { name: 'test' })
+  assert.equal(asked, 2)
+})
+
+test('a remembered command still checks its config line: an edit in the checkout takes effect', async (t) => {
+  const store = records(t)
+  const session = fakeSession(t)
+  let line = TEST
+  const host = createToolHost({
+    capabilities: capsOf('solo'),
+    commands: [TEST],
+    readCommands: () => [line],
+    session,
+    approvals: store,
+    ask: async () => 'approved',
+  })
+  fs.writeFileSync(path.join(session.root, 'package.json'), '{"scripts":{"test":"changed"}}')
+  await host.call('run_named_command', { name: 'test' })
+  assert.equal(session.runs.length, 1)
+  line = { ...TEST, run: 'npm test -- --bail' }
+  assert.match(textOf(await host.call('run_named_command', { name: 'test' })), /shapewall\.config\.json changed/)
+  assert.equal(session.runs.length, 1)
+})
+
 test('args: only where the config allows them, bounded, and the card says they are arbitrary code', async (t) => {
   const session = fakeSession(t)
   const asked = []
