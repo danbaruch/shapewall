@@ -1274,7 +1274,8 @@ export function agentRouter({
           backend,
           current,
           ownerWrites,
-          root: work ? work.root : config.dir,
+          // Branch mode: the project in the worktree (the agent's own workdir), never the worktrees' folder.
+          root: work ? work.tree.projectDir : config.dir,
           inPlace: !work,
           ask: (card) => (cards.ask ? cards.ask(card) : Promise.resolve('cancelled')),
         })
