@@ -180,7 +180,8 @@ export function createHostedApp({
   // a request is not read again.
   const agentStores = new WeakMap()
   const agentsFor = (t) => {
-    if (!agentStores.has(t)) agentStores.set(t, createAgentStore(t, { now, presence: agentPresence, handleFor, links, origin: publicOrigin }))
+    if (!agentStores.has(t))
+      agentStores.set(t, createAgentStore(t, { now, presence: agentPresence, handleFor, links, origin: publicOrigin }))
     return agentStores.get(t)
   }
   const dispatchView = (t, project, board, comment) => {

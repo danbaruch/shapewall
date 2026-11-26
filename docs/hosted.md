@@ -1306,6 +1306,14 @@ The `agent` scope opens the link routes and nothing else. It cannot be ticked on
 `shapewall login`; it comes from approving `shapewall agent connect`. A token with `claim` but without `agent` (a `watch --remote`
 watcher) is an agent as before, with no link and no chat.
 
+**Older tokens with agent access.** Before agents had their own records, any token with `claim` was counted as one, and 1.3.0 and
+earlier listed every such token as an agent. From 1.4.0 a token is listed as an agent when a login or the console made it with
+`claim`, when it connected with `agent connect`, or when it was heard from or took a comment in the last 90 days. An older watcher
+nobody used in 90 days is hidden from the board and the Agents page (an `agent_hidden` audit row says when), never deleted: its
+record, its replies and its token stay, and a call from its token lists it again. **API tokens** lists these under **Has agent
+access (claim)**, with **Make this an agent** (listed for good, with the audience it had) and **Remove claim access** (it keeps its
+other scopes and stops taking comments).
+
 ### Chat with a connected agent
 
 - **Threads.** The **board chat** and the chat of each comment are shared: every member of the workspace reads them. A chat you

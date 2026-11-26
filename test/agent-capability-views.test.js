@@ -159,7 +159,7 @@ test("the project's setting narrows the card the way the machine narrows a turn,
     const line = open.find((item) => item.id === id)
     assert.equal(line.narrowed, true)
     assert.equal(line.fix, null, 'only an admin on the server changes it')
-    assert.match(line.text, /Limited by this project's setting/)
+    assert.deepEqual(line.why, ["limited by this project's setting"])
   }
   // The same states as the resolver with the server's narrowing.
   const narrowedTurn = Object.fromEntries(Object.entries(lineStates(turn)).filter(([id]) => ['commands', 'shell', 'browser'].includes(id)))

@@ -85,9 +85,9 @@ function Line({ line, settingsLink }) {
       <div className="min-w-0 text-xs text-muted">
         <p className="text-fg">{line.text}</p>
         {line.state !== 'on' && line.why?.length && !line.narrowed ? <p className="mt-0.5">Why: {line.why.join('; ')}.</p> : null}
-        {line.narrowed && settingsLink ? (
+        {line.narrowed ? (
           <p className="mt-0.5" data-sw-cap-limited>
-            Limited by this project's setting. {settingsLink}
+            Limited by this project's setting.{settingsLink ? <> {settingsLink}</> : null}
           </p>
         ) : null}
         {line.fix ? <CopyCommand command={line.fix} /> : null}

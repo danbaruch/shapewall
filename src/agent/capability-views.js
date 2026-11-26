@@ -90,7 +90,7 @@ function summaryLines(states, tier, { narrowing, remote }) {
       id,
       label: LINE_LABELS[id],
       state,
-      text: narrowed ? `${summaryText(id, 'off', tier)} Limited by this project's setting.` : summaryText(id, state, tier),
+      text: summaryText(id, state, tier),
       why: narrowed ? [LIMITED] : [],
       fix: fixable ? setCommand(SUMMARY_FIX[id], remote) : null,
       narrowed,
