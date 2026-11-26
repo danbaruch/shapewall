@@ -128,9 +128,12 @@ const RUNNERS_RE = /^(npx|pnpx|bunx|jest|vitest|mocha|ava|tap|node|deno|bun|pyth
 export function argsWarning(command) {
   if (!command.args) return null
   const program = path.basename(String(command.argv?.[0] || '')).replace(/\.(exe|cmd|bat)$/i, '')
-  return `This command takes extra arguments from the agent ("args": true). For ${
-    RUNNERS_RE.test(program) ? program : 'npx, jest and similar runners'
-  } an argument can name any script or package, so allowing it is allowing arbitrary code in this command's place.`
+  const which = RUNNERS_RE.test(program) && !/^(npx|jest)$/i.test(program) ? program + ', as for npx, jest' : 'npx, jest'
+  return (
+    'This command takes extra arguments from the agent ("args": true). For ' +
+    which +
+    " and similar runners an argument can name any script or package: allowing it is allowing arbitrary code in this command's place."
+  )
 }
 
 function resultText({ label, run }) {
