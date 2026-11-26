@@ -506,10 +506,10 @@ digits and dashes. A string is short for `{ "run": "..." }`. Each takes:
 | Key        | Type     | Default                                    | Notes                                                                                                                               |
 | ---------- | -------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `run`      | string   | required                                   | One command line, run without a shell: no pipes, `;`, `&`, redirects or backticks, and no `$` except `$PORT`. Up to 500 characters. |
-| `inputs`   | string[] | manifests, lockfiles, configs, named files | Project-relative paths or globs whose content an approval covers: when the agent changes one, the next run asks again. Up to 50.    |
+| `inputs`   | string[] | manifests, lockfiles, configs, named files | More project-relative paths or globs an approval covers, on top of the manifests, lockfiles and `.npmrc` (always). Up to 50.        |
 | `mutating` | boolean  | `true`                                     | `false`: the command only reads (a linter, a type check). Hosted chat runs only these, and only on its owner's turns.               |
 | `args`     | boolean  | `false`                                    | `true`: the agent may add arguments to it.                                                                                          |
-| `ready`    | URL      | none                                       | For a dev server: the loopback URL that answers once it is up. `$PORT` is the free port Shapewall picks.                            |
+| `ready`    | URL      | none                                       | For a dev server: the loopback URL that answers once it is up. `$PORT` is the free port Shapewall picks. Not in the OS sandbox.     |
 
 `$PORT` goes bare, as its own word or part of one (`--port $PORT`, `--port=$PORT`): quoted or escaped it is refused, as it would
 read as text to a person and as the port to Shapewall, and it is never the program itself. `"args": true` lets the agent add any

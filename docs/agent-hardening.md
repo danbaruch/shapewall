@@ -503,7 +503,7 @@ reads a missing key as the "Local board" column:
 | `trustTeam`          | `"none"`, `"members"`, or a list of handles                                                                         | `"none"`       | `"none"`                                                 | `"none"`                     |
 | `trustTeamShell`     | `true` / `false`                                                                                                    | `false`        | `false`                                                  | `false`                      |
 | `shell`              | `"sandboxed"`, `"commands"` (named and exact only), `"off"`                                                         | `"sandboxed"`  | `"off"` (`"commands"` with approvals and exact commands) | `"off"`                      |
-| `shellNetwork`       | `"registries"`, `"open"`, `"none"`                                                                                  | `"registries"` | `"registries"`                                           | `"none"`                     |
+| `shellNetwork`       | `"registries"`, `"none"`                                                                                            | `"registries"` | `"registries"`                                           | `"none"`                     |
 | `shellUnsandboxed`   | `true` / `false` (solo only, shown loudly)                                                                          | `false`        | `false`                                                  | `false`                      |
 | `commandApproval`    | `"tier"` (as in the table), `"always"` (a card each)                                                                | `"tier"`       | `"always"`                                               | `"always"`                   |
 | `browser`            | `"on"` / `"off"`                                                                                                    | `"on"`         | `"off"`                                                  | `"off"`                      |
@@ -570,15 +570,28 @@ again, and a card's "allow" counts only if the command, its config line and its 
 **The OS sandbox.** On Linux, bubblewrap; on macOS, Seatbelt; both through the open-source sandbox runtime
 (`@anthropic-ai/sandbox-runtime`, pinned to one version). A command in it:
 
-- writes only in the fix copy and a tmp folder of its own (a read-only session: only the tmp folder); a write anywhere else fails,
-  or lands in a throwaway layer that is gone when it exits, never on the host;
-- cannot read the home folder (the fix copy and the folders Node runs from are let back in), so not `~/.ssh`, `~/.config`, your
-  agent's settings or tokens, nor the checkout the fix copy was made from;
+- writes only in the fix copy and a tmp folder of its own, kept beside the fix copy (a read-only session: only the tmp folder); a
+  write anywhere else fails, or lands in a throwaway layer that is gone when it exits, never on the host;
+- cannot read the home folder (under `$HOME` and under the account's own home entry), your absolute `XDG_*` folders, the shared temp
+  folders (`/tmp`, `$TMPDIR`, `/var/tmp`, `/dev/shm`, macOS's per-user temp), `/run/user/<uid>`, `/mnt`, `/media`, or the other fix
+  copies and their tmp folders. The fix copy, its tmp folder and Node's own install folder are let back in: only that one folder,
+  after following links, and only when it is at least three levels inside the denied folder (`~/.nvm/versions/node/v22`). A Node
+  under a shared prefix (`~/.local/bin/node`, `~/bin/node`) is not let in, so commands there need a Node installed elsewhere. So
+  not `~/.ssh`, `~/.config`, your agent's settings or tokens, nor the checkout the fix copy was made from;
 - gets a clean environment: `PATH`, the locale, a home folder of its own in its tmp folder, `CI=1`; never `SHAPEWALL_*` tokens or
   anything else of the shell that started Shapewall;
-- reaches the package registries only (`shellNetwork`: `"registries"`; `"none"` for no network, `"open"` for any public host),
-  through the runtime's proxy, plus the session's dev server;
-- stops after 10 minutes (30 for a dev server), with its output capped at 64 KB, and its whole process group with it.
+- reaches the package registries only (`shellNetwork`: `"registries"`; `"none"` for no network), through the runtime's proxy,
+  never a port on this machine. There is no "any public host": the runtime's proxy is shared by every command of the process and
+  cannot be lifted for one;
+- runs under `ulimit`: at most 1024 processes and 8 GB of address space (Linux only: on macOS a process limit would count every
+  process of yours, and the address-space limit is not enforced), and files of at most 2 GB (everywhere); a tmp folder that
+  grows past 2 GB is emptied after the command, with a note in its output. There is no CPU or memory cgroup;
+- stops after 10 minutes, with its output capped at 64 KB, and its whole process group with it.
+
+**Dev servers** (`start_dev_server`) do not run in the OS sandbox: on Linux each sandboxed command gets its own network namespace,
+so a server started by one command could not be reached by the next (or by a browser), and the runtime forwards no ports. They are
+offered only where commands run without the sandbox (no sandbox on this machine, each after a card, or `--shell-unsandboxed`), and
+what a dev server writes in the fix copy counts as changed by the agent when it stops.
 
 The sandbox starts only in the fix copy Shapewall made for the turn, inside the folder it keeps fix copies in: never in your
 checkout, never in a folder that holds the home folder. The fix copy is a Git worktree of your repository; commands in it can run
@@ -595,9 +608,11 @@ would read its arguments), each after a card.
 runs the project's tests, and the agent edits those. Read the result as the agent's, and review the fix before it leaves your
 machine.
 
-**Asking again.** An "allow" is recorded on the machine (`$XDG_STATE_HOME/shapewall/approvals/<connection>/`, one file per record,
-kept 7 days) for that command name, that exact line and the content of its inputs: the files its `inputs` name, or by default the
-manifests, lockfiles and test configs, plus any script the line names and a relative program (`./run-tests`). When the agent
+**Asking again.** On solo and team turns in the OS sandbox an "allow" is recorded on the machine
+(`$XDG_STATE_HOME/shapewall/approvals/<connection>/`, one file per record, kept 7 days) for that command name, that exact line, the
+tier, the sandbox mode, the network, read-only or not, and the content of its inputs: the manifests, lockfiles, `.npmrc` and test
+configs, plus the files its `inputs` name, any script the line names and a relative program (`./run-tests`). An answer on an open
+turn, or where there is no OS sandbox, is never recorded and never read: it is for that one run, and the next run asks again. When the agent
 changes one of them, or the line changes in the config, the next run asks again. On solo and team turns a command whose inputs are
 still as committed runs without asking. The command line always comes from your checkout's config, read again before each run,
 never from the fix copy the agent writes in. A card for a command with `"args": true` says that for `npx`, `jest` and similar
@@ -608,8 +623,9 @@ until someone sees its whole diff (Push this fix). A command that deletes a trac
 
 **Who "the owner" is.** A turn is solo only when every author is the person who connected the agent. The server says who wrote
 the turn; the machine counts an author as the owner only under the handle of the account that approved the connection, saved with
-its token (or, for a token saved before this release, the first handle the server names). A server that later names another
-account gets no solo turns from that process.
+its token (or, for a token saved before this release, the first handle the server names, which is then written into the saved
+token). A server that later names another account gets no solo turns from that process. With `--approvals owner` an "allow" counts
+only when the server says the owner answered and names the answering handle, and that handle is the one this machine pinned.
 
 ### What Shapewall cannot do
 

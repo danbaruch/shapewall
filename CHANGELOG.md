@@ -34,18 +34,22 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The token API's `/project` says which agent the token is and its state (online while its link is open).
 
 - Commands through Shapewall on a hosted Fix with: the agent gets Shapewall's own tools (`run_named_command`, `run_command`,
-  `start_dev_server`, `stop_dev_server`, `shapewall_capabilities`) and never its own shell. On Linux (bubblewrap, socat and ripgrep)
-  and macOS (Seatbelt) every command runs in an OS sandbox through `@anthropic-ai/sandbox-runtime`: it writes only in the fix copy,
-  cannot read the home folder, gets a clean environment and reaches the package registries only. Solo turns run named commands
-  without a card and get a sandboxed shell; open turns ask with a card (`command`), and an allow is checked again against the
-  machine's rules before the command runs. Approvals are recorded on the machine per command line and inputs, and asked again when
-  the agent changes `package.json`, a lockfile, a test config or a script the line names. Files a command changed hold the fix for a
-  look. See "Commands through Shapewall" in the agent hardening guide.
+  `shapewall_capabilities`, and `start_dev_server` / `stop_dev_server` where commands run without the OS sandbox) and never its own
+  shell. On Linux (bubblewrap, socat and ripgrep) and macOS (Seatbelt) every command runs in an OS sandbox through
+  `@anthropic-ai/sandbox-runtime`: it writes only in the fix copy and its own tmp folder, cannot read the home folder, the XDG
+  folders, the shared temp folders, `/run/user`, `/mnt`, `/media` or other fix copies, gets a clean environment, reaches the package
+  registries only (or nothing) and runs under process, address-space and file-size limits, with its tmp folder capped. Solo turns
+  run named commands without a card and get a sandboxed shell; open turns ask with a card (`command`) every time, and an allow is
+  checked again against the machine's rules and the checkout's config line before the command runs. Solo and team approvals in the
+  sandbox are recorded on the machine per command line, tier, sandbox mode, network and inputs (the manifests, lockfiles and `.npmrc`
+  always among them), and asked again when the agent changes one; answers on open turns or without the sandbox are never recorded.
+  Files a command or dev server changed hold the fix for a look. See "Commands through Shapewall" in the agent hardening guide.
 
 ### Changed
 
 - Who "the owner" is on a connected agent's turns is pinned on its machine: the handle of the account that approved it (saved
-  with the token), not the server's word alone.
+  with the token, or the first one the server names, then saved), not the server's word alone. With `--approvals owner` a card's
+  "allow" must name that handle as the one who answered.
 - Named commands on Windows run without a shell: `node`, `npm` and `npx` as Node plus their script; a `.cmd` or `.bat` program is
   refused. Without an OS sandbox (Windows, no bubblewrap) there is no full shell, and every named command waits for a card.
 - `$PORT` in a command line must be bare: quoted (`'$PORT'`, `"$PORT"`), escaped (`\$PORT`) or as the program it is refused.

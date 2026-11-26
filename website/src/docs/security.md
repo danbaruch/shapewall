@@ -174,8 +174,10 @@ What these protections do not cover:
   their passkey again first). The machine
   checks every answer again, and keeps the commit only if it is exactly what was allowed. The agent's own shell stays off:
   commands run through Shapewall's own tools, the project's named commands (and, on its owner's own turns, a shell), inside an OS
-  sandbox on Linux and macOS that writes only in the fix copy, cannot read the home folder and reaches the package registries only.
-  The limit: Shapewall does not sandbox the agent program itself, and with approvals on, a compromised server can forge an "allow"
+  sandbox on Linux and macOS that writes only in the fix copy, cannot read the home folder or the shared temp folders, reaches the
+  package registries only and runs under process, memory and file-size limits. An answer on a turn from outside the people you
+  trust, or on a machine without the sandbox, covers that one run only. With `--approvals owner` an "allow" counts only from the
+  account this machine pinned as its owner. The limit: Shapewall does not sandbox the agent program itself, and with approvals on, a compromised server can forge an "allow"
   for something the agent really asked. The worst case is then edits to project files on a branch, and the project's named
   commands run with the agent's changes: in the sandbox where there is one, as you where there is not (Windows, or Linux without
   bubblewrap). Not the checkout. Give the agent a restricted profile, prefer `--approvals owner`, install bubblewrap on Linux,
