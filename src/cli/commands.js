@@ -29,11 +29,18 @@ export async function settings(flags, out, err) {
   // still starting is remembered and acted on as soon as it is up.
   let management = null
   let stopping = false
+  // Once cleanup is done the process exits itself. Left to end on its own,
+  // Node first drops its signal handlers and then takes a few milliseconds to
+  // tear down, and a second Ctrl-C (or a SIGTERM right after a SIGINT) that
+  // lands in that gap kills it by signal instead of exiting 0.
   const close = () =>
-    management.close().catch((error) => {
-      err(`Agent settings cleanup failed: ${error.message}`)
-      process.exitCode = 1
-    })
+    management
+      .close()
+      .catch((error) => {
+        err(`Agent settings cleanup failed: ${error.message}`)
+        process.exitCode = 1
+      })
+      .finally(() => process.exit())
   const stop = () => {
     if (stopping) return
     stopping = true
