@@ -40,9 +40,12 @@ const COMMAND_OUTPUT_MAX = 64 * 1024
 const COMMAND_MS_MAX = 10 * 60 * 1000
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.shapewall', 'shapewall-export'])
 // Files that decide what a test command runs: manifests, lockfiles, test and
-// build configs, and the files the command names.
+// build configs, and the files the command names. Every JavaScript or
+// TypeScript config file counts (a dev server loads postcss, tailwind, next,
+// svelte and the like as code: Q7 B1), and so do the rc files that name
+// plugins to load.
 const TEST_INPUT_RE =
-  /(^|\/)(package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.yarnrc(\.yml)?|\.nvmrc|\.mocharc(\.[a-z]+)?|\.babelrc(\.[a-z]+)?|babel\.config\.[a-z]+|(jest|vitest|vite|playwright|karma|ava|cypress|webpack|rollup|esbuild|nyc|c8)\.config\.[a-z.]+|\.c8rc(\.json)?|\.nycrc(\.[a-z]+)?|tsconfig(\.[a-z.]+)?\.json|\.taprc|pytest\.ini|conftest\.py|setup\.cfg|setup\.py|tox\.ini|noxfile\.py|pyproject\.toml|makefile|justfile|\.env(\..*)?)$/i
+  /(^|\/)([^/]+\.config\.(js|cjs|mjs|ts|cts|mts)|\.postcssrc(\.[a-z]+)?|\.swcrc|\.parcelrc|\.eslintrc(\.[a-z]+)?|\.prettierrc(\.[a-z]+)?|package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.yarnrc(\.yml)?|\.nvmrc|\.mocharc(\.[a-z]+)?|\.babelrc(\.[a-z]+)?|babel\.config\.[a-z]+|(jest|vitest|vite|playwright|karma|ava|cypress|webpack|rollup|esbuild|nyc|c8)\.config\.[a-z.]+|\.c8rc(\.json)?|\.nycrc(\.[a-z]+)?|tsconfig(\.[a-z.]+)?\.json|\.taprc|pytest\.ini|conftest\.py|setup\.cfg|setup\.py|tox\.ini|noxfile\.py|pyproject\.toml|makefile|justfile|\.env(\..*)?)$/i
 export function testInput(file, testCommand = []) {
   if (TEST_INPUT_RE.test(file)) return true
   return testCommand.some((part) => {

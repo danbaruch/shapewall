@@ -45,6 +45,7 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { randomBytes } from 'node:crypto'
+import { markRunning } from './acp/sandbox.js'
 
 const require = createRequire(import.meta.url)
 
@@ -705,9 +706,12 @@ export async function createCommandSession({
       else live.add(kill)
       options.onStart?.(handle)
     }
+    // While it runs, the agent's file access through Shapewall knows (acp/sandbox.js commandRunningIn).
+    const done = markRunning(real)
     try {
       return await runInSession(command, { ...options, onStart: started })
     } finally {
+      done()
       if (kill) live.delete(kill)
     }
   }

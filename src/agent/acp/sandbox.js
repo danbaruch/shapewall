@@ -26,6 +26,11 @@ export const WRITE_BYTES_MAX = 4 * 1024 * 1024
 const FOLD = process.platform === 'darwin' || process.platform === 'win32'
 const SENSITIVE_NAMES = new Set(['package.json', 'shapewall.config.json', 'makefile', 'dockerfile', 'justfile', 'taskfile.yml'])
 const O_NOFOLLOW = fs.constants.O_NOFOLLOW || 0
+const O_NONBLOCK = fs.constants.O_NONBLOCK || 0
+const O_DIRECTORY = fs.constants.O_DIRECTORY || 0
+// Linux: what a descriptor holds is read back from /proc/self/fd, so a file
+// is checked as it was opened, not by its path again (Q7 B1).
+const PROC_FD = process.platform === 'linux' && fs.existsSync('/proc/self/fd')
 
 export class SandboxError extends Error {
   constructor(message) {
@@ -43,6 +48,62 @@ export function inside(root, target) {
 }
 
 const realpath = (value) => (fs.realpathSync.native || fs.realpathSync)(value)
+
+// Folders a command (or dev server) of this process is running in now
+// (sandbox-exec.js marks each run): root -> count.
+const running = new Map()
+export function markRunning(root) {
+  let real
+  try {
+    real = realpath(root)
+  } catch {
+    return () => {}
+  }
+  running.set(real, (running.get(real) || 0) + 1)
+  let done = false
+  return () => {
+    if (done) return
+    done = true
+    const left = (running.get(real) || 1) - 1
+    if (left > 0) running.set(real, left)
+    else running.delete(real)
+  }
+}
+export const commandRunningIn = (root) => [...running.keys()].some((dir) => inside(dir, root) || inside(root, dir))
+
+// Real paths Shapewall itself wrote for an agent (an approved write card,
+// an ordinary edit): what the in-place command guard (local-tools.js) must
+// not take for a file a command made.
+const written = new Set()
+export const wroteItself = (real) => written.has(fold(real))
+
+// The real path of the file `fd` holds. Linux: read back from /proc. Where
+// there is no /proc: `expected` itself, when it has no link on its way and
+// is the same file (device and inode) as the descriptor. That second check
+// is weaker (a racing link swap can still land between two of its steps),
+// which is why ACP file access waits while a command runs there
+// (commandRunningIn).
+function fdPath(fd, expected) {
+  if (PROC_FD) {
+    try {
+      return fs.readlinkSync(`/proc/self/fd/${fd}`)
+    } catch {
+      throw new SandboxError('cannot check what was opened')
+    }
+  }
+  try {
+    const held = fs.fstatSync(fd)
+    for (let current = expected; ; current = path.dirname(current)) {
+      if (fs.lstatSync(current).isSymbolicLink()) throw new Error('link')
+      if (path.dirname(current) === current) break
+    }
+    const now = fs.lstatSync(expected)
+    if (now.dev !== held.dev || now.ino !== held.ino) throw new Error('other file')
+  } catch {
+    throw new SandboxError('the file changed while it was opened; try again')
+  }
+  return expected
+}
 
 // The real path of `target`, or of its nearest existing parent with the rest
 // appended. Throws for anything that is not an absolute path.
@@ -81,6 +142,14 @@ export function createSandbox({ root, protect = [], sensitivePaths = [] }) {
     return real
   }
   const resolve = (target, { write = false } = {}) => check(target, realTarget(target), write)
+  // Without /proc a file cannot be checked as opened, so nothing is read or
+  // written through Shapewall while a command runs in the project.
+  const busyGuard = (target) => {
+    if (!PROC_FD && commandRunningIn(realRoot))
+      throw new SandboxError(
+        `${target}: a command or dev server is running in the project; on this system Shapewall reads and writes files for the agent only when none is (stop the dev server, or wait for the command)`,
+      )
+  }
 
   // A real path (from resolve) that needs the person's approval to write.
   const sensitive = (real) => {
@@ -97,6 +166,18 @@ export function createSandbox({ root, protect = [], sensitivePaths = [] }) {
     return SENSITIVE_NAMES.has(fold(parts.at(-1) || '').toLowerCase())
   }
 
+  // The real path of what `fd` holds, and a refusal when it is not `expected`
+  // (the path resolved and checked before the open) or not allowed: a link
+  // swapped in between the check and the open (a command or dev server
+  // running in the project can do that, in a loop) is caught here, after the
+  // open, on what was actually opened.
+  const confirm = (target, fd, expected, write) => {
+    const real = fdPath(fd, expected)
+    check(target, real, write)
+    if (fold(real) !== fold(expected)) throw new SandboxError(`${target} changed while it was opened; try again`)
+    return real
+  }
+
   return {
     root: realRoot,
     resolve,
@@ -104,15 +185,27 @@ export function createSandbox({ root, protect = [], sensitivePaths = [] }) {
     // ACP's line is 1-based; limit is a number of lines.
     read({ path: target, line = null, limit = null }) {
       const file = resolve(target)
-      let stat
+      busyGuard(target)
+      let fd
       try {
-        stat = fs.statSync(file)
-      } catch {
-        throw new SandboxError(`${target} does not exist`)
+        // Never through a link at the end, never waiting on a pipe.
+        fd = fs.openSync(file, fs.constants.O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+      } catch (error) {
+        if (error.code === 'ENOENT' || error.code === 'ENOTDIR') throw new SandboxError(`${target} does not exist`)
+        if (error.code === 'ELOOP') throw new SandboxError(`${target} changed while it was opened; try again`)
+        throw new SandboxError(`cannot read ${target}`)
       }
-      if (!stat.isFile()) throw new SandboxError(`${target} is not a file`)
-      if (stat.size > READ_BYTES_MAX) throw new SandboxError(`${target} is larger than ${READ_BYTES_MAX / 1024 / 1024} MB`)
-      const content = fs.readFileSync(file, 'utf8')
+      let content
+      try {
+        confirm(target, fd, file, false)
+        const stat = fs.fstatSync(fd)
+        if (!stat.isFile()) throw new SandboxError(`${target} is not a file`)
+        if (stat.size > READ_BYTES_MAX) throw new SandboxError(`${target} is larger than ${READ_BYTES_MAX / 1024 / 1024} MB`)
+        // From the file that was checked (the descriptor), never by its path again.
+        content = fs.readFileSync(fd, 'utf8')
+      } finally {
+        fs.closeSync(fd)
+      }
       if (!line && !limit) return content
       const lines = content.split('\n')
       const start = Math.max(0, (Number.isInteger(line) && line > 0 ? line : 1) - 1)
@@ -123,42 +216,63 @@ export function createSandbox({ root, protect = [], sensitivePaths = [] }) {
       if (typeof content !== 'string') throw new SandboxError('content must be text')
       if (Buffer.byteLength(content) > WRITE_BYTES_MAX) throw new SandboxError(`at most ${WRITE_BYTES_MAX / 1024 / 1024} MB per file`)
       const file = resolve(target, { write: true })
+      busyGuard(target)
       fs.mkdirSync(path.dirname(file), { recursive: true })
       // Check again once the folders exist: a symlink swapped in while they
       // were made must not carry the write out of the project.
-      const dir = check(target, realpath(path.dirname(file)), true)
-      const final = path.join(dir, path.basename(file))
-      let mode = null
+      const expectedDir = check(target, realpath(path.dirname(file)), true)
+      const name = path.basename(file)
+      // The folder is opened once and checked as opened; on Linux every step
+      // after that goes through the open folder itself (/proc/self/fd/N), so
+      // a link swapped in for it afterwards changes nothing. Elsewhere the
+      // folder is checked again, by device and inode, after the rename.
+      let dirFd
       try {
-        const stat = fs.lstatSync(final)
-        if (stat.isSymbolicLink()) {
-          // Replaced, never followed: but only a link that stays inside.
-          check(target, realTarget(final), true)
-        } else if (!stat.isFile()) throw new SandboxError(`${target} is not a file`)
-        else mode = stat.mode & 0o777
-      } catch (error) {
-        if (error instanceof SandboxError) throw error
+        dirFd = fs.openSync(expectedDir, fs.constants.O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+      } catch {
+        throw new SandboxError(`${target} changed while it was opened; try again`)
       }
-      // Written through a new temporary file (exclusive, never through a
-      // link), then renamed over the target, so a reader never sees half of
-      // it and a link at the target is replaced, not followed.
-      const temp = path.join(dir, `.${path.basename(final)}.${randomBytes(6).toString('hex')}.tmp`)
-      const fd = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | O_NOFOLLOW, mode ?? 0o644)
       try {
-        // Every byte, on disk, before the rename: a short or failed write
-        // never replaces the person's file, and leaves no temporary file.
+        const dir = confirm(target, dirFd, expectedDir, true)
+        const base = PROC_FD ? `/proc/self/fd/${dirFd}` : dir
+        const final = path.join(base, name)
+        let mode = null
         try {
-          writeAll(fd, content)
-          fs.fsyncSync(fd)
-        } finally {
-          fs.closeSync(fd)
+          const stat = fs.lstatSync(final)
+          if (stat.isSymbolicLink()) {
+            // Replaced, never followed: but only a link that stays inside.
+            check(target, realTarget(path.join(dir, name)), true)
+          } else if (!stat.isFile()) throw new SandboxError(`${target} is not a file`)
+          else mode = stat.mode & 0o777
+        } catch (error) {
+          if (error instanceof SandboxError) throw error
         }
-        fs.renameSync(temp, final)
-      } catch (error) {
-        fs.rmSync(temp, { force: true })
-        throw error
+        // Written through a new temporary file (exclusive, never through a
+        // link), then renamed over the target, so a reader never sees half of
+        // it and a link at the target is replaced, not followed.
+        const tempName = `.${name}.${randomBytes(6).toString('hex')}.tmp`
+        const temp = path.join(base, tempName)
+        const fd = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | O_NOFOLLOW, mode ?? 0o644)
+        try {
+          // Every byte, on disk, before the rename: a short or failed write
+          // never replaces the person's file, and leaves no temporary file.
+          try {
+            writeAll(fd, content)
+            fs.fsyncSync(fd)
+          } finally {
+            fs.closeSync(fd)
+          }
+          fs.renameSync(temp, final)
+        } catch (error) {
+          fs.rmSync(temp, { force: true })
+          throw error
+        }
+        if (!PROC_FD) confirm(target, dirFd, expectedDir, true)
+        written.add(fold(path.join(dir, name)))
+        return path.join(dir, name)
+      } finally {
+        fs.closeSync(dirFd)
       }
-      return final
     },
   }
 }
