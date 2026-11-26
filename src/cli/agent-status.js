@@ -28,7 +28,7 @@ import { findConfigFile, loadConfig } from '../config.js'
 import { AGENT_SLUG_RE, readAgentCredential } from '../remote/credentials.js'
 import { readMachinePolicy, saveMachinePolicy } from '../remote/agent-policy-file.js'
 import { checkExtensionsFolder, policyExtensions } from '../agent/agent-config-folder.js'
-import { localAgent, localExtensions } from '../agent/local-tools.js'
+import { localAgent, localCardConfig, localExtensions } from '../agent/local-tools.js'
 import { createRemote, remoteOrigin } from '../remote/remote.js'
 
 const CONNECTED_PATHS = [
@@ -76,7 +76,7 @@ async function collect(flags, { env = process.env, cwd = process.cwd(), fetchImp
       tiers: Object.fromEntries(
         ['solo', 'open'].map((tier) => [
           tier,
-          ceiling(tier, 'local-chat', machine, config, platform, folder.names, localAgent(config, env)),
+          ceiling(tier, 'local-chat', machine, localCardConfig(config, env), platform, folder.names, localAgent(config, env)),
         ]),
       ),
     }

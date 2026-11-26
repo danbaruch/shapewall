@@ -44,7 +44,7 @@ import { WEBHOOK_SECRET_VAR, createIssue, githubSettings, handleWebhook, linkPul
 import { publicAgentInfo } from '../agent/config.js'
 import { localCard } from '../agent/capability-views.js'
 import { localMachinePolicy, userAgentEntry } from '../agent/user-settings.js'
-import { localAgent, localExtensions } from '../agent/local-tools.js'
+import { localAgent, localCardConfig, localExtensions } from '../agent/local-tools.js'
 import { agentRouter } from '../agent/routes.js'
 import { checksRouter } from '../checks/routes.js'
 import { checksRunRouter, createChecksRuns } from '../checks/run-control.js'
@@ -485,7 +485,8 @@ export function createApp({
       const { entry } = userAgentEntry(config.dir, env)
       return localCard({
         machine: localMachinePolicy(entry),
-        config,
+        // In place unless Work on a branch is on: the config each turn resolves with.
+        config: localCardConfig(config, env, { acp: agentAcp }),
         extensions: localExtensions(config, env).names,
         agent: localAgent(config, env, { acp: agentAcp }),
       })

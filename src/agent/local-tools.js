@@ -32,6 +32,7 @@ import { authFiles, loadConfig } from '../config.js'
 import { policyExtensions, turnExtensions } from './agent-config-folder.js'
 import { agentSettings } from './config.js'
 import { acpAgentKind } from './acp/command.js'
+import { branchModeSettings } from './branch-mode.js'
 
 let platformOnce = null
 // One sandbox probe per process: every turn and the capability card read the same answer.
@@ -80,6 +81,20 @@ export function localAgent(config, env = process.env, { acp = null } = {}) {
   } catch {
     return { kind: null, hardened: false }
   }
+}
+
+// The config a local board's card and `agent status` resolve with: a turn
+// works in the checkout itself (inPlace, fixIn "checkout") unless it is an
+// ACP turn with Work on a branch on, as routes.js decides for each turn.
+export function localCardConfig(config, env = process.env, { acp = null } = {}) {
+  let isAcp = false
+  try {
+    isAcp = agentSettings(config, env, { acp })?.backend === 'acp'
+  } catch {
+    isAcp = false
+  }
+  if (isAcp && branchModeSettings(config, env).enabled) return config
+  return { ...config, agent: { ...(config.agent || {}), fixIn: 'checkout' } }
 }
 
 // The folder of recorded logins for the agent browser (agent-browser.js readAuthState).

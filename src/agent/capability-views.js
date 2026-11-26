@@ -88,7 +88,8 @@ function summaryLines(states, tier, { narrowing, remote, noSandbox = false }) {
       state = 'off'
       narrowed = true
     }
-    const fixable = !narrowed && state !== 'on' && state !== 'unknown' && SUMMARY_FIX[id]
+    // Only a line that is off: an "ask" line (edits, push) is already what its setting gives.
+    const fixable = !narrowed && state === 'off' && SUMMARY_FIX[id]
     return {
       id,
       label: LINE_LABELS[id],
