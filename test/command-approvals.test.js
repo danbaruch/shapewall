@@ -86,7 +86,16 @@ test('`inputs` globs add to the manifests, lockfiles and .npmrc, never replace t
 })
 
 test('the key names where it ran: tier, session mode, network and read only', () => {
-  const entry = { scope: 's', name: 'test', run: 'npm test', inputs: 'abc', tier: 'solo', mode: 'sandboxed', network: 'none', readOnly: true }
+  const entry = {
+    scope: 's',
+    name: 'test',
+    run: 'npm test',
+    inputs: 'abc',
+    tier: 'solo',
+    mode: 'sandboxed',
+    network: 'none',
+    readOnly: true,
+  }
   const key = approvalKey(entry)
   for (const change of [{ tier: 'team' }, { mode: 'host-shell' }, { network: 'registries' }, { readOnly: false }])
     assert.notEqual(approvalKey({ ...entry, ...change }), key, JSON.stringify(change))
