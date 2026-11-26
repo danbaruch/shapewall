@@ -55,6 +55,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
   agent browser's allowlist for the session and leaves it at stop; the agent's other commands cannot reach it. Without the sandbox
   the browser gets a dev server's port only when the server's own process group is what listens there. Shapewall's own server port
   is never opened in the agent browser (`denyPorts`). Not in macOS's sandbox, which could only open every loopback port to it.
+- The starter agent on the capability model: each run is resolved on the host (path `starter`) from the gate's trust (team when
+  every author whose text reaches the model is on the board's trusted list, otherwise open) and the checkout's config. Besides
+  `run_tests` (`commands.test` wins over `starterAgent.testCommand`) it gets `run_named_command` for the other names in `commands`
+  (`build`, `lint`, ...; the lines come from your checkout, never from the agent's), with the same re-ask rule as `run_tests` (an
+  input the agent changed, a file a command changed since the run started, an approved shell command; on an open run every time).
+  `dev` starts in the background on a port in the container, and the `browser_*` tools (no screenshot: the model reads text only)
+  open that port; Chromium starts without its own sandbox there only on a team run. The prompt ends with the capability block.
 
 ### Changed
 

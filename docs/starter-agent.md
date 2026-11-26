@@ -94,14 +94,16 @@ status is `done` or `needs-human`.
 
 A fixed set of tools, nothing else:
 
-| Tool                                | What it does                                                                                                                |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `list_files`, `read_file`, `search` | Read the checkout. `.git` is refused.                                                                                       |
-| `write_file`, `edit_file`           | Change files in the checkout. Paths are resolved after symlinks; anything outside the checkout, or in `.git`, is refused.   |
-| `run_tests`                         | Runs `starterAgent.testCommand` (no shell), only when one is set. Needs your approval after the agent changed what it runs. |
-| `capture`                           | `shapewall capture --only <page>` in the checkout. Offered only when the app is reachable from the sandbox (see below).     |
-| `reply`, `set_status`               | Up to 3 replies on the comment (2,000 characters each), and its agent status.                                               |
-| `run_shell`                         | Any command, but only after you approve that exact command on the board (local boards only, see below).                     |
+| Tool                                   | What it does                                                                                                                                                                                                  |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_files`, `read_file`, `search`    | Read the checkout. `.git` is refused.                                                                                                                                                                         |
+| `write_file`, `edit_file`              | Change files in the checkout. Paths are resolved after symlinks; anything outside the checkout, or in `.git`, is refused.                                                                                     |
+| `run_tests`                            | Runs `commands.test`, else `starterAgent.testCommand` (no shell), only when one is set. Asks first as below.                                                                                                  |
+| `run_named_command`, `stop_dev_server` | Runs another named command from your checkout's `commands` (`build`, `lint`, ...; never from the agent's checkout), no shell. `dev` starts in the background on a port in the container. Asks first as below. |
+| `browser_*`                            | A throwaway headless browser in the container that opens the run's own `dev` server. App origins on the egress allow list are on its list too, but it does not reach them through the container's proxy yet.  |
+| `capture`                              | `shapewall capture --only <page>` in the checkout. Offered only when the app is reachable from the sandbox (see below).                                                                                       |
+| `reply`, `set_status`                  | Up to 3 replies on the comment (2,000 characters each), and its agent status.                                                                                                                                 |
+| `run_shell`                            | Any command, but only after you approve that exact command on the board (local boards only, see below).                                                                                                       |
 
 `starterAgent.setupCommand` (for example `npm ci`) runs once before the agent starts, in the container, with the package registry
 reachable.
@@ -123,9 +125,12 @@ and it runs with everything the sandbox allows. The walls around the container a
 `run_shell` happens inside the agent's own process (the host shows the card and waits for you; the container asks), so it limits what the
 model can do through the tools, not what code already running in the sandbox can do.
 
-One rule narrows it: once the agent changed a file that decides what the test command runs (a manifest or lockfile, `.npmrc`, a test,
-build or TypeScript config, `Makefile`, `justfile`, `pyproject.toml` and the like, or a file the test command names), or ran an approved
-shell command, `run_tests` asks for your approval on the board like `run_shell` does, and is not run where there are no approvals.
+One rule narrows it: once the agent changed a file that decides what a named command runs (a manifest or lockfile, `.npmrc`, a test,
+build or TypeScript config, `Makefile`, `justfile`, `pyproject.toml` and the like, a file the command names, or one its `inputs` list),
+or such a file changed since the run started, or the agent ran an approved shell command, `run_tests` and `run_named_command` ask for
+your approval on the board like `run_shell` does, and do not run where there are no approvals. When someone outside the trusted list
+wrote in the comment (a reply by anyone else, or by an agent), every named command asks first, and the browser does not start without
+Chromium's own sandbox (in most containers it cannot start with it).
 
 ### Approving shell commands
 
