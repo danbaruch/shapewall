@@ -143,6 +143,7 @@ test('capabilities: every tier x path x platform resolves to the table, fail clo
         assert.equal(caps.memory.auto, false)
         assert.equal(caps.enforced, where !== 'watch-exec')
         assert.ok(Object.isFrozen(caps) && Object.isFrozen(caps.commands) && Object.isFrozen(caps.browser.allow))
+        for (const line of lines(caps)) assert.ok(line.state !== 'off' || line.why.length > 0, `${where} ${tier} ${name}: ${line.id}`)
         // A full shell only ever with a sandbox, solo, and the owner's choice.
         if (caps.shell.mode === 'sandboxed') assert.ok(tier === 'solo' && sandboxed(platform))
         // An open turn never runs a command without a card, and never gets extensions or a login.
@@ -206,6 +207,12 @@ test('capabilities: an unknown path, a missing machine and junk inputs read as t
   assert.equal(at('team').shell.mode, 'off')
   assert.equal(at('open').shell.mode, 'off')
   assert.ok(toCli(at('solo')).some((line) => line.includes('WITHOUT an OS sandbox')))
+  // The starter agent's container does not lift this machine's "no commands", or the server's.
+  for (const extra of [{ machine: cleanMachinePolicy({ approvals: 'owner', shell: 'off' }) }, { server: { shell: false } }]) {
+    const caps = resolve('solo', 'starter', PLATFORMS['linux sandbox'], extra)
+    assert.deepEqual([caps.shell.mode, caps.commands.length], ['off', 0], JSON.stringify(extra))
+    assert.ok(lines(caps).every((line) => line.state !== 'off' || line.why.length > 0))
+  }
 })
 
 test('capabilities: the tier needs a clean trust block, the owner audience, and the machine’s own team list', () => {

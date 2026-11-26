@@ -518,7 +518,7 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
   const serverShell = !narrowing || narrowing.shell
   let commandsOn = known
   if (!known) off('commands', 'unknown_path')
-  else if (m.shell === 'off' && !starter) {
+  else if (m.shell === 'off') {
     commandsOn = false
     off('commands', 'machine_shell_off')
   } else if (!serverShell) {
@@ -546,9 +546,9 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
 
   let shell = { mode: 'off', network: 'none', exact: [] }
   if (!known) off('shell', 'unknown_path')
-  else if (starter) shell = commandsOn ? { mode: 'container', network: 'egress', exact: [] } : shell
   else if (!commandsOn) off('shell', m.shell === 'off' ? 'machine_shell_off' : 'server_shell_off')
   else if (chatOnly) off('shell', 'chat_no_shell')
+  else if (starter) shell = { mode: 'container', network: 'egress', exact: [] }
   else {
     const wantsFull = m.shell === 'sandboxed' && (tier === 'solo' || (tier === 'team' && m.trustTeamShell))
     if (wantsFull && box.sandbox) shell = { mode: 'sandboxed', network: m.shellNetwork, exact: [] }
