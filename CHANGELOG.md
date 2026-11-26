@@ -40,7 +40,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The token API's `/project` says which agent the token is and its state (online while its link is open).
 
 - Commands through Shapewall on a hosted Fix with: the agent gets Shapewall's own tools (`run_named_command`, `run_command`,
-  `shapewall_capabilities`, and `start_dev_server` / `stop_dev_server` where commands run without the OS sandbox) and never its own
+  `shapewall_capabilities`, `start_dev_server` and `stop_dev_server`) and never its own
   shell. On Linux (bubblewrap, socat and ripgrep) and macOS (Seatbelt) every command runs in an OS sandbox through
   `@anthropic-ai/sandbox-runtime`: it writes only in the fix copy and its own tmp folder, cannot read the home folder, the XDG
   folders, the shared temp folders, `/run/user`, `/mnt`, `/media` or other fix copies, gets a clean environment, reaches the package
@@ -50,6 +50,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
   sandbox are recorded on the machine per command line, tier, sandbox mode, network and inputs (the manifests, lockfiles and `.npmrc`
   always among them), and asked again when the agent changes one; answers on open turns or without the sandbox are never recorded.
   Files a command or dev server changed hold the fix for a look. See "Commands through Shapewall" in the agent hardening guide.
+- Dev servers in the OS sandbox (Linux): `start_dev_server` runs the `dev` command in a sandbox of its own and bridges exactly one
+  loopback port to it, a port Shapewall binds and holds until the server stops (needs `nsenter`, util-linux). That port joins the
+  agent browser's allowlist for the session and leaves it at stop; the agent's other commands cannot reach it. Without the sandbox
+  the browser gets a dev server's port only when the server's own process group is what listens there. Shapewall's own server port
+  is never opened in the agent browser (`denyPorts`). Not in macOS's sandbox, which could only open every loopback port to it.
 
 ### Changed
 

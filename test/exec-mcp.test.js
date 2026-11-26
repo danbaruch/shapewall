@@ -11,6 +11,7 @@ import { spawn } from 'node:child_process'
 import { EXEC_MCP_NAME, argsWarning, createToolHost, serveToolHost, startExecSession } from '../src/agent/exec-mcp.js'
 import { createApprovalStore } from '../src/agent/command-approvals.js'
 import { createCommandSession } from '../src/agent/sandbox-exec.js'
+import { devBridge } from '../src/agent/dev-server.js'
 
 const TEST = { name: 'test', run: 'npm test', argv: ['npm', 'test'], inputs: null, mutating: true, args: false, ready: null }
 const JEST = { name: 'jest', run: 'npx jest', argv: ['npx', 'jest'], inputs: null, mutating: true, args: true, ready: null }
@@ -314,9 +315,12 @@ test('files a command changed are reported, so the fix is held for a look', asyn
   assert.deepEqual(changes, [{ changed: ['snapshot.txt'], deleted: [] }])
 })
 
-// Review: each sandboxed command has its own network namespace, so a dev
-// server there could never answer (waitReady always timed out).
-test('dev servers: not offered in the OS sandbox', async (t) => {
+// Each sandboxed command has its own network namespace: a dev server there
+// is offered only where the supervisor can bridge its one port
+// (dev-server.js: Linux with nsenter). On macOS, Seatbelt could let it
+// listen only by opening every loopback port to it, so it is not offered.
+// The bridge itself: test/dev-server.test.js.
+test('dev servers in the OS sandbox: offered only where one port can be bridged', async (t) => {
   const DEV = { name: 'dev', run: 'npm run dev', argv: ['npm', 'run', 'dev'], inputs: null, mutating: true, args: false, ready: null }
   const session = fakeSession(t)
   const host = createToolHost({
@@ -326,9 +330,14 @@ test('dev servers: not offered in the OS sandbox', async (t) => {
     approvals: records(t),
     ask: async () => 'approved',
   })
-  assert.ok(!host.tools().some((tool) => tool.name === 'start_dev_server'))
-  assert.match(textOf(await host.call('start_dev_server', {})), /No tool "start_dev_server"/)
-  assert.equal(session.runs.length, 0)
+  const offered = host.tools().some((tool) => tool.name === 'start_dev_server')
+  assert.equal(offered, devBridge().available)
+  assert.deepEqual(devBridge({ platform: 'darwin' }), { available: false, reason: 'seatbelt_loopback' })
+  assert.deepEqual(devBridge({ platform: 'win32' }), { available: false, reason: 'platform' })
+  if (!offered) {
+    assert.match(textOf(await host.call('start_dev_server', {})), /No tool "start_dev_server"/)
+    assert.equal(session.runs.length, 0)
+  }
 })
 
 test(

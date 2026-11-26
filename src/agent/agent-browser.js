@@ -328,6 +328,7 @@ export function createAgentBrowser({
   }
   // token -> origin, for dev servers the tool host started (registerSpawned).
   const spawned = new Map()
+  const configured = new Set(given)
   const blocked = []
   const errors = []
   const notes = []
@@ -631,6 +632,17 @@ export function createAgentBrowser({
       const token = randomBytes(16).toString('hex')
       spawned.set(token, `http://127.0.0.1:${port}`)
       return token
+    },
+    // Takes a stopped dev server's origin off again (its port is anyone's
+    // after), unless the config allows that origin itself.
+    revokeSpawned(token) {
+      const origin = typeof token === 'string' ? spawned.get(token) : undefined
+      if (!origin) return false
+      spawned.delete(token)
+      if (configured.has(origin) || [...spawned.values()].includes(origin)) return true
+      if (given.includes(origin)) given.splice(given.indexOf(origin), 1)
+      allowed.delete(origin)
+      return true
     },
     // Adds the dev server registerSpawned() returned `token` for. Live when
     // the browser runs, or with the next start; never a port it was not given.

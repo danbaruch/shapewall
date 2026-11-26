@@ -40,6 +40,7 @@ import { toPrompt } from './capability-render.js'
 import { showCommand } from './starter/approvals.js'
 import * as z from 'zod'
 import { browserTools, createAgentBrowser } from './agent-browser.js'
+import { DEV_BRIDGE_WHY, devBridge, reserveDevPort, startDevServer } from './dev-server.js'
 
 export const EXEC_MCP_NAME = 'shapewall_exec'
 export const EXEC_TOOL_PREFIX = `mcp__${EXEC_MCP_NAME}__`
@@ -70,18 +71,28 @@ export function registerTools(factory) {
 }
 // The throwaway browser (src/agent/agent-browser.js, Q3): its browser_* tools,
 // only on a turn whose Browser line is on. The browser itself starts on the
-// first tool call and is disposed with the tool host. Arguments are checked
-// against the tools' own schemas before a handler sees them.
+// first tool call and is disposed with the tool host, after its dev servers
+// stopped. It is the host's one browser (host.agentBrowser): the dev server
+// supervisor registers the ports it holds with it. Shapewall's own server
+// port (host.denyPorts) is never opened. Arguments are checked against the
+// tools' own schemas before a handler sees them.
 function browserFamily(host) {
   const browser = host.capabilities.browser
   if (!browser || browser.on !== true) return []
   let agentBrowser
   try {
-    agentBrowser = createAgentBrowser({ browser, checkout: host.checkout, warn: (line) => host.log(`agent browser: ${line}`) })
+    agentBrowser = createAgentBrowser({
+      ...host.browserOptions,
+      browser,
+      checkout: host.checkout,
+      denyPorts: host.denyPorts,
+      warn: (line) => host.log(`agent browser: ${line}`),
+    })
   } catch (error) {
     host.log(`agent browser: off for this turn: ${error.message}`)
     return []
   }
+  host.agentBrowser = agentBrowser
   host.onClose(() => agentBrowser.dispose())
   return browserTools(agentBrowser).map((tool) => {
     const schema = z.object(tool.inputSchema).strict()
@@ -202,6 +213,10 @@ export function createToolHost({
   onChanged = () => {},
   // The person's checkout (the browser reads its recorded logins there, never from the fix copy).
   checkout = null,
+  // Loopback ports the agent browser never opens: Shapewall's own server port.
+  denyPorts = [],
+  // Tests only: more options for createAgentBrowser (a stand-in chromium, a temp root).
+  browserOptions = {},
   log = () => {},
 }) {
   const caps = capabilities
@@ -307,29 +322,55 @@ export function createToolHost({
     return null
   }
 
-  async function runTracked(what, options) {
-    const mutating = options.mutating !== false && !session.readOnly
+  // Runs start() (a command, or a dev server's whole life) and reports the
+  // files it changed in the fix copy.
+  async function tracked(mutatingCommand, start) {
+    const mutating = mutatingCommand !== false && !session.readOnly
     const before = mutating ? snapshot(session.root) : null
-    let run
     try {
-      run = await session.run(what, options)
+      return await start()
     } finally {
       if (before) {
         const diff = changes(before, snapshot(session.root))
         if (diff.changed.length || diff.deleted.length) onChanged(diff)
       }
     }
-    return run
   }
+  const runTracked = (what, options) => tracked(options.mutating, () => session.run(what, options))
 
-  // Dev servers run only outside the OS sandbox (plan 7 Q4): inside it each
-  // command gets its own network namespace on Linux, so nothing else (the
-  // agent's next command, a browser) could reach the port, and srt 0.0.83
-  // forwards no ports.
+  // Dev servers: outside the OS sandbox the server binds a port itself; in
+  // it (Linux) each one gets its own sandbox and one bridged port that the
+  // supervisor holds (dev-server.js). Where the sandbox cannot bridge one
+  // (macOS: Seatbelt would open every loopback port to it), none runs there.
+  const bridge = session?.mode === 'sandboxed' ? devBridge() : { available: true, reason: null }
   const devAvailable = () =>
     Boolean(session) &&
-    session.mode !== 'sandboxed' &&
+    bridge.available &&
     caps.commands.some((item) => item.name === 'dev' || commands.find((c) => c.name === item.name)?.ready)
+  // A server's port joins the agent browser's allowlist for this session
+  // only when the supervisor knows the server is what listens there: the
+  // port it holds and bridges (sandbox), or a listener of the server's own
+  // process group (host mode). Never a port the session did not bind.
+  // -> words for the agent.
+  async function offerToBrowser(server) {
+    const browser = host.agentBrowser
+    if (!browser || browser.disposed) return ''
+    if (!server.bridged && !server.owned())
+      return ' Your browser tools do not get it: Shapewall could not check that the server is what listens on 127.0.0.1 there (bind 127.0.0.1:$PORT).'
+    try {
+      server.token = browser.registerSpawned(server.port)
+      await browser.allowSessionOrigin(server.token)
+    } catch (error) {
+      server.token = null
+      return ` Your browser tools do not get it: ${error.message}`
+    }
+    return ` Your browser tools can open http://127.0.0.1:${server.port}.`
+  }
+  // Its port leaves the browser's allowlist when it stops: the port is free for anyone after.
+  function forget(server) {
+    if (server.token) host.agentBrowser?.revokeSpawned(server.token)
+    server.token = null
+  }
 
   const builtin = [
     {
@@ -443,7 +484,7 @@ export function createToolHost({
     {
       name: 'start_dev_server',
       description:
-        "Starts the project's named dev server (its `dev` command) on a free port in your working folder and waits until it answers. Only where commands run without the OS sandbox; files it writes count as changed by you.",
+        "Starts the project's named dev server (its `dev` command) on a free port in your working folder and waits until it answers on 127.0.0.1:$PORT. In the OS sandbox it runs in a sandbox of its own, and only that one port reaches it (not your other commands). Your browser tools can open it. Files it writes count as changed by you.",
       inputSchema: {
         type: 'object',
         properties: { name: { type: 'string', description: 'The command name (default "dev")' } },
@@ -456,36 +497,51 @@ export function createToolHost({
         if (devServers.size >= EXEC_LIMITS.devServers)
           return failure(`At most ${EXEC_LIMITS.devServers} dev servers at a time: stop one first.`)
         if (!allowedNow(id)) return failure(`"${id}" is not allowed on this turn.`)
-        if (!devAvailable()) return failure('Dev servers do not run in the OS sandbox: each command there has its own network.')
-        const port = await freePort()
-        const picked = namedArgv(id, null, { port })
-        if (picked.error) return failure(picked.error)
-        const refused = await mayRun({ ...picked, label: `Start ${id}` })
-        if (refused) return failure(refused)
-        if (closed) return failure('The session has ended.')
-        const server = { port, kill: () => {}, done: null, output: '' }
-        // Tracked like any command: what the server writes in the fix copy is
-        // reported when it stops, so the fix is held for a look.
-        server.done = runTracked(picked.argv, {
-          mutating: picked.command.mutating,
-          timeoutMs: SANDBOX_LIMITS.timeoutMaxMs,
-          extraEnv: { PORT: String(port) },
-          onStart: ({ kill }) => (server.kill = kill),
-        }).then((run) => {
-          server.output = run.output
-          server.exited = true
-          devServers.delete(id)
-          return run
-        })
-        devServers.set(id, server)
-        const ready = picked.command.ready ? picked.command.ready.split(PORT_TOKEN).join(String(port)) : `http://127.0.0.1:${port}`
-        const up = await waitReady(ready, server)
-        if (!up) {
-          server.kill()
-          await server.done
-          return failure(`${id} did not answer on ${ready} within ${EXEC_LIMITS.readyMs / 1000} s.\n${server.output.slice(-4000)}`)
+        if (!devAvailable()) return failure(DEV_BRIDGE_WHY[bridge.reason] || 'Dev servers do not run here.')
+        const reserved = await reserveDevPort(session)
+        let server = null
+        try {
+          const { port } = reserved
+          const picked = namedArgv(id, null, { port })
+          if (picked.error) return failure(picked.error)
+          const refused = await mayRun({ ...picked, label: `Start ${id}` })
+          if (refused) return failure(refused)
+          if (closed) return failure('The session has ended.')
+          server = await startDevServer({
+            session,
+            reserved,
+            command: picked.argv,
+            timeoutMs: SANDBOX_LIMITS.timeoutMaxMs,
+            // Tracked like any command: what the server writes in the fix
+            // copy is reported when it stops, so the fix is held for a look.
+            track: (start) => tracked(picked.command.mutating, start),
+            log,
+          })
+          const gone = () => {
+            forget(server)
+            if (devServers.get(id) === server) devServers.delete(id)
+          }
+          server.done.then(gone, gone)
+          if (server.bridgeError) {
+            await server.stop()
+            return failure(`${id} did not start: ${server.bridgeError}.\n${server.output().slice(-4000)}`)
+          }
+          devServers.set(id, server)
+          const ready = readyUrl(picked.command.ready, port, reserved.bridged)
+          const up = await waitReady(ready, server)
+          if (!up) {
+            await server.stop()
+            return failure(`${id} did not answer on ${ready} within ${EXEC_LIMITS.readyMs / 1000} s.\n${server.output().slice(-4000)}`)
+          }
+          if (closed) {
+            await server.stop()
+            return failure('The session has ended.')
+          }
+          const browser = await offerToBrowser(server)
+          return text(`${id} is up on ${ready} (port ${port}).${browser} Stop it with stop_dev_server when you are done.`)
+        } finally {
+          if (!server) reserved.release()
         }
-        return text(`${id} is up on ${ready} (port ${port}). Stop it with stop_dev_server when you are done.`)
       },
     },
     {
@@ -494,11 +550,13 @@ export function createToolHost({
       inputSchema: { type: 'object', properties: { name: { type: 'string' } }, additionalProperties: false },
       available: devAvailable,
       async call({ name = 'dev' } = {}) {
-        const server = devServers.get(String(name || 'dev'))
+        const id = String(name || 'dev')
+        const server = devServers.get(id)
         if (!server) return text('No such dev server is running.')
-        server.kill()
-        await server.done
-        return text(`${name} stopped.`)
+        forget(server)
+        await server.stop()
+        devServers.delete(id)
+        return text(`${id} stopped.`)
       },
     },
   ]
@@ -507,6 +565,10 @@ export function createToolHost({
     capabilities: caps,
     session,
     checkout,
+    denyPorts: (Array.isArray(denyPorts) ? denyPorts : []).filter((port) => Number.isInteger(port) && port > 0 && port < 65536),
+    browserOptions,
+    // Set by browserFamily when the Browser line is on: the one agent browser of this host.
+    agentBrowser: null,
     onClose: (fn) => closers.push(fn),
     devPorts: () => [...devServers.values()].map((server) => server.port),
     log,
@@ -516,6 +578,9 @@ export function createToolHost({
   const byName = new Map(listed.map((tool) => [tool.name, tool]))
   return {
     ...host,
+    get agentBrowser() {
+      return host.agentBrowser
+    },
     tools: () => listed.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
     async call(name, args, { signal } = {}) {
       if (closed) return failure('This session has ended.')
@@ -530,23 +595,30 @@ export function createToolHost({
     },
     async close() {
       closed = true
-      for (const server of devServers.values()) server.kill()
-      await Promise.allSettled([...devServers.values()].map((server) => server.done))
+      // The dev servers first (their ports leave the browser), then the browser.
+      const running = [...devServers.values()]
+      for (const server of running) forget(server)
+      await Promise.allSettled(running.map((server) => server.stop()))
+      devServers.clear()
       await Promise.allSettled(closers.map((fn) => Promise.resolve().then(fn)))
     },
   }
 }
 
-async function freePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer()
-    server.unref()
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address()
-      server.close(() => resolve(port))
-    })
-  })
+// The ready URL: the config's (its $PORT filled in), or the port's root. In
+// the sandbox only the held port reaches the server, so the check goes to
+// http://127.0.0.1:PORT with the config's path, whatever host it names.
+function readyUrl(ready, port, bridged) {
+  const base = `http://127.0.0.1:${port}`
+  if (!ready) return base
+  const filled = ready.split(PORT_TOKEN).join(String(port))
+  if (!bridged) return filled
+  try {
+    const url = new URL(filled)
+    return `${base}${url.pathname}${url.search}`
+  } catch {
+    return base
+  }
 }
 async function waitReady(url, server) {
   const until = Date.now() + EXEC_LIMITS.readyMs
@@ -590,6 +662,8 @@ export async function startExecSession({
   ask = null,
   shellCard = false,
   onChanged,
+  // Loopback ports the agent browser never opens (Shapewall's own server port).
+  denyPorts = [],
   env = process.env,
   log = () => {},
 }) {
@@ -617,6 +691,7 @@ export async function startExecSession({
     shellCard,
     onChanged,
     checkout,
+    denyPorts,
     log,
   })
   let served
