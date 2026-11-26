@@ -21,8 +21,12 @@ const probe = probeSandbox()
 const required = process.env.SHAPEWALL_SANDBOX_TEST === '1'
 if (!probe.available && !required)
   console.log('# hosted-exec: the OS sandbox does not start here (' + probe.reason + '): the solo sandbox test is skipped')
-const boxed = { skip: probe.available || required ? false : 'no OS sandbox here (' + probe.reason + ')' }
-const posix = { skip: process.platform === 'win32' ? 'the fixture project runs npm through a POSIX shell' : false }
+// Without /proc fd checks (macOS) an agent that edits gets no commands in
+// 1.4.0 (capabilities.js edits_without_fd_checks; the last test below).
+const NO_FD = process.platform !== 'linux' && process.platform !== 'win32'
+const noFd = NO_FD ? 'an editing agent gets no commands on this system (edits_without_fd_checks)' : false
+const boxed = { skip: noFd || (probe.available || required ? false : 'no OS sandbox here (' + probe.reason + ')') }
+const posix = { skip: noFd || (process.platform === 'win32' ? 'the fixture project runs npm through a POSIX shell' : false) }
 
 let hosted
 let ada
@@ -216,3 +220,15 @@ test('the first owner the server names is pinned and handed back to be saved', p
   const { final } = await turn
   assert.match(final.text, /mcp run_named_command ok: test: exit code 0/)
 })
+
+test(
+  'without /proc fd checks (macOS): a hosted Fix gets no command tools at all',
+  { skip: !NO_FD && 'Linux has the fd checks' },
+  async () => {
+    const agent = await agentWith('NoFd', { audience: 'owner', policy: { audience: 'owner', approvals: 'owner' } })
+    const made = await comment('Run the tests ' + fixScript([['mcp', 'run_named_command', { name: 'test' }]]))
+    const { final } = await pressFix(made.id, agent)
+    assert.doesNotMatch(final?.text || '', /mcp run_named_command ok/)
+    assert.equal((final?.cards || []).filter((item) => item.name === 'command').length, 0)
+  },
+)

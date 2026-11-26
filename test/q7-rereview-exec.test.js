@@ -107,11 +107,11 @@ test(
     assert.equal(fs.readFileSync(path.join(root, 'package.json'), 'utf8'), pkg)
     assert.equal(fs.readFileSync(path.join(victim, '.bashrc'), 'utf8'), 'VICTIM\n')
     assert.equal(fs.existsSync(path.join(root, '.shapewall', 'agent', 'quarantine')), false, 'nothing is moved by path')
-    // Branch mode (a copy) keeps its commands.
+    // Branch mode (a copy) keeps its commands (on Linux: elsewhere an editing agent gets none, round 3 item 1).
     const branch = localCapabilities({ config, env, acp: true, owner: true, inPlace: false })
     assert.deepEqual(
       branch.commands.map((command) => command.name),
-      ['evil'],
+      process.platform === 'linux' ? ['evil'] : [],
     )
   },
 )
