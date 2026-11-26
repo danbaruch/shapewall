@@ -5,12 +5,14 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { resolveCapabilities, resolveCeiling } from '../src/agent/capabilities.js'
+import { browserProfileBase, resolveCapabilities, resolveCeiling } from '../src/agent/capabilities.js'
 import { loadConfig } from '../src/config.js'
 import { LINE_IDS, LINE_LABELS, capabilitySummary, cleanCapabilitySummary, lineStates, toPrompt } from '../src/agent/capability-render.js'
 import { compactCard, localCard, summaryCard, viewerTier } from '../src/agent/capability-views.js'
 import { agentSet, agentStatus, agentStatusData } from '../src/cli/agent-status.js'
 import { saveMachinePolicy, readMachinePolicy } from '../src/remote/agent-policy-file.js'
+import { policyChanges } from '../src/remote/agent-connect.js'
+import { parseArgs } from '../src/cli/args.js'
 import { tempDir } from './helpers.js'
 
 const ORIGIN = 'https://sw.example.com'
@@ -278,4 +280,64 @@ test('agent set on a connection: capability keys and connect keys, each checked 
   assert.equal(readMachinePolicy(ORIGIN, 'default', e).approvals, 'none', 'another connection is untouched')
   await assert.rejects(set('handoff-hops', '9'), /not a value/)
   await assert.rejects(set('approvals', 'everyone'), /--approvals/)
+})
+
+test('agent set and agent connect: browser-no-sandbox and browser-profile NAME', async () => {
+  const { dir, env: e } = env()
+  const set = (...args) =>
+    agentSet(
+      ['set', ...args],
+      { remote: ORIGIN, as: 'builder' },
+      () => {},
+      () => {},
+      { env: e, cwd: dir },
+    )
+  assert.equal(readMachinePolicy(ORIGIN, 'builder', e).browserNoSandbox, false, 'off by default')
+  await set('browser-no-sandbox', 'on')
+  assert.equal(readMachinePolicy(ORIGIN, 'builder', e).browserNoSandbox, true)
+  await set('browser-no-sandbox', 'off')
+  assert.equal(readMachinePolicy(ORIGIN, 'builder', e).browserNoSandbox, false)
+  await assert.rejects(set('browser-no-sandbox', 'maybe'), /on or off/)
+  // A profile by name: made in the state folder's agent-browser-profiles, 0700.
+  await set('browser-profile', 'staging-login')
+  const base = browserProfileBase(e)
+  const saved = readMachinePolicy(ORIGIN, 'builder', e).browserProfile
+  assert.equal(saved, path.join(fs.realpathSync(base), 'staging-login'))
+  assert.equal(fs.statSync(saved).mode & 0o777, 0o700)
+  assert.equal(fs.statSync(base).mode & 0o777, 0o700)
+  await set('browser-profile', 'none')
+  assert.equal(readMachinePolicy(ORIGIN, 'builder', e).browserProfile, null)
+  // A folder elsewhere, a relative path: refused, nothing saved.
+  await assert.rejects(set('browser-profile', path.join(dir, 'elsewhere')), /lives in/)
+  await assert.rejects(set('browser-profile', 'a/b'), /a name such as/)
+  assert.equal(readMachinePolicy(ORIGIN, 'builder', e).browserProfile, null)
+  // The local board's agents.json entry takes the same key.
+  fs.writeFileSync(
+    path.join(dir, 'shapewall.config.json'),
+    JSON.stringify({ boards: [{ id: 'main', baseUrl: 'http://127.0.0.1:5173', pages: [{ id: 'home', path: '/' }] }] }),
+  )
+  await agentSet(
+    ['set', 'browser-no-sandbox', 'on'],
+    {},
+    () => {},
+    () => {},
+    { env: e, cwd: dir },
+  )
+  const status = await agentStatusData({}, { env: e, cwd: dir, platform: PLATFORM })
+  const solo = status.tiers.solo.lines.find((line) => line.id === 'browser')
+  const open = status.tiers.open.lines.find((line) => line.id === 'browser')
+  assert.match(solo.text, /browser-no-sandbox/)
+  assert.doesNotMatch(open.text, /browser-no-sandbox/, 'never on open turns')
+  // agent connect: the flags parse, and become the same changes.
+  const { flags } = parseArgs(['agent', 'connect', '--browser-no-sandbox', '--browser-profile', 'qa'], { strict: true })
+  assert.equal(flags['browser-no-sandbox'], true)
+  const none = readMachinePolicy(ORIGIN, 'fresh', e)
+  const changes = policyChanges(flags, none, null, { cwd: dir, env: e })
+  assert.deepEqual(changes, { browserProfile: path.join(fs.realpathSync(base), 'qa'), browserNoSandbox: true })
+  assert.deepEqual(policyChanges({ 'browser-no-sandbox': false, 'browser-profile': 'none' }, none, null, { env: e }), {
+    browserProfile: null,
+    browserNoSandbox: false,
+  })
+  assert.throws(() => policyChanges({ 'browser-profile': '/etc' }, none, null, { env: e }), /lives in/)
+  assert.deepEqual(policyChanges({}, none, null, { env: e }), {}, 'no flag, no change')
 })

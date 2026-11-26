@@ -511,15 +511,22 @@ reads a missing key as the "Local board" column:
 | `browserAuth`        | a recorded auth name                                                                                                | none           | none                                                     | none                         |
 | `browserProfile`     | a folder Shapewall made for the agent (it holds a marker file); never a real browser's own profile or a copy of one | none           | none                                                     | none                         |
 | `browserProfileTeam` | `true` / `false`                                                                                                    | `false`        | `false`                                                  | `false`                      |
+| `browserNoSandbox`   | `true` / `false` (the browser may start without Chromium's own sandbox where it cannot start; solo and team only)   | `false`        | `false`                                                  | `false`                      |
 | `extensionsFor`      | `"owner"` and handles                                                                                               | `["owner"]`    | `[]`                                                     | `[]`                         |
 | `allowTool`          | exact `mcp__server__tool` names, up to 20                                                                           | `[]`           | `[]`                                                     | `[]`                         |
 | `handoffHops`        | 0 to 2                                                                                                              | `0`            | `0`                                                      | `0`                          |
 
 A key that is there with a value this version does not know reads as its narrowest, and the connector names it. Origins in a
 project's `agent.browser.allow` count only where the machine's `browserAllow` has them too, except on a solo turn of a machine
-without a login for the browser: the machine wins. A `browserProfile` is read after resolving links, and only a folder holding
-Shapewall's marker file counts, so a real browser's profile folder (any browser, any name), a copy of one or a link to one is
-refused. A missing or malformed trust block reads as open. In `agents.json` a key it does not know at all is an
+without a login for the browser: the machine wins. The same goes for an address on this machine that the config names in any
+`baseUrl` or `publicUrl` (a loopback address in any spelling, `0.0.0.0`, `localhost` and `*.localhost`, or a local name such as
+`app.test`): below that solo turn it counts only where `browserAllow` names that exact origin, so a committed config cannot open
+a port on your machine to a team or open turn; the Browser line names what it held back and the command that lists it. A
+`browserProfile` is a name (`--browser-profile staging-login`) for a folder in
+`$XDG_STATE_HOME/shapewall/agent-browser-profiles/` (`~/.local/state/...` without it): that folder is yours, `0700` and never a
+link, and the commands an agent runs never see it. A profile is read after resolving links, and only a folder in there holding
+Shapewall's marker file counts, so a real browser's profile folder (any browser, any name), a copy of one, a link to one or a
+folder anywhere else (an older policy's path included: it reads as no profile, with a warning) is refused. A missing or malformed trust block reads as open. In `agents.json` a key it does not know at all is an
 error for that project, so a typo cannot fall back to a wider default.
 
 **Upgrading from version 1.** A version 1 `agent-policy.json` is read as exactly what it allowed before: no shell, no browser, no
@@ -649,7 +656,8 @@ limits are in Shapewall's code, not in what the model is told:
   refused or sent back to a blank page, popups off the list are closed.
 - **No debugging port.** Shapewall drives Chromium over a pipe; no remote debugging port is opened, and no other program can attach.
   Your own Chrome and its profile are never used. Chromium's own sandbox stays on: where it cannot start, the browser stays off
-  unless the machine's owner allows a browser without it, and then every browser tool result says so.
+  unless the machine's owner allows a browser without it (`browserNoSandbox`, solo and team turns only), and then every browser
+  tool result says so.
 - **Nothing left behind.** The profile is a new folder in a folder private to you (`$XDG_RUNTIME_DIR/shapewall-agent-browser/`,
   or `shapewall-agent-browser-<uid>/` in the system temp folder; one that is a link, belongs to someone else or that others can
   open is refused), removed at close, when Chromium crashes, when Shapewall exits or is stopped, and after a forced kill by the next
@@ -657,8 +665,9 @@ limits are in Shapewall's code, not in what the model is told:
 - **Logins only where the turn allows them.** A recorded login (`browserAuth`, from `.shapewall-auth/<name>.auth.json` in the
   project folder, a plain folder and not a link; cookies kept to the allowed hosts and their parent domains, never a public suffix
   such as `.com` or `.co.uk`) or a persistent agent profile (`browserProfile`) loads only on the tiers in the table
-  above. A profile folder is checked again right before Chromium starts: only a folder Shapewall made (it holds a marker file), never
-  a browser's own profile folder.
+  above. A profile folder is checked again right before Chromium starts and once more right after: only a folder Shapewall made
+  (it holds a marker file) in its own profile folder, the same folder both times, never a browser's own profile folder; one that
+  changed in between closes the browser.
 
 What it cannot cover: the allowed app itself is the agent's to use, so a page there can still show the agent hostile text (page text
 comes back marked as untrusted). A hostname's DNS is trusted at the moment the browser starts. The address an allowed name resolved

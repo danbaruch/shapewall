@@ -47,7 +47,7 @@ import {
 } from './agent-policy-file.js'
 import { createRemote, remoteOrigin } from './remote.js'
 import { safeOut, terminalSafe } from './terminal.js'
-import { hostPlatform } from '../agent/capabilities.js'
+import { hostPlatform, markBrowserProfile } from '../agent/capabilities.js'
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version
 const TOKEN_RE = /^swp_[A-Za-z0-9_-]{43}$/
@@ -219,7 +219,7 @@ export function agentConfigFor(policy, slug, { env = process.env, projectDir }) 
   return { dir: real(dir) }
 }
 
-export function policyChanges(flags, saved, kind = null, { cwd = process.cwd() } = {}) {
+export function policyChanges(flags, saved, kind = null, { cwd = process.cwd(), env = process.env } = {}) {
   const changes = {}
   const commandsOk = kind === null || COMMANDS_PROVEN.includes(kind)
   if (flags.audience !== undefined) {
@@ -303,6 +303,18 @@ export function policyChanges(flags, saved, kind = null, { cwd = process.cwd() }
       throw new Error('--git-remote: a remote name, such as origin ("none": never push)')
     changes.remote = flags['git-remote'] === 'none' ? null : flags['git-remote']
   }
+  // The agent browser. A profile is a NAME in Shapewall's own profile folder
+  // ($XDG_STATE_HOME/shapewall/agent-browser-profiles), made here new or
+  // empty; never a browser's own profile or a folder elsewhere.
+  if (flags['browser-profile'] !== undefined) {
+    const given = flags['browser-profile']
+    if (given === 'none') changes.browserProfile = null
+    else if (typeof given !== 'string' || !given)
+      throw new Error('--browser-profile: a name such as staging-login for the agent browser\'s own saved profile ("none": no profile)')
+    else changes.browserProfile = markBrowserProfile(given, { env })
+  }
+  // Chromium's own sandbox may be skipped where it cannot start (solo and team turns only).
+  if (flags['browser-no-sandbox'] !== undefined) changes.browserNoSandbox = flags['browser-no-sandbox'] === true
   return changes
 }
 
@@ -338,7 +350,7 @@ export async function agentConnect(
   const policyNow = readMachinePolicy(origin, slug, env, {
     warn: (text) => log(`Not understood, so read as the narrowest setting: ${text}`),
   })
-  const changes = policyChanges(flags, policyNow, kind, { cwd })
+  const changes = policyChanges(flags, policyNow, kind, { cwd, env })
   // The agent config folder is checked before the policy file is written: a refused folder is never saved.
   if (changes.agentConfig !== undefined || changes.instructions !== undefined)
     agentConfigFor({ ...policyNow, ...changes }, slug, { env, projectDir: config.dir })

@@ -48,7 +48,7 @@
 // cleanCapabilityKeys, docs/agent-hardening.md lists them): trustTeam,
 // trustTeamShell, shell, shellNetwork, shellUnsandboxed, commandApproval,
 // browser, browserAllow, browserAuth, browserProfile, browserProfileTeam,
-// extensionsFor, allowTool, handoffHops. A version 1 file is read as exactly
+// browserNoSandbox, extensionsFor, allowTool, handoffHops. A version 1 file is read as exactly
 // what it allowed before (upgradeV1Capabilities: no shell, no browser, no
 // extensions, a card for every command), and the next save writes every
 // entry of it back as version 2 with those values spelled out, so no entry
@@ -188,7 +188,8 @@ const KNOWN_KEYS = [
   ...CAPABILITY_KEYS,
 ]
 const unique = (list) => [...new Set(list)]
-function clean(entry, warn = () => {}) {
+// `env`: where the agent browser profiles are (cleanBrowserProfile).
+function clean(entry, warn = () => {}, env = process.env) {
   const has = (key) =>
     entry !== null && typeof entry === 'object' && !Array.isArray(entry) && Object.hasOwn(entry, key) && entry[key] !== undefined
   if (entry !== undefined && entry !== null && (typeof entry !== 'object' || Array.isArray(entry))) {
@@ -290,6 +291,7 @@ function clean(entry, warn = () => {}) {
     ...cleanCapabilityKeys(entry, {
       defaults: upgradeV1Capabilities(approvals, on ? commands : []),
       warn: (key, said) => bad(key, said),
+      env,
     }),
   }
 }
@@ -314,7 +316,7 @@ export function readMachinePolicy(origin, slug = 'default', env = process.env, {
   const file = policyFile(env)
   const data = readAll(file)
   const entry = data.connections[`${origin}#${slug}`]
-  return clean(fileVersion(data) === 1 ? upgradeV1Entry(entry) : entry, (text) => warn(`${file}: ${text}`))
+  return clean(fileVersion(data) === 1 ? upgradeV1Entry(entry) : entry, (text) => warn(`${file}: ${text}`), env)
 }
 
 // Saves what was chosen for one connection; returns the policy in effect.
@@ -331,11 +333,12 @@ export function saveMachinePolicy(origin, slug, changes, env = process.env) {
     // A version 1 file is written back as version 2, every entry reading
     // exactly as it did: an entry nobody touched gains nothing.
     if (version === 1) {
-      for (const [name, entry] of Object.entries(data.connections)) data.connections[name] = stored(clean(upgradeV1Entry(entry)))
+      for (const [name, entry] of Object.entries(data.connections))
+        data.connections[name] = stored(clean(upgradeV1Entry(entry), undefined, env))
     }
     data.version = POLICY_VERSION
     const key = `${origin}#${slug}`
-    const next = clean({ ...stored(clean(data.connections[key])), ...changes })
+    const next = clean({ ...stored(clean(data.connections[key], undefined, env)), ...changes }, undefined, env)
     data.connections[key] = stored(next)
     return next
   })

@@ -53,6 +53,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The agent browser: an address on the agent's machine (a loopback address in any spelling, `localhost`, a local name such as
+  `app.test`) that a committed config names counts below the owner's own turn (team, open, and solo with a browser login) only
+  where the machine's `browserAllow` lists that exact origin; the Browser line names what it held back and the command that
+  lists it. Persistent agent browser profiles live in `$XDG_STATE_HOME/shapewall/agent-browser-profiles/NAME` (yours, `0700`,
+  never a link, out of reach of the agent's commands) and are checked again after Chromium starts; a profile path saved
+  elsewhere reads as no profile, with a warning. New machine policy key `browserNoSandbox` (`agent connect --browser-no-sandbox`,
+  `agent set browser-no-sandbox on`, default off): the browser may start without Chromium's own sandbox where it cannot start,
+  on solo and team turns only, and the Browser line says so. `agent connect --browser-profile NAME` makes and saves a profile.
 - Who "the owner" is on a connected agent's turns is pinned on its machine: the handle of the account that approved it (saved
   with the token, or the first one the server names, then saved), not the server's word alone. With `--approvals owner` a card's
   "allow" must name that handle as the one who answered.
