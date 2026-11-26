@@ -880,6 +880,23 @@ function resolveForTier(
     commands = commands.filter((command) => !command.mutating)
     if (shell.mode !== 'off') shell = { mode: 'off', network: 'none', exact: [] }
   }
+  // A local board whose edits land in the checkout itself: a command there
+  // could leave files that run later on their own (Git hooks, .npmrc,
+  // node_modules/.bin, ...), which no check after the run can undo in time.
+  // Commands run only in a copy (Work on a branch): none here (Q7 re-review 1).
+  // Read-only commands (edits off) stay: they cannot write there.
+  if (local && config?.agent?.fixIn === 'checkout' && edit.on && (commands.length || shell.mode !== 'off')) {
+    commands = []
+    shell = { mode: 'off', network: 'none', exact: [] }
+    off('commands', 'in_place_commands')
+    off('shell', 'in_place_commands')
+  }
+  // Read only is the OS sandbox's to keep: without one no read-only command
+  // session starts (sandbox-exec.js no_sandbox_read_only), so none is offered.
+  if (!edit.on && !starter && !box.sandbox && commands.length) {
+    commands = []
+    off('commands', 'no_sandbox_read_only')
+  }
 
   // The throwaway browser.
   const serverBrowser = !narrowing || narrowing.browser

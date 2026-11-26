@@ -50,8 +50,13 @@ export function inside(root, target) {
 const realpath = (value) => (fs.realpathSync.native || fs.realpathSync)(value)
 
 // Folders a command (or dev server) of this process is running in now
-// (sandbox-exec.js marks each run): root -> count.
+// (sandbox-exec.js marks each run): root -> count. And every folder a
+// command ever started in, with the number of the last start there
+// (commandRanIn): on a system without /proc a command that left a process
+// behind can still swap folders after it "ended" (Q7 re-review 4).
 const running = new Map()
+const started = new Map()
+let starts = 0
 export function markRunning(root) {
   let real
   try {
@@ -60,6 +65,8 @@ export function markRunning(root) {
     return () => {}
   }
   running.set(real, (running.get(real) || 0) + 1)
+  starts += 1
+  started.set(real, starts)
   let done = false
   return () => {
     if (done) return
@@ -70,22 +77,10 @@ export function markRunning(root) {
   }
 }
 export const commandRunningIn = (root) => [...running.keys()].some((dir) => inside(dir, root) || inside(root, dir))
-
-// Real paths Shapewall itself wrote for an agent (an approved write card,
-// an ordinary edit): what the in-place command guard (local-tools.js) must
-// not take for a file a command made.
-// real path -> the file as Shapewall left it (size, mtime, inode, mode).
-const written = new Map()
-const stamp = (stat) => [stat.size, stat.mtimeMs, stat.ino, stat.mode].join(':')
-export function wroteItself(real) {
-  const was = written.get(fold(real))
-  if (!was) return false
-  try {
-    return stamp(fs.lstatSync(real)) === was
-  } catch {
-    return false
-  }
-}
+// The number of the last command start in, inside or around `root` (0: none).
+export const lastCommandIn = (root) =>
+  Math.max(0, ...[...started].filter(([dir]) => inside(dir, root) || inside(root, dir)).map(([, at]) => at))
+export const commandStarts = () => starts
 
 // The real path of the file `fd` holds. Linux: read back from /proc. Where
 // there is no /proc: `expected` itself, when it has no link on its way and
@@ -93,8 +88,8 @@ export function wroteItself(real) {
 // is weaker (a racing link swap can still land between two of its steps),
 // which is why ACP file access waits while a command runs there
 // (commandRunningIn).
-function fdPath(fd, expected) {
-  if (PROC_FD) {
+function fdPath(fd, expected, proc = PROC_FD) {
+  if (proc) {
     try {
       return fs.readlinkSync(`/proc/self/fd/${fd}`)
     } catch {
@@ -140,8 +135,16 @@ function realTarget(target) {
 // `sensitivePaths` (a list, or a function returning one) names more files
 // that need approval to write: the config's auth.loginScript (capture runs
 // it) and auth.storageState (the login capture uses).
-export function createSandbox({ root, protect = [], sensitivePaths = [] }) {
+export function createSandbox({
+  root,
+  protect = [],
+  sensitivePaths = [],
+  // Tests only: false checks files as a system without /proc does.
+  procFd = PROC_FD,
+}) {
   const realRoot = realpath(root)
+  // Commands started before this session do not count (commandRanIn).
+  const since = commandStarts()
   const realProtected = [path.join(realRoot, '.git'), ...protect.map((dir) => realTarget(path.resolve(dir)))]
 
   const check = (target, real, write) => {
@@ -155,9 +158,19 @@ export function createSandbox({ root, protect = [], sensitivePaths = [] }) {
   // Without /proc a file cannot be checked as opened, so nothing is read or
   // written through Shapewall while a command runs in the project.
   const busyGuard = (target) => {
-    if (!PROC_FD && commandRunningIn(realRoot))
+    if (!procFd && commandRunningIn(realRoot))
       throw new SandboxError(
         `${target}: a command or dev server is running in the project; on this system Shapewall reads and writes files for the agent only when none is (stop the dev server, or wait for the command)`,
+      )
+  }
+  // Without /proc a write goes by path in the end (the rename), and a
+  // process a command left behind could swap a folder there: once any
+  // command ran in the project in this session, Shapewall writes nothing
+  // more for the agent there (Q7 re-review 4).
+  const writeGuard = (target) => {
+    if (!procFd && lastCommandIn(realRoot) > since)
+      throw new SandboxError(
+        `${target}: not written. On this system Shapewall writes files for the agent only until a command has run in the project in this session (a process it left could redirect the write); start a new session to edit again`,
       )
   }
 
@@ -182,10 +195,54 @@ export function createSandbox({ root, protect = [], sensitivePaths = [] }) {
   // running in the project can do that, in a loop) is caught here, after the
   // open, on what was actually opened.
   const confirm = (target, fd, expected, write) => {
-    const real = fdPath(fd, expected)
+    const real = fdPath(fd, expected, procFd)
     check(target, real, write)
     if (fold(real) !== fold(expected)) throw new SandboxError(`${target} changed while it was opened; try again`)
     return real
+  }
+
+  // An open descriptor of folder `real` (inside the root), made part by part
+  // from the root: each part is made and opened relative to the open folder
+  // before it, never by a path a link can redirect (Q7 re-review 5).
+  const openFolder = (target, real) => {
+    const parts = path.relative(realRoot, real).split(path.sep).filter(Boolean)
+    if (parts.includes('..')) throw new SandboxError(`${target} is outside the project; only files under ${realRoot} are allowed`)
+    const flags = fs.constants.O_RDONLY | O_DIRECTORY | O_NOFOLLOW
+    const changed = () => new SandboxError(`${target} changed while it was opened; try again`)
+    let fd
+    try {
+      fd = fs.openSync(realRoot, flags)
+    } catch {
+      throw changed()
+    }
+    let at = realRoot
+    try {
+      confirm(target, fd, at, false)
+      for (const part of parts) {
+        const base = procFd ? `/proc/self/fd/${fd}` : at
+        const next = path.join(base, part)
+        try {
+          fs.mkdirSync(next)
+        } catch (error) {
+          if (error.code !== 'EEXIST') throw changed()
+        }
+        let child
+        try {
+          // O_NOFOLLOW: a link in its place is refused, never followed.
+          child = fs.openSync(next, flags)
+        } catch {
+          throw changed()
+        }
+        fs.closeSync(fd)
+        fd = child
+        at = path.join(at, part)
+        confirm(target, fd, at, true)
+      }
+      return fd
+    } catch (error) {
+      fs.closeSync(fd)
+      throw error instanceof SandboxError ? error : changed()
+    }
   }
 
   return {
@@ -210,6 +267,9 @@ export function createSandbox({ root, protect = [], sensitivePaths = [] }) {
         confirm(target, fd, file, false)
         const stat = fs.fstatSync(fd)
         if (!stat.isFile()) throw new SandboxError(`${target} is not a file`)
+        // A second name for a file (a hard link) may be one from outside the
+        // project: the path checks cannot tell, so it is refused.
+        if (stat.nlink > 1) throw new SandboxError(`${target} has more than one name (a hard link); Shapewall does not read it`)
         if (stat.size > READ_BYTES_MAX) throw new SandboxError(`${target} is larger than ${READ_BYTES_MAX / 1024 / 1024} MB`)
         // From the file that was checked (the descriptor), never by its path again.
         content = fs.readFileSync(fd, 'utf8')
@@ -227,24 +287,19 @@ export function createSandbox({ root, protect = [], sensitivePaths = [] }) {
       if (Buffer.byteLength(content) > WRITE_BYTES_MAX) throw new SandboxError(`at most ${WRITE_BYTES_MAX / 1024 / 1024} MB per file`)
       const file = resolve(target, { write: true })
       busyGuard(target)
-      fs.mkdirSync(path.dirname(file), { recursive: true })
-      // Check again once the folders exist: a symlink swapped in while they
-      // were made must not carry the write out of the project.
-      const expectedDir = check(target, realpath(path.dirname(file)), true)
+      writeGuard(target)
       const name = path.basename(file)
-      // The folder is opened once and checked as opened; on Linux every step
-      // after that goes through the open folder itself (/proc/self/fd/N), so
-      // a link swapped in for it afterwards changes nothing. Elsewhere the
-      // folder is checked again, by device and inode, after the rename.
-      let dirFd
+      // The folder, opened from the root down one part at a time, each part
+      // made (when missing) and opened inside the one before it and checked
+      // as opened: a link swapped in for any of them never takes a folder
+      // or the file outside the project. On Linux every step goes through
+      // the open folder itself (/proc/self/fd/N). Elsewhere each folder is
+      // checked by device and inode, and again after the rename.
+      const expectedDir = path.dirname(file)
+      const dirFd = openFolder(target, expectedDir)
       try {
-        dirFd = fs.openSync(expectedDir, fs.constants.O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
-      } catch {
-        throw new SandboxError(`${target} changed while it was opened; try again`)
-      }
-      try {
-        const dir = confirm(target, dirFd, expectedDir, true)
-        const base = PROC_FD ? `/proc/self/fd/${dirFd}` : dir
+        const dir = expectedDir
+        const base = procFd ? `/proc/self/fd/${dirFd}` : dir
         const final = path.join(base, name)
         let mode = null
         try {
@@ -277,15 +332,7 @@ export function createSandbox({ root, protect = [], sensitivePaths = [] }) {
           fs.rmSync(temp, { force: true })
           throw error
         }
-        if (!PROC_FD) confirm(target, dirFd, expectedDir, true)
-        try {
-          const key = fold(path.join(dir, name))
-          written.delete(key)
-          written.set(key, stamp(fs.lstatSync(path.join(dir, name))))
-          if (written.size > 10000) written.delete(written.keys().next().value)
-        } catch {
-          /* gone already */
-        }
+        if (!procFd) confirm(target, dirFd, expectedDir, true)
         return path.join(dir, name)
       } finally {
         fs.closeSync(dirFd)

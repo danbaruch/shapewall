@@ -131,7 +131,8 @@ function expected(where, tier, box) {
   if (where === 'hosted-chat') {
     return {
       shell: 'off',
-      commands: tier === 'solo' ? (box ? 'run lint' : 'card lint') : 'none',
+      // Read only needs the OS sandbox (Q7 B7): without one, no commands.
+      commands: tier === 'solo' && box ? 'run lint' : 'none',
       browser: tier === 'solo',
       edit: 'off',
       push: false,

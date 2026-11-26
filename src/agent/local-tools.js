@@ -25,13 +25,12 @@ import path from 'node:path'
 import { hostPlatform, namedCommands, resolveCapabilities } from './capabilities.js'
 import { createApprovalStore } from './command-approvals.js'
 import { toPrompt } from './capability-render.js'
-import { startExecSession } from './exec-mcp.js'
+import { offeredCapabilities, startExecSession } from './exec-mcp.js'
 import { localMachinePolicy, userAgentEntry } from './user-settings.js'
 import { authFiles, loadConfig } from '../config.js'
 import { policyExtensions, turnExtensions } from './agent-config-folder.js'
 import { agentSettings } from './config.js'
 import { acpAgentKind } from './acp/command.js'
-import { createRunGuard, guardNote } from './command-guard.js'
 
 let platformOnce = null
 // One sandbox probe per process: every turn and the capability card read the same answer.
@@ -95,6 +94,17 @@ export const localApprovalsDir = (config) => path.join(config.outputDir, 'agent'
 // worktree of it (the same path relative to config.dir). Only paths that
 // exist and are inside root (the sandbox denies the rest of the home folder
 // anyway).
+// The recorded logins' folder in `dir`, made (0700) when missing: a folder
+// the sandbox can hide from commands from their start. A link or a file
+// in its place is left alone (it is denied by its path all the same).
+export function ensureAuthDir(dir) {
+  try {
+    fs.mkdirSync(path.join(dir, AUTH_DIR), { mode: 0o700 })
+  } catch {
+    /* there already, or not ours to make */
+  }
+}
+
 export function commandReadDenied(config, root) {
   if (!root || !config) return []
   let real
@@ -223,7 +233,6 @@ export async function startLocalTools({
     failed = true
     caps = resolve(config)
   }
-  const prompt = toPrompt(caps)
   // `commands` come from the checkout's config, read again for each check.
   const fresh = () => {
     if (!config.file) return config
@@ -239,27 +248,16 @@ export async function startLocalTools({
   } catch {
     real = null
   }
+  // The recorded logins' folder exists before any command does, so the
+  // sandbox can hide it (it hides only what is there when it starts: Q7 C4).
+  if (real) ensureAuthDir(real)
+  if (config.dir) ensureAuthDir(config.dir)
   // A local checkout keeps its repository, Shapewall's folder and the
-  // recorded logins read only for commands, and (Q7 B2) every file that
-  // runs code on its own later (command-guard.js): denied before each run,
-  // and moved out or put back after it.
-  const fixed = real
+  // recorded logins read only for commands. Commands never run in the
+  // checkout itself (capabilities.js: in_place_commands), only in a copy.
+  const denyWrite = real
     ? [path.join(real, '.git'), path.resolve(config.outputDir), path.join(real, AUTH_DIR)].filter((dir) => fs.existsSync(dir))
     : []
-  let guard = null
-  if (real) {
-    const quarantine = path.join(path.resolve(config.outputDir), 'agent', 'quarantine')
-    const skip = [path.relative(real, path.resolve(config.outputDir)), AUTH_DIR].filter(
-      (rel) => rel && !rel.startsWith('..') && !path.isAbsolute(rel),
-    )
-    const runGuard = createRunGuard({ root: real, quarantine, skip })
-    guard = {
-      denyList: () => runGuard.denyList(),
-      before: () => runGuard.before(),
-      after: (state) => guardNote(runGuard.after(state), quarantine),
-    }
-  }
-  const denyWrite = guard ? () => [...new Set([...fixed, ...guard.denyList()])] : fixed
   const exec = await startExecSession({
     capabilities: caps,
     platform,
@@ -284,7 +282,6 @@ export async function startLocalTools({
     shellCard: caps.shell.mode !== 'off' && localMachinePolicy(userAgentEntry(config.dir, env).entry).commandApproval === 'always',
     // Local edits are the agent's own: the run summary and Undo see the checkout as it is.
     onChanged: () => {},
-    guard,
     // In place, the checkout holds the agent's earlier edits: the base is what is committed (Q7 B7).
     committedBase: Boolean(inPlace && real),
     browserCheckout: real,
@@ -293,6 +290,8 @@ export async function startLocalTools({
     env,
     log,
   })
+  // What the tool host offers, not what was asked for (a session that did not start offers no commands).
+  const prompt = toPrompt(offeredCapabilities(caps, exec))
   return { caps, prompt, exec, extensions }
 }
 

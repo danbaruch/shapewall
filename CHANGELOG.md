@@ -173,22 +173,29 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 - The agent's file tools check the file they opened, not the path again: a link or folder swapped in while a read or write is under
   way can no longer make it read or write outside the project (Linux: the opened descriptor; elsewhere a device and inode check, and
-  reads and writes wait while a command runs in the project).
-- A local in-place command can no longer leave files that run code on their own: Git hooks, `.envrc`, editor tasks, CI files,
-  `shapewall.config.json`, `Makefile`, agent instruction files and the like are write-denied in the sandbox, and after every run (and
-  every few seconds while a dev server runs) a new one is moved to `.shapewall/agent/quarantine` and a changed one is put back.
+  reads and writes wait while a command runs in the project). Missing folders are made one at a time inside the folder opened
+  before them, and a file with a second name (a hard link) is never read.
+- On macOS, once a command has run in the project, Shapewall writes no more files for the agent there for the rest of the session,
+  and the processes a command left behind (those that left its process group included) are killed when it ends.
+- A local board whose edits land in the checkout itself gives the agent no named commands and no shell (they could leave files
+  that run later on their own); with Work on a branch, commands run in the branch copy.
+- A fix copy without `node_modules` sees the checkout's read only, so a team turn's commands (no network) still run the project's
+  tools.
 - Every JavaScript or TypeScript `*.config.*` file and the plugin rc files (`.postcssrc`, `.swcrc`, `.parcelrc`, `.eslintrc`,
   `.prettierrc`) are inputs of every named command, so a change to one asks again.
 - An approval covers every byte of a command's inputs (no size and time stand-in past 8 MB); a command with more inputs than
   Shapewall checks asks every time and is never remembered.
-- A local board in place takes the committed state as the base of its named commands, not what an earlier turn left in the checkout.
 - The person's own checkout is unreadable to sandboxed commands wherever it is (not only inside the home folder), and so is every
   other account's home (`/home`, `/Users`, `/var/home`); programs on `PATH` installed in another home still run.
 - A read-only command session never starts without the OS sandbox.
 - On Linux with a systemd user manager each sandboxed command runs in a scope of its own, capped for the command and everything it
   starts together (memory with no swap, processes, CPU weight), in the slice Shapewall runs in; elsewhere the ulimit caps stay. A fix
   copy that grows past 8 GB takes no more commands.
-- Recorded logins (`.shapewall-auth`) are unreadable to commands, in the checkout and in the config folder.
+- Recorded logins (`.shapewall-auth`) are unreadable to commands, in the checkout and in the config folder; the folder is made
+  before a command session starts so it is hidden from the start, and `shapewall auth record` waits for no agent command to run
+  in the project.
+- A turn's prompt says what its tool host offers: a command session that did not start offers no commands there, and a read-only
+  turn without the OS sandbox gets no commands (said so in the capability lines).
 - A recorded login's cookies are never given for a host a session dev server listens on (a cookie has no port).
 - On an open turn the agent browser always keeps Chromium's own sandbox: it starts on this machine with it instead of inside the OS
   sandbox without it.

@@ -76,6 +76,10 @@ export const REASONS = {
   chat_not_solo: { text: 'in chat, only on turns only its owner wrote' },
   no_sandbox: { text: 'no OS sandbox on this machine, so each command waits for a card (install bubblewrap)' },
   chat_no_shell: { text: 'chat has no shell' },
+  in_place_commands: {
+    text: 'edits land in your checkout itself, so commands run only in a copy: turn on Work on a branch to give the agent commands',
+  },
+  no_sandbox_read_only: { text: 'read-only commands need the OS sandbox, and there is none on this machine (install bubblewrap)' },
   machine_shell_commands: { text: 'this machine allows named commands only', set: ['shell', 'sandboxed'] },
   team_shell_off: { text: 'the team gets no full shell unless this machine says so', set: ['trust-team-shell', 'on'] },
   open_tier_shell: { text: 'open turns get no full shell' },

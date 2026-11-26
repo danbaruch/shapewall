@@ -92,16 +92,16 @@ test('Q7 B6: the scope command caps memory, swap, processes and CPU, and keeps t
   assert.deepEqual(rest, ['env', '-u', 'XDG_RUNTIME_DIR', '-u', 'DBUS_SESSION_BUS_ADDRESS', '/bin/sh', '-c', 'echo $HOME'])
 })
 
-test('Q7 B6: no systemd user manager (or not Linux): no scope, and commands run with the ulimit caps', () => {
+test('Q7 B6: no systemd user manager (or not Linux): no scope, and commands run with the ulimit caps', async () => {
   const ok = () => ({ status: 0 })
   const fails = () => ({ status: 1 })
   const env = { PATH: '/usr/bin:/bin' }
-  assert.equal(probeScope({ platform: 'darwin', run: ok, fresh: true }).available, false)
+  assert.equal((await probeScope({ platform: 'darwin', run: ok, fresh: true })).available, false)
   const hasRun = fs.existsSync('/usr/bin/systemd-run') || fs.existsSync('/bin/systemd-run')
   if (hasRun) {
-    assert.equal(probeScope({ platform: 'linux', env, run: fails, cgroup: '', fresh: true }).available, false)
+    assert.equal((await probeScope({ platform: 'linux', env, run: fails, cgroup: '', fresh: true })).available, false)
     const seen = []
-    const yes = probeScope({
+    const yes = await probeScope({
       platform: 'linux',
       env,
       run: (program, args) => (seen.push(args), { status: 0 }),
@@ -111,11 +111,11 @@ test('Q7 B6: no systemd user manager (or not Linux): no scope, and commands run 
     assert.deepEqual([yes.available, yes.slice], [true, 'app.slice'])
     assert.ok(seen[0].includes('--expand-environment=no'))
   }
-  assert.equal(probeScope({ platform: 'linux', env: { PATH: '/nonexistent' }, run: ok, fresh: true }).available, false)
+  assert.equal((await probeScope({ platform: 'linux', env: { PATH: '/nonexistent' }, run: ok, fresh: true })).available, false)
 })
 
 const sandbox = probeSandbox()
-const scope = probeScope()
+const scope = await probeScope()
 test(
   'Q7 B6: a sandboxed command runs in a scope of its own where there is one',
   { skip: !(sandbox.available && scope.available) && 'no OS sandbox or no systemd user scope here', timeout: 120_000 },

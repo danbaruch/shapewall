@@ -173,8 +173,13 @@ When the chat panel drives an agent CLI over ACP:
 - **Project-only files, protected writes.** Reads and writes go to text files inside the project only, checked after resolving symlinks,
   and checked again on the file actually opened: on Linux the open descriptor itself (a read opens the file without following a
   final link and reads where `/proc/self/fd` says it is; a write goes through the open parent folder), so a link or folder swapped
-  in between the check and the open cannot point it outside. Elsewhere (macOS) the opened file's device and inode are compared with
-  the path's, and while a command Shapewall runs is going in the project, reads and writes there are refused (try again after it).
+  in between the check and the open cannot point it outside. Missing folders are made one at a time, each inside the open folder
+  before it. A file with a second name (a hard link) is never read. Elsewhere (macOS) the opened file's device and inode are
+  compared with the path's, which is weaker: a process a command left behind could still swap a folder between two steps. So on
+  macOS, while a command Shapewall runs is going in the project, reads and writes there are refused, and once any command has run
+  in the project, Shapewall writes no more files for the agent there until a new session starts. Every process a command started is
+  killed when it ends, those that left its process group included, as far as Shapewall saw them (a process that detaches between
+  two looks can be missed: the refusal to write is what holds).
   Writes into `.git` and Shapewall's own store (`.shapewall`: comments, chat, captures) are refused, so an agent cannot rewrite the comments
   it is reading. Writes to files that decide what runs later need a **Write** / **Don't write** card: any dotfile or dot folder
   (`.claude`, `.codex`, `.husky`, `.vscode`, `.envrc`, `.github/workflows`, ...), `package.json`, `shapewall.config.json`, `Makefile`,
@@ -654,7 +659,12 @@ again, and a card's "allow" counts only if the command, its config line and its 
   grows past 2 GB is emptied after the command, with a note in its output. On Linux with a systemd user manager each command also
   runs in a systemd scope of its own (`systemd-run --user --scope`, in the slice Shapewall runs in), so the command and everything
   it starts share one cap: 8 GB of memory with no swap, 1024 tasks and a lower CPU weight. Without a user manager (a container, CI,
-  macOS) only the `ulimit` caps hold, and those count each process alone. A fix copy that grows past 8 GB takes no more commands;
+  macOS) only the `ulimit` caps hold, and those count each process alone. The scope needs systemd 254 or later (for
+  `--expand-environment=no`); with an older systemd Shapewall finds no scope and only the `ulimit` caps hold. A fix copy that grows
+  past 8 GB takes no more commands (its size is measured when the disk lost a lot of space since the last look, or a minute passed);
+- sees the checkout's `node_modules` read only, when the fix copy has none of its own (fix copies leave it out): commands run the
+  project's installed tools, and a team turn, which gets no network, needs no install. A write there fails; an install that changes
+  it is the owner's, on a solo turn;
 - is read only only inside the OS sandbox: a read-only session (a Q&A turn) does not start without one;
 - stops after 10 minutes, with its output capped at 64 KB, and its whole process group with it.
 
@@ -668,15 +678,15 @@ so dev servers do not run in the OS sandbox there. Without the sandbox (no sandb
 server's own process group (Linux and macOS; not on Windows). The browser never opens Shapewall's own server port. What a dev
 server writes in the fix copy counts as changed by the agent when it stops.
 
-**In place on a local board** (`agent.fixIn: "checkout"`, the owner's own turn), commands run in your checkout itself, so
-Shapewall keeps them from leaving behind files that run code later on their own: Git hooks and the rest of `.git`, dot files and
-folders (`.envrc`, `.vscode`, `.github/workflows`, `.husky`, ...), `shapewall.config.json`, `Makefile`, `Dockerfile`, `justfile`
-and agent instruction files (`CLAUDE.md`, `AGENTS.md`). Inside the sandbox existing ones are write-denied; after every command, and
-every few seconds while a dev server runs, a new one is moved to `.shapewall/agent/quarantine/` and a changed one is put back, and
-the next tool result says so. `node_modules` and build output folders (`.next`, `dist` and the like) are not watched: an install
-writes there, and what runs from them is the project's own tooling. A file the agent wrote through an approved Write card is the
-agent's, not the command's, and stays. Between two sweeps a dev server could run a file it just planted: the sweep puts it back, it
-does not undo what ran.
+**No commands in place on a local board.** When a local board's edits land in your checkout itself (`agent.fixIn: "checkout"`,
+the default without [Work on a branch](agents.md#work-on-a-branch)), the agent gets no named commands and no shell: a command
+there could leave files that run later on their own (Git hooks, `.npmrc`, `node_modules/.bin`, `.venv/bin`, a hooks folder Git
+config names, lint-staged and husky configs), and no check after the run can tell them all apart from ordinary work or undo what
+already ran. Turn on Work on a branch to give the agent commands: they then run in the branch copy, never in your checkout. A
+read-only turn (edits off) keeps its read-only commands, inside the OS sandbox.
+
+The recorded logins' folder (`.shapewall-auth`) is made, private to you, before a command session starts, so the sandbox hides it
+from the start, and `shapewall auth record` refuses to record a login while an agent command runs in the project.
 
 The sandbox starts only in the fix copy Shapewall made for the turn, inside the folder it keeps fix copies in: never in your
 checkout, never in a folder that holds the home folder. The fix copy is a Git worktree of your repository; commands in it can run
@@ -702,8 +712,7 @@ server or build loads them as code), plus the files its `inputs` name, any scrip
 time and is never recorded. An answer on an open
 turn, or where there is no OS sandbox, is never recorded and never read: it is for that one run, and the next run asks again. When the agent
 changes one of them, or the line changes in the config, the next run asks again. On solo and team turns a command whose inputs are
-still as committed runs without asking (in place on a local board: as committed in `HEAD`, not as an earlier turn left the
-checkout). The command line always comes from your checkout's config, read again before each run,
+still as committed runs without asking. The command line always comes from your checkout's config, read again before each run,
 never from the fix copy the agent writes in. A card for a command with `"args": true` says that for `npx`, `jest` and similar
 runners an argument can be any script or package: allowing it is allowing arbitrary code.
 

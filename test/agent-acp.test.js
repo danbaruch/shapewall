@@ -740,7 +740,10 @@ test('review 5: a folder swapped for a symlink while the parents are made does n
     return original(dir, options)
   }
   try {
-    assert.throws(() => sandbox.write({ path: path.join(root, 'new', 'deep', 'file.txt'), content: 'x' }), /outside the project/)
+    assert.throws(
+      () => sandbox.write({ path: path.join(root, 'new', 'deep', 'file.txt'), content: 'x' }),
+      /outside the project|changed while it was opened/,
+    )
   } finally {
     fs.mkdirSync = original
   }

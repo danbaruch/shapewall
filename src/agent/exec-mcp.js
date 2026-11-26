@@ -56,8 +56,6 @@ export const EXEC_LIMITS = {
   snapshotFiles: 20000,
 }
 const PORT_TOKEN = '$PORT'
-// How often a running dev server's guarded files are checked (command-guard.js).
-const GUARD_SWEEP_MS = 2000
 // What a card holds (card-hash.js CARD_LIMITS.detail), and the longest
 // command line one shows: a longer one is refused, never cut.
 const CARD_DETAIL_MAX = 4000
@@ -278,9 +276,6 @@ export function createToolHost({
   // The machine asks before every command (commandApproval "always"): the full shell too.
   shellCard = false,
   onChanged = () => {},
-  // { before(), after(state) => note }: a local board's guard of the files
-  // that run code on their own (command-guard.js), or null.
-  guard = null,
   // true: the session's root is the person's own checkout (a local board in
   // place): the base is the committed state, not what is there now.
   committedBase = false,
@@ -316,8 +311,6 @@ export function createToolHost({
       ? `Not run: the command line is over ${CARD_LINE_MAX} characters as a card shows it, too long for a person to check on the board.`
       : null
   const devServers = new Map()
-  // What the guard did, for the next tool result.
-  const guardNotes = []
   // Dev servers being started (their slot is taken before the first await).
   const starting = new Set()
   let closed = false
@@ -444,30 +437,12 @@ export function createToolHost({
 
   // Runs start() (a command, or a dev server's whole life) and reports the
   // files it changed in the fix copy.
-  // With a `guard` (a local board in place: command-guard.js), the files
-  // that run code on their own are checked after the run, and every few
-  // seconds while a dev server runs (`long`); what it did goes with the next
-  // tool result.
-  async function tracked(mutatingCommand, start, { long = false } = {}) {
+  async function tracked(mutatingCommand, start) {
     const mutating = mutatingCommand !== false && !session.readOnly
     const before = mutating ? snapshot(session.root) : null
-    const guarded = guard && !session.readOnly ? guard.before() : null
-    const sweep = () => {
-      try {
-        const note = guard.after(guarded)
-        if (note) guardNotes.push(note)
-      } catch (error) {
-        log(`exec-mcp: command guard: ${error.message}`)
-        guardNotes.push('[Shapewall: the files that run code here could not be checked after the command; look at them.]')
-      }
-    }
-    const timer = guarded && long ? setInterval(sweep, GUARD_SWEEP_MS) : null
-    timer?.unref?.()
     try {
       return await start()
     } finally {
-      if (timer) clearInterval(timer)
-      if (guarded) sweep()
       if (before) {
         const diff = changes(before, snapshot(session.root))
         if (diff.changed.length || diff.deleted.length) onChanged(diff)
@@ -669,7 +644,7 @@ export function createToolHost({
             timeoutMs: SANDBOX_LIMITS.timeoutMaxMs,
             // Tracked like any command: what the server writes in the fix
             // copy is reported when it stops, so the fix is held for a look.
-            track: (start) => tracked(picked.command.mutating, start, { long: true }),
+            track: (start) => tracked(picked.command.mutating, start),
             log,
           })
           if (closed) {
@@ -764,10 +739,7 @@ export function createToolHost({
         }
       }
       try {
-        const result = await tool.call(args && typeof args === 'object' && !Array.isArray(args) ? args : {}, { signal })
-        if (!guardNotes.length) return result
-        const notes = guardNotes.splice(0).join('\n')
-        return { ...result, content: [...(result?.content || []), { type: 'text', text: notes }] }
+        return await tool.call(args && typeof args === 'object' && !Array.isArray(args) ? args : {}, { signal })
       } catch (error) {
         log(`exec-mcp: ${name}: ${error.message}`)
         return failure(error instanceof SandboxRefusal ? error.message : `${name} failed on the agent's machine.`)
@@ -853,7 +825,6 @@ export async function startExecSession({
   ask = null,
   shellCard = false,
   onChanged,
-  guard = null,
   committedBase = false,
   // Loopback ports the agent browser never opens (Shapewall's own server port).
   denyPorts = [],
@@ -904,7 +875,6 @@ export async function startExecSession({
     ask,
     shellCard,
     onChanged,
-    guard,
     committedBase,
     checkout: browserCheckout,
     denyPorts,
@@ -946,6 +916,16 @@ export async function startExecSession({
 export function withoutCommands(caps) {
   if (!caps) return caps
   return Object.freeze({ ...caps, commands: [], shell: Object.freeze({ mode: 'off', network: 'none', exact: [] }) })
+}
+
+// What a turn is actually offered, for its prompt: the tool host's own
+// capabilities, or, with no tool host, the same with commands, the shell and
+// the browser off (they would have come from it).
+export function offeredCapabilities(caps, exec) {
+  if (!caps) return caps
+  if (exec?.host?.capabilities) return exec.host.capabilities
+  if (!caps.commands.length && caps.shell.mode === 'off' && caps.browser?.on !== true) return caps
+  return Object.freeze({ ...withoutCommands(caps), browser: Object.freeze({ ...caps.browser, on: false }) })
 }
 
 // One stable exec server for a chat thread whose agent session outlives a

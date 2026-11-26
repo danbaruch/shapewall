@@ -45,7 +45,7 @@ import {
   resolveCapabilities,
 } from '../agent/capabilities.js'
 import { approvalsDir, createApprovalStore } from '../agent/command-approvals.js'
-import { createThreadRelay, startExecSession } from '../agent/exec-mcp.js'
+import { createThreadRelay, offeredCapabilities, startExecSession } from '../agent/exec-mcp.js'
 import { commandReadDenied } from '../agent/local-tools.js'
 import { loadConfig } from '../config.js'
 import { capabilitySummary, toPrompt } from '../agent/capability-render.js'
@@ -765,7 +765,8 @@ export async function runAgentLink({
               : 'Commands are off for this fix: the command session did not start on this machine',
           })
         fixTurn = {
-          capabilities: toPrompt(caps),
+          // What the tool host actually offers (a session that did not start offers no commands).
+          capabilities: toPrompt(offeredCapabilities(caps, exec)),
           extensions: extensionsOf(caps, job, fix.env),
           workdir: exec ? { ...prepared.workdir, mcpServers: exec.servers } : prepared.workdir,
           gate: {
@@ -874,6 +875,8 @@ export async function runAgentLink({
             }
           }
         }
+        // The prompt says what the tool host offers, not what was asked for.
+        fixTurn.capabilities = toPrompt(offeredCapabilities(caps, exec))
       }
       const reply = await runTurn({
         config: null,
