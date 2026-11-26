@@ -160,6 +160,31 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The approval page no longer promises a connected agent "never runs a command" when its machine allows named commands, and the
   chat's Connect note and the agent settings say Claude Code gets the restricted local session, while Codex, goose and Gemini CLI
   bring their own tools.
+- Handing work to another agent (`handoff-hops`) is off on every path until it is built: the Hand off line no longer reads on
+  for a value above 0, `agent set handoff-hops` takes only 0 ("not available yet"), and a larger value in the policy file reads
+  as 0 with a warning at `agent connect`.
+- `agent set` on a connected agent reaches a running `agent connect`: a narrower value applies from its next turn (and the board
+  is told), a wider one is logged and waits for the next connect.
+- The narrowing re-check before a command or browser step asks the server again after a failed answer, instead of skipping 5
+  seconds, and steps that run at once wait for the same answer.
+- An agent hidden for inactivity that came back and went quiet again is written to the audit log as hidden again.
+- The unconnected chat's Connect note says which session Claude Code gets on this board: the restricted one, or its own when
+  `agent.localSession` is `"own"`.
+
+### Security
+
+- Who wrote a turn is one answer for its tier and for its thread's trust. A comment that a message mentions (directly, as an
+  element, or among an `@person` mention's open comments) now counts as an author of the turn on a hosted board, so a member can
+  no longer bring someone else's comment into a solo or team turn and get that turn's shell. A token's or an imported comment
+  counts as an author nobody vouches for. On a local board, a message that mentions someone else's comment makes the turn open.
+- A connected agent's machine holds back, on every turn above open, each mentioned comment whose author is not one of the turn's
+  authors (number only), and counts an `@person` mention's open comments by others instead of quoting them, whatever the server
+  sent.
+- A thread keeps what it carried for the tier too: a person whose message was pruned still counts, and a thread tainted by text
+  nobody vouches for stays open. An agent session is never reused across tiers or across a thread deleted and started again
+  under the same id (`turn.generation` in the job), so an open turn's text cannot carry into a solo or team turn.
+- With `audience: owner` on the machine, a turn is refused unless its asker is the account this machine pinned as its owner; the
+  server's `owner` label alone no longer passes.
 
 ## 1.3.0 - 2026-11-25
 

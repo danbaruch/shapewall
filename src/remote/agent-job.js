@@ -170,7 +170,7 @@ export function withholdOutside(job, handles) {
         if (mention.data && ok(mention.data.comment)) continue
         // A comment's label is its text: its number instead.
         const number = Number(mention.id)
-        mention.label = Number.isSafeInteger(number) && number > 0 ? `#` : '#'
+        mention.label = Number.isSafeInteger(number) && number > 0 ? `#${number}` : '#'
         if (mention.data) {
           held += 1
           mention.data = {

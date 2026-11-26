@@ -2905,6 +2905,10 @@ are the members whose text it carried. Only the chat store writes them, through 
 `src/agent/thread-trust.js`. **Every thread that exists at upgrade is marked tainted**, because who wrote its history was never
 kept: those threads never get extensions, and new threads start clean. Nothing else changes.
 
+1.4.0 also reads them for each turn's tier, not only for extensions: every member the thread ever carried is an author of
+its later turns (after their message is pruned, too), and a tainted thread's turns are open. Deleting a thread removes its row,
+so the next one under that id starts clean, and the agent's machine starts a new session for it (the job's `turn.generation`).
+
 For a rollback, the older build ignores the columns (it gives no extensions). To let a newer build run the migration again, with
 the server stopped:
 

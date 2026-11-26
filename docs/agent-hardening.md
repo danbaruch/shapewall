@@ -473,6 +473,26 @@ It is decided by **who wrote the turn**, not by whether the board is local or ho
 | **team** | only people on this machine's trusted list (and the owner)                             | the machine names a team (`trustTeam`), and every author is on it |
 | **open** | anyone else, a share-link guest, or a turn the server's trust block does not vouch for | every other turn                                                  |
 
+**Who wrote the turn is one answer.** On a hosted board the server works out one list of every person whose text reaches the turn:
+its messages (from people in the agent's audience), the thread's comment and every reply, and every comment a message mentions,
+directly, as an element, or as the open comments an `@person` mention brings in. A token's comment, an imported one and another
+agent's answer are authors nobody vouches for. The turn's tier and the thread's trust (extensions, below) are both read from that
+list, so a mentioned comment can never reach a solo or team turn without counting. A thread keeps what it carried: every person it
+ever carried still counts after their message is pruned, and a thread that carried text nobody vouches for stays open (the
+server folds the thread's stored state, [migration 23](hosted.md#migration-23-and-rollback), into each turn's authors). On a local
+board the same check that decides whether the prompt quotes someone else's comment makes the turn open.
+
+The machine does not take the list on trust either. On a turn above open it holds back every mentioned comment whose author is not
+one of the turn's authors (a token's or an import's included), keeping its number only, and counts an `@person` mention's open
+comments by others instead of quoting them. An agent session is reused only by a turn of the same tier in the same life of the
+thread: a session that read an open turn is never handed a solo one, and a thread deleted and started again under the same id
+starts a new session.
+
+The server's audience and the machine's pinned owner: with the machine's `audience` left at `server`, a turn is solo when the
+server's audience is the owner and every author is the account this machine pinned when it connected. A server that lies can only
+name that same pinned account, so the audience setting alone never makes another person's turn solo. With `audience: owner` the
+machine also refuses every turn whose asker is not the pinned account, whatever the server's `owner` label says.
+
 A thread that once carried text from outside the list keeps the tier that text allowed. What each tier may get, once the machine's
 owner has opted in (on a local board these are the defaults; a hosted connection starts with none of them, see below):
 
@@ -566,7 +586,8 @@ an older hello of the same process arriving late does not replace a newer one.
 
 `shapewall agent set KEY VALUE` changes one line without reconnecting (`agent set browser off`, `agent set trust-team ada,bo`,
 `agent set shell commands --remote URL`). It checks a value the way `agent connect` does, and refuses one it does not know rather
-than saving it. A connected agent reads the change when it connects again; a local board reads it on the next turn.
+than saving it. A running connected agent applies a narrower value from its next turn and a wider one once `agent connect`
+starts again; a local board reads it on the next turn.
 
 ### Extensions on trusted turns
 
