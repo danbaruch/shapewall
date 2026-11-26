@@ -75,8 +75,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 - The plugin guide is a page on the site (https://shapewall.com/docs/plugins), and the Features page and docs index cover agent
   setup, links and follow, and shared threads.
-- A release text gate (`npm run check:text`, run by CI on the lines a change adds): no en or em dashes, banned phrases or
-  competitor and employer names. Lists in `scripts/release-text.config.json`.
+- A release text gate (`npm run check:text`, run by CI on the lines a change adds): no en or em dashes or banned phrases
+  (`scripts/release-text.config.json`), plus names from a private list kept outside the repository.
 
 ### Changed
 

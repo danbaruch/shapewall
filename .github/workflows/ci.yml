@@ -41,7 +41,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - name: Release text gate (lines added since main)
-        # No en or em dashes, banned phrases, competitor or employer names (scripts/release-text.config.json).
+        # No en or em dashes or banned phrases (scripts/release-text.config.json). Names are checked locally from a private list.
         if: matrix.node == 22
         run: |
           git fetch --no-tags --depth=1 origin main

@@ -13,7 +13,7 @@ const CONFIG = {
   phrases: [{ pattern: '(feedback|review)[ -]tools?\\b', why: 'positioning' }],
   names: [
     { name: 'Acme Corp', kind: 'employer' },
-    { name: 'Marker.io', kind: 'competitor' },
+    { name: 'Example.io', kind: 'competitor' },
   ],
   exclude: ['lists.json'],
   dashesAllowed: { paths: ['tts/'] },
@@ -22,7 +22,7 @@ const CONFIG = {
 }
 
 test('each rule fires on its own line, and the allow lists hold', () => {
-  const rules = loadRules(CONFIG)
+  const rules = loadRules(CONFIG, { names: [], phrases: [] })
   const hits = check(
     {
       'docs/a.md': [
@@ -31,8 +31,8 @@ test('each rule fires on its own line, and the allow lists hold', () => {
         [3, `An em dash ${DASHES[1]} here`],
         [4, 'The best review tool around'],
         [5, 'We used to work at ACME CORP.'],
-        [6, 'Unlike marker.io, ...'],
-        [7, 'A markerXio lookalike and Acme Corporation do not count'],
+        [6, 'Unlike example.io, ...'],
+        [7, 'An exampleXio lookalike and Acme Corporation do not count'],
       ],
       'tts/split.js': [[1, `/[${DASHES[0]}${DASHES[1]}]/`]],
       'test/rules.test.js': [[1, 'never a feedback tool']],
@@ -48,7 +48,7 @@ test('each rule fires on its own line, and the allow lists hold', () => {
       'docs/a.md:3 em dash (U+2014)',
       'docs/a.md:4 positioning',
       'docs/a.md:5 employer name Acme Corp',
-      'docs/a.md:6 competitor name Marker.io',
+      'docs/a.md:6 competitor name Example.io',
     ],
   )
 })
@@ -70,8 +70,12 @@ test('addedLines reads only the lines HEAD adds against the base, with their lin
 })
 
 test('the repository config parses and bans the dashes everywhere but its allow list', () => {
-  const rules = loadRules()
+  const rules = loadRules(undefined, { names: [], phrases: [] })
   assert.equal(rules.excluded('scripts/release-text.config.json'), true)
   assert.deepEqual(check({ 'README.md': [[1, `a ${DASHES[1]} b`]] }, rules).length, 1)
-  assert.ok(rules.names.length > 0 && rules.phrases.length > 0)
+  // The public repository names nobody: names come only from the private file.
+  assert.equal(rules.names.length, 0)
+  assert.ok(rules.phrases.length > 0)
+  const withPrivate = loadRules(undefined, { names: [{ name: 'Acme Corp', kind: 'employer' }], phrases: [] })
+  assert.equal(check({ 'docs/b.md': [[2, 'at Acme Corp we']] }, withPrivate).length, 1)
 })
