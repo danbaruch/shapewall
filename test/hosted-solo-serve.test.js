@@ -9,6 +9,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { loadConfig } from '../src/config.js'
 import { ENGINE_DIR, MIGRATED, MIGRATING, assertMigrationAllows, engineDir, prepareEngineFolder } from '../src/engine-folder.js'
@@ -16,6 +17,7 @@ import { processStartTime } from '../src/lock.js'
 import { quietSqliteWarning } from '../src/hosted/db.js'
 import { startHosted } from '../src/hosted/server.js'
 import { soloFlagGate } from '../src/hosted/solo/flags.js'
+import { removeStaleAnswerFolders } from '../src/update/routes.js'
 import { engineFlagProblem, serveEngine } from '../src/hosted/solo/serve.js'
 import { SAMPLE, request, tempDir } from './helpers.js'
 import { signUp, startHostedServer } from './hosted-helpers.js'
@@ -158,36 +160,154 @@ test('serve --engine hosted: refuses a data folder git tracks, and a migration r
   assert.deepEqual([...assertMigrationAllows(config)], ['sample'])
 })
 
-test('serve --engine hosted: starts on the project’s own host, prints no link off a terminal, and a second --open asks the running engine', async () => {
+// The nonce a sign-in page holds, and what its form sends.
+const nonceOf = (file) => /name="nonce" value="([A-Za-z0-9_-]{32})"/.exec(fs.readFileSync(file, 'utf8'))[1]
+const redeem = (origin, nonce) => {
+  const url = new URL(origin)
+  return request(Number(url.port), 'POST', '/open', {
+    body: `nonce=${nonce}`,
+    headers: { Host: url.host, 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'null' },
+  })
+}
+// An opener that records what it was started with, as another user reading /proc/<pid>/cmdline would see it.
+const recordingOpener = () => {
+  const argv = []
+  const spawnImpl = (command, args) => {
+    argv.push([command, ...args].join(' '))
+    return { once() {}, unref() {} }
+  }
+  return { argv, spawnImpl }
+}
+
+test('serve --engine hosted: its own random host, no sign-in off a terminal; --open puts no nonce on any command line or output (rev54 F2)', async () => {
   const { config } = project('solo-serve-run')
   const first = quiet()
+  const opener = recordingOpener()
   const handle = await serveEngine({ engine: 'hosted', config: config.file, port: 0 }, first.out, { env: ENV, start: noExit })
   try {
-    assert.match(handle.origin, /^http:\/\/lumen-notes\.shapewall\.localhost:\d+$/)
-    assert.ok(first.lines.some((line) => line.startsWith('Shapewall solo engine (experimental) is serving 1 board at http://lumen-notes')))
+    const dir = engineDir(config.outputDir)
+    const suffix = fs.readFileSync(path.join(dir, 'host.key'), 'utf8').trim()
+    assert.equal(handle.origin, `http://lumen-notes-${suffix}.shapewall.localhost:${handle.server.address().port}`)
+    assert.ok(
+      first.lines.some((line) =>
+        line.startsWith(`Shapewall solo engine (experimental) is serving 1 board at http://lumen-notes-${suffix}`),
+      ),
+    )
     assert.ok(first.lines.some((line) => /Sign in: run shapewall serve --engine hosted --open/.test(line)))
     assert.equal(
-      first.lines.some((line) => line.includes('/open/')),
+      fs.readdirSync(dir).some((name) => name.startsWith('open-')),
       false,
-      'no sign-in link in output that is not a terminal',
+      'no sign-in page for output that is not a terminal',
     )
-    assert.ok(fs.existsSync(path.join(engineDir(config.outputDir), 'shapewall.db')))
+    assert.ok(fs.existsSync(path.join(dir, 'shapewall.db')))
     // Without --open, a second start says where the engine runs.
     await assert.rejects(
       serveEngine({ engine: 'hosted', config: config.file, port: 0 }, () => {}, { env: ENV, start: noExit }),
       /already runs for this project/,
     )
-    // With --print-owner-link: a fresh link from the running engine, and it signs a browser in there.
+    // --open against the running engine: the browser is started on a 0600 file in the data folder; the nonce is
+    // in that file only.
     const second = quiet()
-    assert.equal(await serveEngine({ engine: 'hosted', config: config.file, 'print-owner-link': true }, second.out, { env: ENV }), null)
-    const line = second.lines.find((item) => item.startsWith('Sign in'))
-    const link = new URL(/(http:\/\/\S+)/.exec(line)[1])
-    const redeemed = await request(Number(link.port), 'GET', link.pathname, { headers: { Host: link.host } })
-    assert.equal(redeemed.status, 303)
-    assert.match(String(redeemed.headers['set-cookie']), /^sw_session=/)
+    assert.equal(
+      await serveEngine({ engine: 'hosted', config: config.file, open: true }, second.out, { env: ENV, spawnImpl: opener.spawnImpl }),
+      null,
+    )
+    assert.equal(opener.argv.length, 1)
+    const opened = /(file:\/\/\S+)/.exec(opener.argv[0])[1]
+    const file = fileURLToPath(opened)
+    assert.equal(path.dirname(file), dir)
+    if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600)
+    const nonce = nonceOf(file)
+    for (const text of [...opener.argv, ...first.lines, ...second.lines]) assert.equal(text.includes(nonce), false, `nonce in: ${text}`)
+    const redeemed = await redeem(handle.origin, nonce)
+    assert.equal(redeemed.status, 200)
+    assert.match(String(redeemed.headers['set-cookie']), /^sw_session=[^;]+;.*SameSite=Strict/)
+    assert.equal(fs.existsSync(file), false, 'used: removed')
+    // --print-owner-link prints the page's path, not the nonce.
+    const third = quiet()
+    await serveEngine({ engine: 'hosted', config: config.file, 'print-owner-link': true }, third.out, { env: ENV })
+    const printed = fileURLToPath(/(file:\/\/\S+)/.exec(third.lines.find((line) => line.startsWith('Sign in')))[1])
+    assert.equal(
+      third.lines.some((line) => line.includes(nonceOf(printed))),
+      false,
+    )
+    assert.equal((await redeem(handle.origin, nonceOf(printed))).status, 200)
   } finally {
     await handle.stop()
   }
+  // Stopped: no sign-in page is left behind.
+  assert.equal(
+    fs.readdirSync(engineDir(config.outputDir)).some((name) => name.startsWith('open-')),
+    false,
+  )
+})
+
+test('first start with --open: the opener gets the page’s path, never the nonce (rev54 F2)', async () => {
+  const { config } = project('solo-serve-open-first')
+  const opener = recordingOpener()
+  const lines = quiet()
+  const handle = await serveEngine({ engine: 'hosted', config: config.file, port: 0, open: true }, lines.out, {
+    env: ENV,
+    start: noExit,
+    spawnImpl: opener.spawnImpl,
+  })
+  try {
+    const file = fileURLToPath(/(file:\/\/\S+)/.exec(opener.argv[0])[1])
+    const nonce = nonceOf(file)
+    for (const text of [...opener.argv, ...lines.lines]) assert.equal(text.includes(nonce), false)
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('the git check fails closed and sees nested repositories, an outside repository and submodules (rev54 F4)', () => {
+  const git = (cwd, ...args) =>
+    execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=T', '-c', 'protocol.file.allow=always', ...args], {
+      cwd,
+      stdio: 'ignore',
+    })
+  const tracked = (out) => {
+    fs.mkdirSync(path.join(out, ENGINE_DIR), { recursive: true })
+    fs.writeFileSync(path.join(out, ENGINE_DIR, 'secret.key'), 'x')
+  }
+  const configAt = (dir, outputDir) => ({ dir, outputDir })
+  // (a) The output folder is a repository of its own, nested in the project's.
+  const a = tempDir('solo-serve-git-nested')
+  git(a, 'init', '-q')
+  const aOut = path.join(a, '.shapewall')
+  fs.mkdirSync(aOut)
+  git(aOut, 'init', '-q')
+  tracked(aOut)
+  git(aOut, 'add', '-f', '.')
+  assert.throws(() => prepareEngineFolder(configAt(a, aOut)), /git tracks files in/)
+  // (b) The output folder sits in another repository, outside the project.
+  const project = tempDir('solo-serve-git-outside-project')
+  const other = tempDir('solo-serve-git-outside-repo')
+  git(other, 'init', '-q')
+  const bOut = path.join(other, 'out')
+  tracked(bOut)
+  git(other, 'add', '-f', '.')
+  assert.throws(() => prepareEngineFolder(configAt(project, bOut)), /git tracks files in/)
+  // (c) The output folder is a submodule that tracks it.
+  const sub = tempDir('solo-serve-git-sub-origin')
+  git(sub, 'init', '-q')
+  tracked(sub)
+  git(sub, 'add', '-f', '.')
+  git(sub, 'commit', '-q', '-m', 'x')
+  const c = tempDir('solo-serve-git-super')
+  git(c, 'init', '-q')
+  git(c, 'submodule', 'add', '-q', sub, 'out')
+  assert.throws(() => prepareEngineFolder(configAt(c, path.join(c, 'out'))), /git tracks files in/)
+  // A repository git cannot answer for: refused, with the override named; the override starts.
+  const d = tempDir('solo-serve-git-broken')
+  git(d, 'init', '-q')
+  fs.writeFileSync(path.join(d, '.git', 'HEAD'), 'garbage\n')
+  const dOut = path.join(d, '.shapewall')
+  assert.throws(() => prepareEngineFolder(configAt(d, dOut)), /could not check whether git tracks.*--skip-git-check/)
+  assert.equal(prepareEngineFolder(configAt(d, dOut), { skipGitCheck: true }), path.join(dOut, ENGINE_DIR))
+  // No repository at all: nothing to check.
+  const e = tempDir('solo-serve-git-none')
+  assert.equal(prepareEngineFolder(configAt(e, path.join(e, '.shapewall'))), path.join(e, '.shapewall', ENGINE_DIR))
 })
 
 test('SHAPEWALL_UPDATE_RESTART=1: a finished update apply stops the engine with the restart code (PR #53 review, F3)', async () => {
@@ -260,4 +380,110 @@ test('--read-only and --no-chat: the board API refuses writes and chat, the comm
   assert.equal(run(noChat, 'POST', '/w/ws1/p/p1/api/boards/sample/threads').body.error.code, 'chat_off')
   assert.equal(run(noChat, 'GET', '/w/ws1/p/p1/api/boards/sample/permissions/abc').body.error.code, 'chat_off')
   assert.equal(run(noChat, 'POST', '/w/ws1/p/p1/api/boards/sample/comments').next, true)
+})
+
+test('with the real self-update router: Ctrl+C during an apply waits past the force timer, then exits 75 for the restart (rev54 F6)', async () => {
+  const { config } = project('solo-serve-f6')
+  const helperDir = tempDir('solo-serve-f6-helper')
+  const helper = path.join(helperDir, 'update')
+  const answer = (extra) => JSON.stringify({ latest: { version: '9.9.9', revision: 'abcdef1234567' }, updateAvailable: true, ...extra })
+  fs.writeFileSync(
+    helper,
+    `#!${process.execPath}\nif (process.argv[2] === 'apply') await new Promise((resolve) => setTimeout(resolve, 600))\nconsole.log(${JSON.stringify(answer({ restartRequired: true }))})\n`,
+    { mode: 0o700 },
+  )
+  const exits = []
+  const start = (options) => startHosted({ ...options, exitOnStop: true, exit: (code) => exits.push(code), forceExitMs: 50 })
+  const handle = await serveEngine({ engine: 'hosted', config: config.file, port: 0, 'print-owner-link': true }, () => {}, {
+    env: { ...ENV, SHAPEWALL_UPDATE_RESTART: '1', SHAPEWALL_UPDATE_HELPER: helper },
+    start,
+  })
+  // The engine's own lifecycle, from src/update/routes.js, not a stand-in.
+  const lifecycle = handle.app.locals.appUpdate
+  assert.equal(typeof lifecycle?.applying, 'function')
+  assert.equal(typeof lifecycle.restartPending, 'function')
+
+  const page = fs.readdirSync(engineDir(config.outputDir)).find((name) => name.startsWith('open-'))
+  const signedIn = await redeem(handle.origin, nonceOf(path.join(engineDir(config.outputDir), page)))
+  const cookie = String([].concat(signedIn.headers['set-cookie'])[0]).split(';')[0]
+  const { owner } = handle.app.locals.solo
+  const url = new URL(handle.origin)
+  const call = (method, pathname) =>
+    request(Number(url.port), method, `/w/${owner.workspaceId}/p/${owner.projectId}/api/app-update${pathname}`, {
+      body: method === 'POST' ? {} : undefined,
+      headers: { Host: url.host, Cookie: cookie, ...(method === 'POST' ? { Origin: handle.origin } : {}) },
+    })
+  assert.equal((await call('GET', '')).json.canUpdate, true, 'the signed-in owner on this machine may update')
+  assert.equal((await call('POST', '/check')).status, 202)
+  for (let i = 0; i < 300 && (await call('GET', '')).json.job?.state === 'running'; i++)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal((await call('POST', '/apply')).status, 202)
+  assert.equal(lifecycle.applying(), true)
+
+  // Ctrl+C now: well past the 50 ms force timer, nothing exits while the helper runs.
+  const stopping = handle.stop(0)
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  assert.deepEqual(exits, [], 'no exit during the apply')
+  assert.equal(handle.server.listening, true)
+  await stopping
+  assert.deepEqual(exits, [75], 'a finished apply that needs a restart exits 75, even from Ctrl+C')
+  assert.equal(lifecycle.restartPending(), true)
+  // onRestart (its own timer) finds the stop under way: no second exit.
+  await new Promise((resolve) => setTimeout(resolve, 1700))
+  assert.deepEqual(exits, [75])
+})
+
+test('operator commands refuse a solo engine’s folder (a second account would lock the owner out)', async () => {
+  const { config } = project('solo-serve-ops')
+  const dataDir = tempDir('solo-serve-ops-data')
+  const handle = await noExit({
+    dataDir,
+    port: 0,
+    out: () => {},
+    solo: { signIn: 'local', config, configPath: config.file },
+    origin: (port) => `http://lumen-abcdefghijklmn.shapewall.localhost:${port}`,
+  })
+  await handle.stop()
+  const { hostedCommand } = await import('../src/hosted/ops-cli.js')
+  for (const args of [['admin', 'list'], ['claim'], ['setup-link']])
+    await assert.rejects(
+      hostedCommand(args, { data: dataDir, login: 'someone@example.com' }, () => {}),
+      /a solo engine's folder/,
+      args.join(' '),
+    )
+  // A team server's folder is unaffected.
+  const team = await startHostedServer('solo-serve-ops-team')
+  await signUp(team, { handle: 'ada' })
+  await team.close()
+  assert.equal(await hostedCommand(['admin', 'list'], { data: team.dataDir }, () => {}), 0)
+})
+
+test('update answers: stale folders of this user are removed after a day; nothing else is touched (#53 RR1-L2)', () => {
+  const tmp = tempDir('solo-serve-update-tmp')
+  const now = Date.now()
+  const make = (name, ageMs) => {
+    const dir = path.join(tmp, name)
+    fs.mkdirSync(dir)
+    fs.writeFileSync(path.join(dir, 'answer'), 'x')
+    const when = new Date(now - ageMs)
+    fs.utimesSync(dir, when, when)
+    return dir
+  }
+  const stale = make('shapewall-update-old', 2 * 86_400_000)
+  const fresh = make('shapewall-update-new', 60_000)
+  const other = make('something-else', 3 * 86_400_000)
+  const target = make('shapewall-update-target', 3 * 86_400_000)
+  fs.symlinkSync(target, path.join(tmp, 'shapewall-update-link'))
+  const linkTime = new Date(now - 3 * 86_400_000)
+  fs.lutimesSync(path.join(tmp, 'shapewall-update-link'), linkTime, linkTime)
+  assert.equal(removeStaleAnswerFolders({ tmp, now }), 2)
+  assert.equal(fs.existsSync(stale), false)
+  assert.equal(fs.existsSync(target), false, 'a stale folder of its own')
+  assert.equal(fs.existsSync(fresh), true, 'an apply may still be using it')
+  assert.equal(fs.existsSync(other), true)
+  assert.equal(fs.lstatSync(path.join(tmp, 'shapewall-update-link')).isSymbolicLink(), true, 'a link is never followed or removed')
+  // Another user's folder is left alone.
+  const mine = make('shapewall-update-theirs', 2 * 86_400_000)
+  assert.equal(removeStaleAnswerFolders({ tmp, now, uid: (process.getuid?.() ?? 0) + 1 }), 0)
+  assert.equal(fs.existsSync(mine), true)
 })

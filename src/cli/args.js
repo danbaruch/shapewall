@@ -21,6 +21,7 @@ const BOOLEAN_FLAGS = new Set([
   'no-capture',
   'open',
   'print-owner-link',
+  'skip-git-check',
   'resolved',
   'all',
   'json',
@@ -135,6 +136,7 @@ export const COMMAND_FLAGS = {
   checks: [...new Set([...CHECKS_FLAGS, ...LIGHTHOUSE_FLAGS])],
   serve: [
     'engine',
+    'skip-git-check',
     'buzz-bridge',
     'accounts',
     'accounts-origin',

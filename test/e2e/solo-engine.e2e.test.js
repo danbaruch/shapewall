@@ -1,6 +1,6 @@
 // End to end, the solo engine (experimental): the real `shapewall serve
 // --engine hosted` on this machine, as a person runs it in their project.
-// The one-time owner link signs a real browser in on the project's own
+// The one-time sign-in page signs a real browser in on the project's own
 // http://<project>.shapewall.localhost origin and the board opens; that
 // cookie is not sent to 127.0.0.1 or localhost on the same port (PR #53
 // review, F5). `shapewall login --remote` is approved on /device by the
@@ -14,7 +14,9 @@ import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import http from 'node:http'
 import { spawn } from 'node:child_process'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { SAMPLE, tempDir } from '../helpers.js'
 import { writeLocalCaptures } from '../hosted-helpers.js'
@@ -98,10 +100,10 @@ before(async () => {
   config = loadConfig(path.join(projectDir, 'shapewall.config.json'))
   writeLocalCaptures(config, 'sample')
   engine = run(['serve', '--engine', 'hosted', '--port', '0', '--print-owner-link'])
-  await until(() => /Sign in \(works once/.test(engine.state.out), `the engine to start\n${engine.state.out}\n${engine.state.err}`)
+  await until(() => /Sign in: open file:/.test(engine.state.out), `the engine to start\n${engine.state.out}\n${engine.state.err}`)
   boardUrl = /serving 1 board at (\S+)/.exec(engine.state.out)[1]
   origin = new URL(boardUrl).origin
-  assert.match(origin, /^http:\/\/lumen-notes\.shapewall\.localhost:\d+$/)
+  assert.match(origin, /^http:\/\/lumen-notes-[a-z2-7]{14}\.shapewall\.localhost:\d+$/)
   browser = await chromium.launch()
   context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   page = await context.newPage()
@@ -114,10 +116,18 @@ after(async () => {
   await browser?.close()
 })
 
-test('the one-time owner link signs the browser in on the project origin, once; the cookie stays on that origin', async () => {
-  const link = /Sign in \(works once, for 5 minutes, from this machine\): (\S+)/.exec(engine.state.out)[1]
-  assert.ok(link.startsWith(`${origin}/open/`))
-  assert.doesNotMatch(engine.state.out + engine.state.err, /swp_|sw_session/, 'no token or cookie in the output')
+test('the one-time sign-in page signs the browser in on the project origin, once; the cookie stays on that origin', async () => {
+  const link = /Sign in: open (file:\S+)/.exec(engine.state.out)[1]
+  const file = fileURLToPath(link)
+  const nonce = /name="nonce" value="([A-Za-z0-9_-]{32})"/.exec(fs.readFileSync(file, 'utf8'))[1]
+  assert.doesNotMatch(
+    engine.state.out + engine.state.err,
+    new RegExp(`swp_|sw_session|${nonce}`),
+    'no token, cookie or nonce in the output',
+  )
+  // A copy, to try the used page again below (the engine removes its own once used).
+  const copy = path.join(tempDir('solo-e2e-copy'), 'again.html')
+  fs.copyFileSync(file, copy)
   await page.goto(link)
   await page.waitForURL((url) => url.href.startsWith(boardUrl))
   await page.waitForSelector('[data-sw-board], [data-sw-node], [data-sw-empty-board]')
@@ -138,10 +148,28 @@ test('the one-time owner link signs the browser in on the project origin, once; 
   assert.equal((await me.json()).user, null, 'not signed in on 127.0.0.1')
   await bare.close()
 
-  // Used up: the same link again signs nobody in.
+  assert.equal(session.sameSite, 'Strict')
+  assert.equal(fs.existsSync(file), false, 'the page is removed once used')
+
+  // rev54 F1: a link on another site to the engine's name never carries the cookie (SameSite=Strict).
+  const lure = http.createServer((req, res) => res.end(`<a id="go" href="${origin}/auth/me">go</a>`))
+  await new Promise((resolve) => lure.listen(0, '127.0.0.1', resolve))
+  try {
+    const other = await context.newPage()
+    await other.goto(`http://127.0.0.1:${lure.address().port}/`)
+    const [landed] = await Promise.all([other.waitForNavigation(), other.click('#go')])
+    assert.equal((await landed.json()).user, null, 'a cross-site link arrives signed out')
+    await other.close()
+  } finally {
+    lure.close()
+  }
+
+  // Used up: the same page again signs nobody in.
   const second = await browser.newContext()
-  const again = await (await second.newPage()).goto(link)
-  assert.equal(again.status(), 410)
+  const againPage = await second.newPage()
+  const gone = againPage.waitForResponse((response) => response.url().endsWith('/open'))
+  await againPage.goto(pathToFileURL(copy).href)
+  assert.equal((await gone).status(), 410)
   assert.deepEqual(await second.cookies(origin), [])
   await second.close()
 })

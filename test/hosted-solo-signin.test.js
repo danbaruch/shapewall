@@ -10,7 +10,18 @@ import { loadConfig } from '../src/config.js'
 import { quietSqliteWarning } from '../src/hosted/db.js'
 import { NEVER_VERIFIED } from '../src/hosted/auth.js'
 import { SESSION_VIA, passkeylessVia, viaCounts } from '../src/hosted/session-via.js'
-import { OPEN_KEY_FILE, ensureSoloOwner, soloHostLabel, soloLocalGate, soloOrigin } from '../src/hosted/solo/signin.js'
+import net from 'node:net'
+import {
+  HOST_KEY_FILE,
+  OPEN_KEY_FILE,
+  ensureSoloOwner,
+  soloHostLabel,
+  soloHostName,
+  soloHostSuffix,
+  soloLocalGate,
+  soloOrigin,
+} from '../src/hosted/solo/signin.js'
+import { peerUids, sameUserPeer } from '../src/hosted/solo/peer-uid.js'
 import { readSoloBinding } from '../src/hosted/solo/binding.js'
 import { localRequest } from '../src/agent/settings-routes.js'
 import { SAMPLE, request, tempDir } from './helpers.js'
@@ -41,12 +52,22 @@ async function startSolo(name, { now, config = projectConfig(`${name}-project`),
   return { hosted, config }
 }
 
-// A browser on this machine that opens the terminal's one-time link.
+// The nonce in a sign-in page the engine wrote.
+const nonceOf = (file) => /name="nonce" value="([A-Za-z0-9_-]{32})"/.exec(fs.readFileSync(file, 'utf8'))[1]
+// What the page's form sends.
+const redeem = (browser, nonce, { host, headers = {} } = {}) =>
+  browser.post('/open', `nonce=${nonce}`, {
+    sendOrigin: false,
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'null', ...(host ? { Host: host } : {}), ...headers },
+  })
+
+// A browser on this machine that opens the terminal's one-time sign-in page.
 async function signIn(hosted, { host = new URL(hosted.origin).host, headers = {} } = {}) {
-  const link = hosted.app.locals.soloOpenLink()
+  const file = hosted.app.locals.soloOpenFile()
+  const nonce = nonceOf(file)
   const browser = createBrowser(hosted.port, hosted.origin)
-  const response = await browser.get(link, { headers: { Host: host, ...headers } })
-  return { browser, response, link }
+  const response = await redeem(browser, nonce, { host, headers })
+  return { browser, response, file, nonce }
 }
 
 test('the via table: local is passkeyless and counts only where the solo gate admits the request', () => {
@@ -64,22 +85,84 @@ test('the via table: local is passkeyless and counts only where the solo gate ad
   assert.equal(viaCounts('tailnet', { passkeysOn: true }), false, 'only once sessionReader checked the identity')
 })
 
-test('host names: a DNS label of the project, and localRequest accepts only the solo name besides loopback', () => {
+test('host names: the project label plus a random part kept in the data folder (rev54 F1)', () => {
   assert.equal(soloHostLabel('Lumen Notes!'), 'lumen-notes')
   assert.equal(soloHostLabel('---'), 'project')
   assert.equal(soloHostLabel('x'.repeat(80)).length, 40)
-  assert.equal(soloOrigin('Lumen Notes', 4600), 'http://lumen-notes.shapewall.localhost:4600')
+  const dir = tempDir('solo-signin-suffix')
+  const suffix = soloHostSuffix(dir)
+  assert.match(suffix, /^[a-z2-7]{14}$/, '70 random bits')
+  assert.equal(soloHostSuffix(dir), suffix, 'made once, kept')
+  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dir, HOST_KEY_FILE)).mode & 0o777, 0o600)
+  assert.notEqual(soloHostSuffix(tempDir('solo-signin-suffix-2')), suffix, 'each engine folder its own')
+  const name = soloHostName('Lumen Notes', suffix)
+  assert.equal(name, `lumen-notes-${suffix}`)
+  assert.ok(name.length <= 63)
+  assert.equal(soloOrigin(name, 4600), `http://lumen-notes-${suffix}.shapewall.localhost:4600`)
+  // A damaged file is refused, not quietly replaced (the address would change under the owner).
+  fs.writeFileSync(path.join(dir, HOST_KEY_FILE), 'short\n')
+  assert.throws(() => soloHostSuffix(dir), /damaged/)
+})
+
+test('the gate and localRequest take exactly the engine’s host, never another name of that shape (rev54 F1, F5)', () => {
   const req = (host, extra = {}) => ({ socket: { remoteAddress: '127.0.0.1' }, headers: { host, ...extra } })
-  assert.equal(localRequest(req('lumen.shapewall.localhost:4600')), true)
-  assert.equal(localRequest(req('lumen.shapewall.localhost.evil.com:4600')), false)
-  assert.equal(localRequest(req('evil.localhost:4600')), false)
-  assert.equal(localRequest(req('a.b.shapewall.localhost:4600')), false)
-  const gate = soloLocalGate('http://lumen.shapewall.localhost:4600')
-  assert.equal(gate.admits(req('lumen.shapewall.localhost:4600')), true)
+  const own = 'lumen-abcdefghijklmn.shapewall.localhost:4600'
+  // The 1.x local server: loopback names only.
+  assert.equal(localRequest(req('localhost:4600')), true)
+  assert.equal(localRequest(req('lumen.shapewall.localhost:4600')), false, 'no wildcard')
+  assert.equal(localRequest(req(own)), false)
+  // The engine passes its own host, and only that passes besides loopback.
+  assert.equal(localRequest(req(own), { ownHost: own }), true)
+  assert.equal(localRequest(req('other-abcdefghijklmn.shapewall.localhost:4600'), { ownHost: own }), false)
+  assert.equal(localRequest(req('lumen-abcdefghijklmn.shapewall.localhost:4601'), { ownHost: own }), false, 'another port')
+  const gate = soloLocalGate(`http://${own}`, { peer: () => true })
+  assert.equal(gate.admits(req(own)), true)
+  assert.equal(gate.admits(req('lumen-abcdefghijklmn.shapewall.localhost:4601')), false, 'another port')
   assert.equal(gate.admits(req('127.0.0.1:4600')), false, 'only the engine’s own host')
   assert.equal(gate.admits(req('localhost:4600')), false)
-  assert.equal(gate.admits(req('lumen.shapewall.localhost:4600', { 'x-forwarded-for': '1.2.3.4' })), false)
-  assert.equal(gate.admits({ socket: { remoteAddress: '10.0.0.5' }, headers: { host: 'lumen.shapewall.localhost:4600' } }), false)
+  assert.equal(gate.admits(req(own, { 'x-forwarded-for': '1.2.3.4' })), false)
+  assert.equal(gate.admits({ socket: { remoteAddress: '10.0.0.5' }, headers: { host: own } }), false)
+  // Another OS user's socket (Linux): refused; unknown on this system (null): the other checks decide.
+  assert.equal(soloLocalGate(`http://${own}`, { peer: () => false }).admits(req(own)), false)
+  assert.equal(soloLocalGate(`http://${own}`, { peer: () => null }).admits(req(own)), true)
+})
+
+test('the peer uid comes from the kernel’s socket table and fails closed (rev54 F1, Linux)', async () => {
+  // A client socket 127.0.0.1:50000 -> 127.0.0.1:4600 (0x11F8) owned by uid 1000, and the server's own row.
+  const table = [
+    '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode',
+    '   0: 0100007F:C350 0100007F:11F8 01 00000000:00000000 00:00000000 00000000  1000        0 1 1 0000000000000000 20 4 30 10 -1',
+    '   1: 0100007F:11F8 0100007F:C350 01 00000000:00000000 00:00000000 00000000  1000        0 2 1 0000000000000000 20 4 30 10 -1',
+  ].join('\n')
+  assert.deepEqual([...peerUids([table], { peerPort: 50000, serverPort: 4600 })], [1000])
+  const socket = (peerPort) => ({ remotePort: peerPort, localPort: 4600 })
+  const read = (text) => (file) => (file.endsWith('6') ? '' : text)
+  assert.equal(sameUserPeer(socket(50000), { platform: 'linux', uid: 1000, read: read(table) }), true)
+  assert.equal(sameUserPeer(socket(50000), { platform: 'linux', uid: 1001, read: read(table) }), false, 'another user')
+  assert.equal(sameUserPeer(socket(50001), { platform: 'linux', uid: 1000, read: read(table) }), false, 'no row: refused')
+  const unreadable = () => {
+    throw Object.assign(new Error('denied'), { code: 'EACCES' })
+  }
+  assert.equal(sameUserPeer(socket(50000), { platform: 'linux', uid: 1000, read: unreadable }), false, 'unreadable: refused')
+  assert.equal(sameUserPeer(socket(50000), { platform: 'darwin', uid: 1000, read: read(table) }), null)
+  if (process.platform !== 'linux') return
+  // This machine, for real: a loopback connection of this process is this user's.
+  await new Promise((resolve, reject) => {
+    let client
+    const server = net.createServer((accepted) => {
+      try {
+        assert.equal(sameUserPeer(accepted), true)
+        resolve()
+      } catch (error) {
+        reject(error)
+      } finally {
+        accepted.destroy()
+        client?.destroy()
+        server.close()
+      }
+    })
+    server.listen(0, '127.0.0.1', () => (client = net.connect(server.address().port, '127.0.0.1')))
+  })
 })
 
 test('first start makes one owner, workspace and project bound to the config; a restart keeps them', async () => {
@@ -126,12 +209,16 @@ test('the one-time link: once, for a minute, from this machine, on the engine’
   assert.equal((await bare.get(`/w/${owner.workspaceId}/p/${owner.projectId}/api/info`)).status, 401)
   assert.equal(bare.jar.size, 0)
 
-  const { browser, response, link } = await signIn(hosted)
-  assert.equal(response.status, 303)
-  assert.equal(response.headers.location, `/w/${owner.workspaceId}/p/${owner.projectId}/`)
+  const { browser, response, file, nonce } = await signIn(hosted)
+  assert.equal(response.status, 200)
+  // A same-site step to the board, so the Strict cookie goes along.
+  assert.match(response.text, new RegExp(`http-equiv="refresh" content="0;url=/w/${owner.workspaceId}/p/${owner.projectId}/"`))
+  assert.match(response.headers['content-security-policy'], /default-src 'none'/)
+  assert.equal(fs.existsSync(file), false, 'the sign-in page is removed once used')
   const cookie = [].concat(response.headers['set-cookie'])[0]
-  // Host-only (no Domain): the browser keeps it to <label>.shapewall.localhost, never 127.0.0.1 or localhost.
-  assert.match(cookie, /^sw_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=86400$/)
+  // Host-only (no Domain): the browser keeps it to the engine's name, never 127.0.0.1 or localhost; Strict: no
+  // other site's link or page carries it (rev54 F1).
+  assert.match(cookie, /^sw_session=[^;]+; Path=\/; HttpOnly; SameSite=Strict; Max-Age=86400$/)
   assert.doesNotMatch(cookie, /Domain=/i)
   const me = await browser.get('/auth/me')
   assert.equal(me.json.user.handle, 'robin-tester')
@@ -148,26 +235,32 @@ test('the one-time link: once, for a minute, from this machine, on the engine’
   assert.equal(Date.parse(row.expires_at) - clock, 24 * 3_600_000)
 
   // Once.
-  assert.equal((await createBrowser(hosted.port, hosted.origin).get(link)).status, 410)
+  assert.equal((await redeem(createBrowser(hosted.port, hosted.origin), nonce)).status, 410)
   // Redeemed on another loopback name: refused, and no cookie for that name.
   const wrongHost = await signIn(hosted, { host: `127.0.0.1:${hosted.port}` })
   assert.equal(wrongHost.response.status, 410)
   assert.equal(wrongHost.response.headers['set-cookie'], undefined)
   const localhostName = await signIn(hosted, { host: `localhost:${hosted.port}` })
   assert.equal(localhostName.response.status, 410)
+  // The engine's name on another port (what another server there would replay): refused.
+  const otherPort = await signIn(hosted, { host: `${new URL(hosted.origin).hostname}:${hosted.port + 1}` })
+  assert.equal(otherPort.response.status, 410)
   // Through a proxy: refused.
   const proxied = await signIn(hosted, { headers: { 'X-Forwarded-For': '203.0.113.9' } })
   assert.equal(proxied.response.status, 410)
-  // After a minute: refused.
-  const late = hosted.app.locals.soloOpenLink()
+  // After a minute: refused, and its page is gone.
+  const late = hosted.app.locals.soloOpenFile()
   clock += 61_000
-  assert.equal((await createBrowser(hosted.port, hosted.origin).get(late)).status, 410)
-  // A printed link (no browser) gets five minutes.
-  const kept = hosted.app.locals.soloOpenLink({ keep: true })
+  assert.equal((await redeem(createBrowser(hosted.port, hosted.origin), nonceOf(late))).status, 410)
+  assert.equal(fs.existsSync(late), false)
+  // A printed page (no browser) gets five minutes; the page is 0600.
+  const kept = hosted.app.locals.soloOpenFile({ keep: true })
+  if (process.platform !== 'win32') assert.equal(fs.statSync(kept).mode & 0o777, 0o600)
   clock += 4 * 60_000
-  assert.equal((await createBrowser(hosted.port, hosted.origin).get(kept)).status, 303)
-  // A made-up nonce: refused.
-  assert.equal((await createBrowser(hosted.port, hosted.origin).get(`/open/${'a'.repeat(32)}`)).status, 410)
+  assert.equal((await redeem(createBrowser(hosted.port, hosted.origin), nonceOf(kept))).status, 200)
+  // A made-up nonce, or the old GET form: refused.
+  assert.equal((await redeem(createBrowser(hosted.port, hosted.origin), 'a'.repeat(32))).status, 410)
+  assert.equal((await createBrowser(hosted.port, hosted.origin).get(`/open/${'a'.repeat(32)}`)).status, 404)
 })
 
 test('the session counts only from this machine on the engine’s host, and expires after a day idle', async () => {
@@ -245,10 +338,12 @@ test('a second serve asks the running engine for a link with the per-start key; 
   assert.equal((await ask({ 'X-Shapewall-Solo-Key': key, 'X-Forwarded-For': '1.2.3.4' })).status, 403)
   const ok = await ask({ 'X-Shapewall-Solo-Key': key })
   assert.equal(ok.status, 200)
-  assert.match(ok.json.link, /^\/open\/[A-Za-z0-9_-]{32}$/)
+  // A page in the data folder, never the nonce itself.
+  assert.equal(path.dirname(ok.json.file), hosted.dataDir)
+  assert.doesNotMatch(ok.text, /nonce/)
   assert.equal(ok.json.origin, hosted.origin)
-  const redeemed = await createBrowser(hosted.port, hosted.origin).get(ok.json.link)
-  assert.equal(redeemed.status, 303)
+  const redeemed = await redeem(createBrowser(hosted.port, hosted.origin), nonceOf(ok.json.file))
+  assert.equal(redeemed.status, 200)
 })
 
 test('the boards follow the config file: rows without a push, live definition, binding refreshed', async () => {

@@ -95,8 +95,9 @@ export const SECTIONS = {
                             (also $SHAPEWALL_AGENT_ACP; never read from the config; https://shapewall.com/docs/chat)
       --allow-remote-agent  with --chat on a shared board, let an ACP agent run anyway (anyone reaching it acts as you)
       --engine hosted       run the hosted engine for this project, on this machine only: one owner, signed in by a
-                            one-time link (--open), data in .shapewall/.engine/; takes --port, --open,
-                            --print-owner-link, --read-only, --no-chat, --no-capture${EXPERIMENTAL}`,
+                            one-time page (--open), data in .shapewall/.engine/; takes --port, --open,
+                            --print-owner-link, --read-only, --no-chat, --no-capture, --skip-git-check
+                            (start even when git cannot say whether it tracks .engine/)${EXPERIMENTAL}`,
   devices: `  devices list              paired devices and pending requests for this project [--json]
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request

@@ -78,9 +78,11 @@ export function assertMigrationAllows(config, { local = false, boardIds = null }
 // signing secret and sign-in keys. Refuses when git tracks anything in it,
 // and drops a .gitignore of `*` in it (for an outputDir that `shapewall
 // init` did not add to the project's .gitignore). Returns the folder.
-export function prepareEngineFolder(config, { git = 'git' } = {}) {
+// skipGitCheck (serve --engine hosted --skip-git-check): for a folder git
+// cannot be asked about; the person checks it themselves.
+export function prepareEngineFolder(config, { git = 'git', skipGitCheck = false } = {}) {
   const dir = engineDir(config.outputDir)
-  const tracked = gitTracked(dir, { cwd: config.dir, git })
+  const tracked = skipGitCheck ? [] : gitTracked(dir, { git })
   if (tracked.length)
     throw new EngineFolderError(
       `Refusing to start: git tracks files in ${dir} (${tracked.slice(0, 3).join(', ')}${tracked.length > 3 ? ', ...' : ''}). It holds the engine's database and secrets; remove them from git (git rm -r --cached) and keep the folder ignored.`,
@@ -96,9 +98,57 @@ export function prepareEngineFolder(config, { git = 'git' } = {}) {
   return dir
 }
 
-// Paths under `dir` that git tracks ([] outside a repository or without git).
-export function gitTracked(dir, { cwd, git = 'git' } = {}) {
-  const run = spawnSync(git, ['ls-files', '-z', '--', dir], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-  if (run.status !== 0 || typeof run.stdout !== 'string') return []
-  return run.stdout.split('\0').filter(Boolean)
+const realpath = (file) => {
+  try {
+    return fs.realpathSync(file)
+  } catch {
+    return path.resolve(file)
+  }
+}
+
+// The nearest folder at or above `start` with a `.git` (a folder, or the
+// file a submodule or worktree has), or null.
+function enclosingRepo(start) {
+  for (let dir = path.resolve(start); ; dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, '.git'))) return dir
+    if (path.dirname(dir) === dir) return null
+  }
+}
+
+// Paths under `dir` that git tracks. Asked from the folder that holds `dir`,
+// so the repository that could track it answers, whatever it is: the
+// project's, a nested repository or submodule the output folder is, or one
+// the output folder sits in outside the project. [] only when no repository
+// holds the folder; anything git cannot answer there refuses (fails closed).
+export function gitTracked(dir, { git = 'git' } = {}) {
+  let existing = path.dirname(path.resolve(dir))
+  while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing)
+  const repo = enclosingRepo(existing)
+  if (!repo && !process.env.GIT_DIR) return []
+  const gitIn = (...args) =>
+    spawnSync(git, ['-C', existing, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+      timeout: 15_000,
+    })
+  const failed = (run) =>
+    run.error?.code === 'ENOENT'
+      ? 'git is not installed'
+      : String(run.stderr || run.error?.message || `git exited with ${run.status}`)
+          .trim()
+          .split('\n')[0]
+  let why = null
+  // The repository git answers for must be the nearest one: a damaged nearer .git makes git skip to an outer one.
+  const top = gitIn('rev-parse', '--show-toplevel')
+  if (top.status !== 0) why = failed(top)
+  else if (repo && realpath(top.stdout.trim()) !== realpath(repo)) why = `git answers for ${top.stdout.trim()}, not ${repo}`
+  if (!why) {
+    const run = gitIn('ls-files', '-z', '--full-name', '--', path.relative(existing, dir) || '.')
+    if (run.status === 0 && typeof run.stdout === 'string') return run.stdout.split('\0').filter(Boolean)
+    why = failed(run)
+  }
+  throw new EngineFolderError(
+    `Refusing to start: could not check whether git tracks ${dir} (${why}); ${repo || 'a repository'} holds it. The folder keeps the engine's database and secrets. Fix git, or check that nothing in it is committed and start with --skip-git-check.`,
+  )
 }

@@ -1,5 +1,6 @@
 // `shapewall serve`: the local board server, and the checks that decide what it may share.
 
+import { UPDATE_RESTART_EXIT } from '../update/routes.js'
 import fs from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { isLoopback } from '../net.js'
@@ -107,8 +108,8 @@ export async function listenFailure(error, { port, host, config, flags = {} }) {
   return friendly
 }
 
-// What a managed installer's service manager restarts (SHAPEWALL_UPDATE_RESTART).
-export const UPDATE_RESTART_EXIT = 75
+// What a managed installer's service manager restarts (SHAPEWALL_UPDATE_RESTART): src/update/routes.js.
+export { UPDATE_RESTART_EXIT }
 
 export async function serve(flags, out) {
   const config = loadConfig(flags.config)

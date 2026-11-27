@@ -42,8 +42,10 @@ export function createGuards({
   local = null,
 }) {
   const clientIp = (req) => (trustProxy ? req.ip : req.socket.remoteAddress) || 'unknown'
-  const setCookie = (res, name, value, maxAgeSeconds) => {
-    res.append('Set-Cookie', `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure ? '; Secure' : ''}`)
+  // sameSite: 'Lax' (default) or 'Strict' (the solo engine's local session: never sent on a navigation from another site).
+  const setCookie = (res, name, value, maxAgeSeconds, { sameSite = 'Lax' } = {}) => {
+    const site = sameSite === 'Strict' ? 'Strict' : 'Lax'
+    res.append('Set-Cookie', `${name}=${value}; Path=/; HttpOnly; SameSite=${site}; Max-Age=${maxAgeSeconds}${secure ? '; Secure' : ''}`)
   }
   const limit =
     (bucket, keyOf = clientIp) =>

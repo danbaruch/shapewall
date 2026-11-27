@@ -12,6 +12,7 @@ import path from 'node:path'
 import http from 'node:http'
 import { EventEmitter } from 'node:events'
 import { randomBytes } from 'node:crypto'
+import { UPDATE_RESTART_EXIT } from '../update/routes.js'
 import { MIN_NODE, nodeSupportsSqlite, openDatabase, quietSqliteWarning } from './db.js'
 import { dropSetupCodes, removeSetupLink, userCount, writeSetupLink } from './setup-link.js'
 
@@ -407,7 +408,7 @@ export async function startHosted({
     // a half-applied install is worse than a slow stop, so no new one starts,
     // a check stops, and the force exit is armed only once the apply settled.
     const stop = (code = 0) => {
-      const exitCode = Number.isInteger(code) ? code : 0
+      let exitCode = Number.isInteger(code) ? code : 0
       stopping ||= (async () => {
         const update = app.locals.appUpdate
         update?.stop?.()
@@ -415,6 +416,9 @@ export async function startHosted({
           out('Waiting for the update in progress to finish before stopping.')
           await update.settled?.()
         }
+        // An apply finished that needs a restart, and the installer opted in to one (onRestart): exit so the
+        // service manager starts the new version, even when the stop came from a signal.
+        if (exitCode === 0 && update?.restartPending?.()) exitCode = UPDATE_RESTART_EXIT
         const force = setTimeout(() => exitOnStop && exit(exitCode), forceExitMs)
         force.unref()
         server.closeAllConnections?.()

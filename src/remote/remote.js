@@ -9,6 +9,7 @@ import { readOutputFile } from '../output-path.js'
 import { portablePagePath } from '../portable-path.js'
 import fs from 'node:fs'
 import path from 'node:path'
+import { soloHost, soloLoopbackPinned } from './loopback-pin.js'
 import { isLoopback } from '../net.js'
 import { boardViewports } from '../config.js'
 import { boardDir } from '../store.js'
@@ -36,11 +37,14 @@ export function remoteOrigin(flags = {}, env = process.env) {
   } catch {
     throw new Error(`--remote: not a URL (${raw})`)
   }
-  // A *.localhost name is this machine too (RFC 6761): the solo engine's origin, http://<project>.shapewall.localhost:<port>.
-  const local = isLoopback(url.hostname) || /^[a-z0-9.-]+\.localhost$/i.test(url.hostname)
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
+  // Plain http: only to this machine. That is a loopback address or name, or the solo engine's own host name
+  // (<project>-<random>.shapewall.localhost), whose connections are pinned to 127.0.0.1 (src/remote/loopback-pin.js).
+  const solo = url.protocol === 'http:' && soloHost(url.hostname)
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && (isLoopback(url.hostname) || solo))) {
     throw new Error('--remote must be https (plain http only to this machine), so the token is never sent in the clear')
   }
+  if (solo && !soloLoopbackPinned())
+    throw new Error(`--remote ${url.origin}: could not make sure the connection stays on this machine, so no token is sent.`)
   return url.origin
 }
 

@@ -193,7 +193,13 @@ async function openExisting(flags) {
   if (!fs.existsSync(file)) throw new Error(`no hosted database at ${file} (pass --data, the server's data folder)`)
   const { openDatabase, quietSqliteWarning } = await import('./db.js')
   quietSqliteWarning()
-  return { dir, db: await openDatabase(file) }
+  const db = await openDatabase(file)
+  const { SOLO_FOLDER_OPERATOR_MESSAGE, isSoloFolder } = await import('./solo/binding.js')
+  if (isSoloFolder(db)) {
+    db.close()
+    throw new Error(SOLO_FOLDER_OPERATOR_MESSAGE(dir))
+  }
+  return { dir, db }
 }
 
 const ADMIN_HELP = `shapewall hosted admin <command> --data DIR   (on the server's machine)

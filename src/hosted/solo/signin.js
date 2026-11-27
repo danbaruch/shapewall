@@ -4,40 +4,51 @@
 // one owner, on this machine. There is no setup link, no passkey and no
 // password. The owner account is made on the first start (named after the
 // person at the machine: SHAPEWALL_USER_NAME, git, the OS user). The browser
-// is signed in by a one-time link that only the terminal running the engine
-// knows:
+// is signed in by a one-time nonce that only the terminal running the engine
+// (and whoever can read the engine's data folder) knows:
 //
-//   GET /open/<nonce>   works once, for 60 seconds (5 minutes when no browser
-//                       could be opened and the link is printed instead), and
-//                       only for a request from this machine (loopback peer)
-//                       to the engine's own host name with no proxy headers.
-//                       It mints a `local` session (src/hosted/session-via.js)
+//   POST /open          nonce=<nonce> (a form): works once, for 60 seconds
+//                       (5 minutes when no browser could be opened and the
+//                       file is printed instead), and only for a request from
+//                       this machine and this OS user to the engine's own
+//                       host name with no proxy headers (`admits` below). It
+//                       mints a `local` session (src/hosted/session-via.js)
 //                       and its cookie, then sends the browser to the board.
 //
+// The nonce never goes on a command line (another user can read every
+// process's argv) or into any output: the engine writes it into a 0600 page
+// in its 0700 data folder, open-<id>.html, that posts it to /open, and the
+// browser is opened (or told) on that file. The page is removed once the
+// nonce is used or has expired, and at stop.
+//
 // What keeps other people out:
-// - The origin is http://<project>.shapewall.localhost:<port>, a host of its
-//   own (browsers resolve *.localhost to loopback). The cookie is host-only,
-//   so it never reaches the user's dev server on localhost:3000 or any other
-//   127.0.0.1 port, and the redeem refuses any other Host (127.0.0.1,
-//   localhost), so no cookie is ever set for those names.
-// - A bare loopback request gets nothing: no nonce, no session. On a shared
-//   machine another user can reach the port, never the nonce.
-// - A local session counts only on such a request (loopback peer, the solo
-//   host, no proxy headers): `admits` below, read by every session check
-//   (src/hosted/tailnet.js sessionReader). The engine refuses --trust-proxy
-//   and every exposure flag (src/hosted/solo/serve.js).
+// - The origin is http://<label>-<random>.shapewall.localhost:<port>
+//   (browsers resolve *.localhost to loopback). Cookies are kept per host
+//   name, not per port: the browser sends the session cookie to that name on
+//   any port. So the name carries a random part (70 bits, made once and kept
+//   in <data>/host.key, 0600): nobody outside the data folder can point a
+//   browser at it, so no other server on this machine ever gets the cookie.
+//   The cookie is SameSite=Strict, so a link on another site never carries
+//   it, and host-only, so 127.0.0.1, localhost and other names never get it.
+// - The redeem and every session read (src/hosted/tailnet.js sessionReader)
+//   admit a request only from a loopback peer, to exactly the engine's host
+//   and port, with no proxy headers, and on Linux only from a socket owned
+//   by the engine's own OS user (src/hosted/solo/peer-uid.js; fails closed).
+//   The engine refuses --trust-proxy and every exposure flag
+//   (src/hosted/solo/serve.js).
 // - The session is short: a day from its last use, a week at most
 //   (src/hosted/auth.js LOCAL_SESSION_*), and it never counts as a passkey
 //   check (verified_at is held to the never-verified mark by migration 24).
 //   Passkeys are off on the engine; the fixed core asks for a typed
 //   confirmation, as on a tailnet sign-in server (src/hosted/guards.js).
 // - A second `serve --engine hosted --open` while the engine runs asks it for
-//   a new link (POST /solo/open-link) with the per-start key in
+//   a new sign-in page (POST /solo/open-link) with the per-start key in
 //   <data>/solo-open.key (0600, rotated each start, removed at stop): whoever
 //   can read that file can read the engine's database too.
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
+import express from 'express'
 import { auditAccount } from '../../accounts/events.js'
 import { PROXY_HEADERS } from '../../agent/settings-routes.js'
 import { HANDLE_RE, LOCAL_SESSION_IDLE_MS, cleanDisplayName, deviceLabel } from '../auth.js'
@@ -46,11 +57,15 @@ import { transaction } from '../db.js'
 import { createProjectStore } from '../projects.js'
 import { audit, tenant } from '../tenancy.js'
 import { bindSoloProject, readSoloBinding } from './binding.js'
+import { sameUserPeer } from './peer-uid.js'
 
 export const OPEN_TTL_MS = 60_000
 export const OPEN_KEEP_MS = 5 * 60_000
 export const OPEN_KEY_FILE = 'solo-open.key'
+export const HOST_KEY_FILE = 'host.key'
+const OPEN_PAGE_RE = /^open-[a-f0-9]{16}\.html$/
 const NONCE_RE = /^[A-Za-z0-9_-]{32}$/
+const SUFFIX_RE = /^[a-z2-7]{14}$/
 const OPEN_MAX = 16
 
 export class SoloSignInError extends Error {}
@@ -66,6 +81,34 @@ export function soloHostLabel(name) {
   return label || 'project'
 }
 
+const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567'
+
+// The random part of the engine's host name: 14 base32 characters (70 bits),
+// made on the first start and kept in <dataDir>/host.key (0600). A file that
+// is not a plain file of that shape is refused, not replaced.
+export function soloHostSuffix(dataDir) {
+  const file = path.join(dataDir, HOST_KEY_FILE)
+  let stat = null
+  try {
+    stat = fs.lstatSync(file)
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+  if (!stat) {
+    const bytes = randomBytes(14)
+    const suffix = [...bytes].map((byte) => BASE32[byte & 31]).join('')
+    fs.writeFileSync(file, `${suffix}\n`, { mode: 0o600, flag: 'wx' })
+    return suffix
+  }
+  if (!stat.isFile()) throw new SoloSignInError(`${file} is not a plain file. Remove it, then start the engine again.`)
+  const suffix = fs.readFileSync(file, 'utf8').trim()
+  if (!SUFFIX_RE.test(suffix))
+    throw new SoloSignInError(`${file} is damaged. Remove it, then start the engine again (the address changes).`)
+  return suffix
+}
+
+// The engine's host label: <project label>-<random part>.
+export const soloHostName = (projectName, suffix) => `${soloHostLabel(projectName)}-${suffix}`
 export const soloOrigin = (label, port) => `http://${soloHostLabel(label)}.shapewall.localhost:${port}`
 
 const loopbackPeer = (address) => {
@@ -73,16 +116,22 @@ const loopbackPeer = (address) => {
   return value === '::1' || value.startsWith('127.') || value.startsWith('::ffff:127.')
 }
 
+// From this machine and, where the system says (Linux), this OS user.
+const samePerson = (req, peer) => loopbackPeer(req.socket?.remoteAddress) && peer(req.socket) !== false
+
 // Whether a request may carry (or start) the owner's local session: from this
-// machine, straight to this server, addressed to the engine's own host.
-export function soloLocalGate(origin) {
+// machine and this OS user, straight to this server, addressed to exactly the
+// engine's own host and port. peer: (socket) => true | false | null (unknown
+// on this system), src/hosted/solo/peer-uid.js.
+export function soloLocalGate(origin, { peer = sameUserPeer } = {}) {
   const host = new URL(origin).host.toLowerCase()
   return {
     host,
+    peer,
     admits(req) {
-      if (!loopbackPeer(req.socket?.remoteAddress)) return false
       if (PROXY_HEADERS.some((name) => req.headers?.[name] !== undefined)) return false
-      return String(req.headers?.host || '').toLowerCase() === host
+      if (String(req.headers?.host || '').toLowerCase() !== host) return false
+      return samePerson(req, peer)
     },
   }
 }
@@ -163,55 +212,85 @@ export function ensureSoloOwner(
   })
 }
 
-// Mounts GET /open/:nonce and POST /solo/open-link, and sets
-// app.locals.soloOpenLink({ keep }) -> '/open/<nonce>' (a path on the origin).
+const escapeHtml = (value) =>
+  String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])
+
+// The page the browser is opened on: it posts the nonce to /open.
+const openPage = (origin, nonce) => `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>Shapewall: signing in</title></head>
+<body><form method="post" action="${escapeHtml(origin)}/open"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}">
+<p>Signing you in to the Shapewall solo engine. <button type="submit">Sign in</button></p></form>
+<script>document.forms[0].submit()</script></body></html>
+`
+
+// After the redeem: a same-site step to the board, so the SameSite=Strict
+// cookie goes with it (a redirect would still count as the file page's
+// cross-site navigation).
+const signedInPage = (target) => `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="refresh" content="0;url=${escapeHtml(target)}"><title>Shapewall: signed in</title></head>
+<body><p>Signed in. <a href="${escapeHtml(target)}">Open the board</a>.</p></body></html>
+`
+
+// Mounts POST /open and POST /solo/open-link, and sets
+// app.locals.soloOpenFile({ keep }) -> the path of a new sign-in page, and
+// app.locals.soloKeepOpenFile(file) (five minutes instead of one).
 // deps: auth, setCookie, SESSION_COOKIE, now, iso, log, dataDir, db, gate
 // (soloLocalGate), owner ({ userId, workspaceId, projectId }).
 export function mountSoloSignIn(app, { auth, db, setCookie, SESSION_COOKIE, now, iso, log, dataDir, gate, owner }) {
-  const nonces = new Map() // nonce -> expires (ms)
+  const origin = `http://${gate.host}`
+  const nonces = new Map() // nonce -> { expires (ms), file }
   const clock = () => now().getTime()
-  const sweep = () => {
-    for (const [nonce, expires] of nonces) if (expires <= clock()) nonces.delete(nonce)
+  const drop = (nonce) => {
+    const entry = nonces.get(nonce)
+    nonces.delete(nonce)
+    if (entry) fs.rmSync(entry.file, { force: true })
+    return entry
   }
+  const sweep = () => {
+    for (const [nonce, entry] of nonces) if (entry.expires <= clock()) drop(nonce)
+  }
+  // Pages a stopped engine left behind.
+  for (const name of fs.readdirSync(dataDir)) if (OPEN_PAGE_RE.test(name)) fs.rmSync(path.join(dataDir, name), { force: true })
+
   const mint = ({ keep = false } = {}) => {
     sweep()
     // Never more than a handful waiting: the oldest goes first.
-    while (nonces.size >= OPEN_MAX) nonces.delete(nonces.keys().next().value)
+    while (nonces.size >= OPEN_MAX) drop(nonces.keys().next().value)
     const nonce = randomBytes(24).toString('base64url')
-    nonces.set(nonce, clock() + (keep ? OPEN_KEEP_MS : OPEN_TTL_MS))
-    return `/open/${nonce}`
+    const file = path.join(dataDir, `open-${randomBytes(8).toString('hex')}.html`)
+    fs.writeFileSync(file, openPage(origin, nonce), { mode: 0o600, flag: 'wx' })
+    nonces.set(nonce, { expires: clock() + (keep ? OPEN_KEEP_MS : OPEN_TTL_MS), file })
+    return file
   }
-  // A link that could not be opened in a browser and is printed instead: five minutes to copy it.
-  const keepLink = (link) => {
-    const nonce = String(link).split('/').pop()
-    if (nonces.has(nonce)) nonces.set(nonce, clock() + OPEN_KEEP_MS)
+  // A page that could not be opened in a browser and is printed instead: five minutes to open it.
+  const keepFile = (file) => {
+    for (const entry of nonces.values()) if (entry.file === file) entry.expires = clock() + OPEN_KEEP_MS
   }
-  app.locals.soloOpenLink = mint
-  app.locals.soloKeepOpenLink = keepLink
+  app.locals.soloOpenFile = mint
+  app.locals.soloKeepOpenFile = keepFile
   const boardPath = `/w/${owner.workspaceId}/p/${owner.projectId}/`
 
   const gone = (res) =>
     res
       .status(410)
       .type('text')
-      .send('This sign-in link works once, for a minute, in a browser on this machine. Run shapewall serve --engine hosted --open again.')
+      .send('This sign-in page works once, for a minute, in a browser on this machine. Run shapewall serve --engine hosted --open again.')
 
-  app.get('/open/:nonce', (req, res) => {
+  const form = express.urlencoded({ extended: false, limit: '1kb', parameterLimit: 4 })
+  app.post('/open', form, (req, res) => {
     res.setHeader('Cache-Control', 'no-store')
-    const nonce = String(req.params.nonce || '')
+    res.setHeader('Referrer-Policy', 'no-referrer')
+    const nonce = String(req.body?.nonce || '')
     if (!NONCE_RE.test(nonce)) return gone(res)
-    const expires = nonces.get(nonce)
-    // Used up whatever happens next: one try per link.
-    nonces.delete(nonce)
-    if (!expires || expires <= clock()) return gone(res)
-    // From this machine, to the engine's own host, with no proxy in between:
-    // a cookie set on any other name would reach other servers (S5 section 7).
+    // Used up whatever happens next: one try per nonce.
+    const entry = drop(nonce)
+    if (!entry || entry.expires <= clock()) return gone(res)
     if (!gate.admits(req)) return gone(res)
     const current = db.prepare('SELECT id FROM users WHERE id = ?').get(owner.userId)
     if (!current) return gone(res)
     const device = deviceLabel(req.headers['user-agent'])
     const token = auth.createSession(owner.userId, { via: 'local', device, ip: req.socket.remoteAddress })
-    setCookie(res, SESSION_COOKIE, token, Math.floor(LOCAL_SESSION_IDLE_MS / 1000))
+    setCookie(res, SESSION_COOKIE, token, Math.floor(LOCAL_SESSION_IDLE_MS / 1000), { sameSite: 'Strict' })
     auditAccount(db, {
       userId: owner.userId,
       action: 'signed_in',
@@ -219,27 +298,29 @@ export function mountSoloSignIn(app, { auth, db, setCookie, SESSION_COOKIE, now,
       at: iso(),
       detail: { via: 'local', device },
     })
-    res.redirect(303, boardPath)
+    res.setHeader('Content-Security-Policy', "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+    res.status(200).type('html').send(signedInPage(boardPath))
   })
+  app.get('/open', (req, res) => gone(res.setHeader('Cache-Control', 'no-store')))
 
-  // A new link for a running engine (a second `serve --engine hosted --open`).
+  // A new sign-in page for a running engine (a second `serve --engine hosted --open`).
   const keyFile = path.join(dataDir, OPEN_KEY_FILE)
   const key = randomBytes(32).toString('base64url')
   fs.rmSync(keyFile, { force: true })
   fs.writeFileSync(keyFile, `${key}\n`, { mode: 0o600, flag: 'wx' })
   app.post('/solo/open-link', (req, res) => {
     res.setHeader('Cache-Control', 'no-store')
-    const local = loopbackPeer(req.socket?.remoteAddress) && !PROXY_HEADERS.some((name) => req.headers[name] !== undefined)
+    const local = samePerson(req, gate.peer) && !PROXY_HEADERS.some((name) => req.headers[name] !== undefined)
     // Browsers never send this header on their own; a page cannot set it cross-origin without a preflight.
     const given = String(req.headers['x-shapewall-solo-key'] || '')
     if (!local || req.headers.origin !== undefined || !given || !safeEqual(given, key))
       return res.status(403).json({ error: { code: 'forbidden', message: 'Not from this machine.' } })
-    res.json({ link: mint({ keep: req.headers['x-shapewall-keep'] === '1' }), origin: `http://${gate.host}` })
+    res.json({ file: mint({ keep: req.headers['x-shapewall-keep'] === '1' }), origin })
   })
-  log('Sign-in: the one-time link from this terminal (no passkeys on the solo engine).')
+  log('Sign-in: a one-time page from this terminal (no passkeys on the solo engine).')
   return {
     close() {
-      nonces.clear()
+      for (const nonce of [...nonces.keys()]) drop(nonce)
       try {
         if (fs.readFileSync(keyFile, 'utf8').trim() === key) fs.rmSync(keyFile, { force: true })
       } catch {

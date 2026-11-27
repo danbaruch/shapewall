@@ -56,7 +56,9 @@ export function mountSoloUpdate(app, deps) {
     env: solo.env || process.env,
     readOnly: solo.readOnly === true,
     appUpdate: solo.appUpdate || {},
-    owner: (req) => soloOwner(deps.db, req) && localRequest(req),
+    // On the engine (serve --engine hosted): its own exact host, from this OS user (the sign-in gate).
+    owner: (req) =>
+      soloOwner(deps.db, req) && localRequest(req, { ownHost: deps.localGate?.host }) && (!deps.localGate || deps.localGate.admits(req)),
   })
   deps.boardApi.use('/app-update', updates)
   // As on a local server (src/server/app.js): whoever stops the engine can

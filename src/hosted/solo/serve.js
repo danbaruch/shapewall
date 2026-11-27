@@ -5,11 +5,11 @@
 // - Data: <outputDir>/.engine/ (src/engine-folder.js: refused when git tracks
 //   it; 0700, a .gitignore of `*` in it). SQLite shapewall.db, secret.key,
 //   files/<ws>/<project>/<board>/ (the local capture layout), solo-open.key.
-// - Origin: http://<project>.shapewall.localhost:<port>, listening on
-//   127.0.0.1 only; live HTML from http://uc.<project>.shapewall.localhost:<port>
+// - Origin: http://<project>-<random>.shapewall.localhost:<port>, listening on
+//   127.0.0.1 only; live HTML from http://uc.<project>-<random>.shapewall.localhost:<port>
 //   (its own origin; S5 security 7).
-// - The owner is made on the first start and signs in by a one-time link
-//   (src/hosted/solo/signin.js). `--open` opens it; a second
+// - The owner is made on the first start and signs in by a one-time page
+//   (src/hosted/solo/signin.js, nonce never in argv). `--open` opens it; a second
 //   `serve --engine hosted --open` while the engine runs asks it for a new one.
 // - Boards come from shapewall.config.json, live (src/hosted/solo/config.js).
 // - Events and notifications are the engine's (src/hosted/solo/events.js):
@@ -30,7 +30,8 @@ import { localUserName } from '../../server/local-user.js'
 import { openBrowser } from '../../cli/open.js'
 import { UPDATE_RESTART_EXIT } from '../../cli/serve.js'
 import { keyWarningLines } from '../../config-keys.js'
-import { OPEN_KEY_FILE, soloHostLabel } from './signin.js'
+import { pathToFileURL } from 'node:url'
+import { OPEN_KEY_FILE, soloHostName, soloHostSuffix } from './signin.js'
 
 export const ENGINES = ['hosted']
 
@@ -76,16 +77,35 @@ function runningEngine(dir) {
   }
 }
 
-// A new one-time link from the engine that already runs for this folder.
-async function linkFromRunning(dir, running, { keep }) {
+// A new sign-in page from the engine that already runs for this folder: the
+// path of a 0600 file in the data folder that posts a one-time nonce.
+async function pageFromRunning(dir, running, { keep }) {
   const key = fs.readFileSync(path.join(dir, OPEN_KEY_FILE), 'utf8').trim()
   const response = await fetch(`http://127.0.0.1:${running.port}/solo/open-link`, {
     method: 'POST',
     headers: { 'X-Shapewall-Solo-Key': key, ...(keep ? { 'X-Shapewall-Keep': '1' } : {}) },
   })
-  if (!response.ok) throw new Error(`The running engine did not give a sign-in link (HTTP ${response.status}).`)
+  if (!response.ok) throw new Error(`The running engine did not make a sign-in page (HTTP ${response.status}).`)
   const body = await response.json()
-  return `${running.origin}${body.link}`
+  const file = path.resolve(String(body.file || ''))
+  if (path.dirname(file) !== path.resolve(dir)) throw new Error('The running engine answered with a sign-in page outside its data folder.')
+  return file
+}
+
+// The browser opens the page by its path: the nonce is in the file only,
+// never on a command line (other users can read every process's argv) or in
+// this output.
+function signIn(file, out, { open, spawnImpl, keep = () => {} }) {
+  const url = pathToFileURL(file).href
+  if (open)
+    openBrowser(url, out, {
+      spawnImpl,
+      onCannotOpen: () => {
+        keep()
+        return 'it signs you in once, from this machine, within 5 minutes'
+      },
+    })
+  else out(`Sign in: open ${url} in a browser on this machine (works once, for 5 minutes).`)
 }
 
 function showLink(flags, env) {
@@ -93,7 +113,7 @@ function showLink(flags, env) {
   return Boolean(process.stdout.isTTY) && env.TERM !== 'dumb'
 }
 
-export async function serveEngine(flags, out, { env = process.env, start = null } = {}) {
+export async function serveEngine(flags, out, { env = process.env, start = null, spawnImpl = undefined } = {}) {
   const problem = engineFlagProblem(flags)
   if (problem) throw new Error(problem)
   const config = loadConfig(flags.config)
@@ -101,7 +121,7 @@ export async function serveEngine(flags, out, { env = process.env, start = null 
   const port = flags.port === undefined ? DEFAULT_PORT : Number(flags.port)
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port must be a port number')
   assertMigrationAllows(config)
-  const dir = prepareEngineFolder(config)
+  const dir = prepareEngineFolder(config, { skipGitCheck: Boolean(flags['skip-git-check']) })
 
   // Already running for this project: --open signs a browser in there, and nothing starts twice.
   const running = runningEngine(dir)
@@ -110,9 +130,8 @@ export async function serveEngine(flags, out, { env = process.env, start = null 
       throw new Error(
         `The solo engine already runs for this project at ${running.url} (pid ${running.pid}). Add --open to sign a browser in.`,
       )
-    const link = await linkFromRunning(dir, running, { keep: !flags.open })
-    if (flags.open) openBrowser(link, out, { onCannotOpen: () => 'it works once, from this machine, for a minute' })
-    else out(`Sign in (works once, for 5 minutes, from this machine): ${link}`)
+    const file = await pageFromRunning(dir, running, { keep: !flags.open })
+    signIn(file, out, { open: Boolean(flags.open), spawnImpl })
     return null
   }
   if (!acquireLock(lockFile(dir), { kind: 'serve-engine', mode: 0o600 }))
@@ -123,7 +142,16 @@ export async function serveEngine(flags, out, { env = process.env, start = null 
   }
   process.once('exit', release)
 
-  const label = soloHostLabel(config.title || path.basename(config.dir))
+  // <project>-<random>.shapewall.localhost: the random part (host.key in the data folder) keeps the name, and so the
+  // owner's cookie, away from every other server on this machine (src/hosted/solo/signin.js).
+  let label
+  try {
+    label = soloHostName(config.title || path.basename(config.dir), soloHostSuffix(dir))
+  } catch (error) {
+    release()
+    process.off('exit', release)
+    throw error
+  }
   const holder = { stop: null }
   const solo = {
     signIn: 'local',
@@ -172,18 +200,12 @@ export async function serveEngine(flags, out, { env = process.env, start = null 
   out(`Data: ${dir} (never commit it)`)
   out(`Agents: shapewall agent connect --remote ${handle.origin}`)
   if (flags.open) {
-    const link = handle.app.locals.soloOpenLink()
-    openBrowser(`${handle.origin}${link}`, out, {
-      onCannotOpen: () => {
-        handle.app.locals.soloKeepOpenLink(link)
-        return 'it signs you in once, from this machine, within 5 minutes'
-      },
-    })
+    const file = handle.app.locals.soloOpenFile()
+    signIn(file, out, { open: true, spawnImpl, keep: () => handle.app.locals.soloKeepOpenFile(file) })
   } else if (showLink(flags, env)) {
-    const link = handle.app.locals.soloOpenLink({ keep: true })
-    out(`Sign in (works once, for 5 minutes, from this machine): ${handle.origin}${link}`)
+    signIn(handle.app.locals.soloOpenFile({ keep: true }), out, { open: false })
   } else {
-    out('Sign in: run shapewall serve --engine hosted --open (a one-time link; this output is not a terminal, so none is printed).')
+    out('Sign in: run shapewall serve --engine hosted --open (a one-time sign-in page; this output is not a terminal, so none is made).')
   }
   return handle
 }
