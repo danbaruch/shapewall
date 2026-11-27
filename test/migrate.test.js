@@ -909,6 +909,7 @@ test('R2-2: a journal whose backup was deleted after the run changed the engine 
   assert.equal(back.code, 1, back.text)
   assert.doesNotMatch(back.text, /before it changed anything/)
   assert.match(back.text, /cannot be put back: its backup is gone, and the engine already has comments, chat or files of site/)
+  assert.match(back.text, /may be half moved: copy \.shapewall\/site aside first\. Then, to give up on that run/)
   assert.equal(fs.existsSync(path.join(p.out, JOURNAL)), true, 'the journal stays')
   const json = await run(p, { rollback: true, json: true })
   assert.equal(json.json.ok, false)

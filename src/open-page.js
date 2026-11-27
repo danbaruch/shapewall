@@ -9,14 +9,19 @@
 // So the nonce goes into a 0600 page in the project's .shapewall folder,
 // open-<id>.html, that posts it to <origin>/open; the browser is opened (or
 // told) on that file's path. The page is removed once its nonce is tried,
-// when it expires, and at stop. POST /open is the only way to use a nonce.
+// when it expires, and at stop; its nonce lives only in the server's memory,
+// so a page a stopped server left behind is dead, and the next server for
+// the project removes it when it starts. POST /open is the only way to use a
+// nonce, and its answer hands the settings token to the tab without putting
+// it in any URL (sendTokenHandoff), so it never lands in browser history.
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { PROXY_HEADERS, localRequest } from './agent/settings-routes.js'
 
-const PAGE_RE = /^open-[a-f0-9]{16}\.html$/
+// open-<pid>-<id>.html; open-<id>.html from 1.4.1.
+const PAGE_RE = /^open-(?:([1-9][0-9]{0,9})-)?[a-f0-9]{16}\.html$/
 const NONCE_RE = /^[A-Za-z0-9_-]{32}$/
 const MAX_WAITING = 16
 
@@ -30,6 +35,31 @@ const openPage = (action, nonce) => `<!doctype html>
 <p>Opening Shapewall. <button type="submit">Open</button></p></form>
 <script>document.forms[0].submit()</script></body></html>
 `
+
+// The key the board keeps the settings token under for its tab
+// (client/src/lib/api.js TOKEN_KEY).
+export const SETTINGS_TOKEN_KEY = 'shapewall-settings-token'
+
+// The answer to a redeemed POST /open: a page that puts the settings token in
+// this tab's sessionStorage, where the board reads it, then replaces itself
+// with `target`. The token is in this no-store page only, never in a URL or
+// fragment, so browser history never records it. The script runs under a
+// nonce of this response's own CSP.
+export function sendTokenHandoff(res, { token, target }) {
+  const nonce = randomBytes(16).toString('base64')
+  const data = JSON.stringify({ key: SETTINGS_TOKEN_KEY, token, target }).replace(/</g, '\\u003c')
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('Referrer-Policy', 'no-referrer')
+  res.setHeader(
+    'Content-Security-Policy',
+    `default-src 'none'; script-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+  )
+  res.status(200).type('html').send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>Shapewall: opening</title></head>
+<body><p>Opening Shapewall.</p><noscript><p>Turn on JavaScript, or open the private owner link that shapewall serve printed.</p></noscript>
+<script nonce="${nonce}">const d = ${data}; try { sessionStorage.setItem(d.key, d.token) } catch {} location.replace(d.target)</script></body></html>
+`)
+}
 
 // A request from this machine, straight to this server (no proxy headers), to
 // a loopback host name. The form is posted from a file:// page, whose Origin
@@ -60,8 +90,18 @@ export function createOpenPages({ dir, ttlMs, keepMs = ttlMs, now = () => Date.n
     entry.timer = setTimeout(() => drop(nonce), ms)
     entry.timer.unref?.()
   }
-  // Pages a stopped server left behind (older than any page could still work;
-  // a newer one may belong to another server for this project).
+  // Pages a stopped server left behind: those of a process that is gone, and
+  // any older than a page can work (a newer page of a live process may belong
+  // to another server for this project, such as settings --open beside serve).
+  const alive = (pid) => {
+    if (pid === process.pid) return true
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch (error) {
+      return error?.code === 'EPERM'
+    }
+  }
   const leftovers = () => {
     let names = []
     try {
@@ -70,15 +110,19 @@ export function createOpenPages({ dir, ttlMs, keepMs = ttlMs, now = () => Date.n
       return
     }
     for (const name of names) {
-      if (!PAGE_RE.test(name)) continue
+      const match = PAGE_RE.exec(name)
+      if (!match) continue
       const file = path.join(dir, name)
       try {
-        if (now() - fs.lstatSync(file).mtimeMs > keepMs) fs.rmSync(file, { force: true })
+        const stale = (match[1] && !alive(Number(match[1]))) || now() - fs.lstatSync(file).mtimeMs > keepMs
+        if (stale) fs.rmSync(file, { force: true })
       } catch {
         /* gone already */
       }
     }
   }
+  // At start too, not only when a page is made: plain serve sweeps them as well.
+  leftovers()
   return {
     // A new page that posts a new nonce to `action` (an absolute http(s) URL).
     // Returns its file:// URL, which holds no secret.
@@ -88,7 +132,7 @@ export function createOpenPages({ dir, ttlMs, keepMs = ttlMs, now = () => Date.n
       // Never more than a handful waiting: the oldest goes first.
       while (waiting.size >= MAX_WAITING) drop(waiting.keys().next().value)
       const nonce = randomBytes(24).toString('base64url')
-      const file = path.join(dir, `open-${randomBytes(8).toString('hex')}.html`)
+      const file = path.join(dir, `open-${process.pid}-${randomBytes(8).toString('hex')}.html`)
       fs.writeFileSync(file, openPage(action, nonce), { mode: 0o600, flag: 'wx' })
       const entry = { file }
       waiting.set(nonce, entry)
