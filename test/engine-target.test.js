@@ -156,9 +156,13 @@ test('in the folder of a running engine, comments go to the engine; the JSON fil
   assert.equal(await engineMode('comments', flags, { env: {} }), null)
   assert.equal(flags.remote, 'https://app.example.com')
 
-  // export reads the 1.x files: refused while the engine holds the comments, unless --no-comments.
-  await assert.rejects(engineMode('export', { config: config.file }, { env: {} }), /holds its comments.*--no-comments/s)
-  assert.equal(await engineMode('export', { config: config.file, 'no-comments': true }, { env: {} }), null)
+  // export (R5c): the engine's comments through its token API; --no-comments needs no token.
+  const exportFlags = { config: config.file }
+  assert.ok(await engineMode('export', exportFlags, { env: {} }))
+  assert.equal(exportFlags.remote, handle.origin)
+  const bare = { config: config.file, 'no-comments': true }
+  assert.equal((await engineMode('export', bare, { env: {} })).target, null)
+  assert.equal(bare.remote, undefined)
 })
 
 test('the machine tokens rotate at each start, stop working at stop, and are refused when others can read them', async () => {
