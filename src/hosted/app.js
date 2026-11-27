@@ -629,13 +629,16 @@ export function createHostedApp({
     links,
     chat,
   })
-  // On the solo engine the token API and the MCP endpoint answer this machine's own OS user only, at the engine's
-  // own name (soloLocalGate: loopback, Host, and on Linux the peer's uid): every client of a solo engine runs here as
-  // its owner, so a token copied by another user gets nothing (rev57 R57-2).
+  // On the solo engine the token API and the MCP endpoint answer this machine's own OS user only (soloLocalGate
+  // admitsMachine: a loopback peer, no proxy headers, the engine's name or a loopback address on its port, and on
+  // Linux the peer's uid): every client of a solo engine runs here as its owner, so a token copied by another user
+  // gets nothing (rev57 R57-2).
   if (soloLocal)
     for (const prefix of ['/api/v1', '/mcp'])
       app.use(prefix, (req, res, next) =>
-        soloLocal.admits(req) ? next() : fail(res, 403, 'not_this_user', 'The solo engine answers its own user on this machine only.'),
+        soloLocal.admitsMachine(req)
+          ? next()
+          : fail(res, 403, 'not_this_user', 'The solo engine answers its own user on this machine only.'),
       )
   // The token API first: it never falls through to the cookie-based console API.
   mountMcpHttp(app, { tokenAuth, origin: publicOrigin, dataDir, db, cleaner, now: () => now().getTime() })
