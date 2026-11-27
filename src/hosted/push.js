@@ -30,6 +30,7 @@ import { commentFileBytes } from './comment-files.js'
 import { findApiToken, openPushIds, pushStatus, staleOpenPushes, tenant } from './tenancy.js'
 import { mergeCheckEnvironments, validateCheckEnvironments } from '../checks/environments.js'
 import { projectDir } from './projects.js'
+import { boardJobBusyMessage, readBoardJob } from '../board-job.js'
 import { CHECKS_BUNDLE_MAX, validateChecksBundle } from '../checks/transport.js'
 import { listReports } from '../checks/store.js'
 import { REPORTS_MAX, validateReport } from '../checks/schema.js'
@@ -468,6 +469,7 @@ export function createPushStore(
     if (isObject(raw) && raw.mode === 'pages') return startPages({ projectId, tokenId, raw, now })
     const definition = cleanDefinition(raw)
     sweep(now)
+    refuseBoardJob(projectId, definition.board.id)
     const boards = t.all('SELECT board_id FROM boards WHERE workspace_id = :ws AND project_id = :project', { project: projectId })
     if (!boards.some((row) => row.board_id === definition.board.id) && boards.length >= boardsPerProject) {
       throw new PushError(409, 'too_many_boards', `A project holds at most ${boardsPerProject} boards.`)
@@ -600,6 +602,17 @@ export function createPushStore(
 
   const boardFolder = (projectId, boardId) => path.join(projectDir(dataDir, t.workspaceId, projectId), boardId)
 
+  // A live board-job lock (<board>/capture.lock, src/board-job.js) in the
+  // board's folder: only the solo engine's in-process capture writes one on
+  // a server (src/hosted/solo/capture.js), so a team server never refuses here.
+  function refuseBoardJob(projectId, boardId) {
+    const job = readBoardJob({ outputDir: projectDir(dataDir, t.workspaceId, projectId) }, boardId)
+    if (!job) return
+    if (job.kind === 'capture')
+      throw new PushError(409, 'capture_running', 'A capture of this board is running on the engine. Push again when it finishes.')
+    throw new PushError(409, 'board_busy', boardJobBusyMessage(job.kind))
+  }
+
   // The workspace quota with `bytes` as the new size of this board.
   function checkQuota(projectId, boardId, bytes) {
     const others = t.get(
@@ -667,6 +680,10 @@ export function createPushStore(
         if (!JSON.parse(live.scopes).includes('push'))
           throw new PushError(403, 'missing_scope', 'This token does not have the "push" scope.')
       }
+      // In the write lock: a job that holds the board folder (the solo
+      // engine's capture) keeps it until it finishes, however the push's
+      // route was spelled.
+      refuseBoardJob(projectId, boardId)
       prepare(at)
       t.run("UPDATE pushes SET status = 'committed', finished_at = :at WHERE workspace_id = :ws AND id = :id", { id: push.id, at })
       // Inside the transaction: if the swap fails, the rows roll back too.
@@ -714,6 +731,7 @@ export function createPushStore(
   function startPages({ projectId, tokenId, raw, now }) {
     const boardId = String(raw.board || '')
     if (!ID_RE.test(boardId)) throw new PushError(400, 'invalid_board', 'Send { mode: "pages", board, pages }.')
+    refuseBoardJob(projectId, boardId)
     const row = t.get('SELECT definition FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
       project: projectId,
       board: boardId,

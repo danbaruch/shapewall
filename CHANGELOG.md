@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Solo engine (experimental): "Capture now" on the board and `recapture_pages` on the engine's `/mcp` capture in the engine
+  itself, from the live `shapewall.config.json`, straight into the board, with no push. Owner only (the board on this machine,
+  or a `push` token the owner made, used on this machine); the capture browser reaches the app's origin only, never the
+  engine, its live HTML origin or this machine's LAN and tailnet addresses. `--no-capture` and `--read-only` turn it off.
+  Team servers never capture. See docs/hosted.md, "The solo engine (experimental)".
 - Solo engine (experimental): the engine writes `.shapewall/events.jsonl` in the same line format as the local board and sends
   notifications as `serve` does, so `shapewall events`, bots and notification channels keep working. See
   [the event log](docs/notifications.md#the-event-log).

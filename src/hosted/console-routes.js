@@ -408,6 +408,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
     stepUp('data'),
     inProject,
     handle(async (req, res) => {
+      await req.app.locals.soloCapture?.cancel(req.project.id)
       req.projects.remove(req.project.id)
       auditOf(req, 'project_deleted', req.project.id, { name: req.project.name })
       res.json({ ok: true })
@@ -425,6 +426,8 @@ export function mountConsoleRoutes(consoleApi, deps) {
     stepUp('data'),
     inProject,
     handle(async (req, res) => {
+      // The solo engine: a capture of this board stops first, so nothing writes its folder after.
+      await req.app.locals.soloCapture?.cancel(req.project.id, String(req.params.bid || ''))
       const gone = req.projects.removeBoard(req.project.id, req.params.bid)
       auditOf(req, 'board_removed', `${req.project.id}/${gone.board}`, { project: req.project.name, comments: gone.comments })
       res.json({ ok: true, board: gone.board, comments: gone.comments, bytes: gone.bytes })

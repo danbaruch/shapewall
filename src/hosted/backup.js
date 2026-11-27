@@ -16,7 +16,11 @@
 // rename or unlink board files, never rewrite one, so the pin holds the very
 // files the snapshot's rows describe. The pin is copied into the backup after
 // the lock is released, so pushes and metadata writes keep working, and then
-// removed. A board the snapshot lists with no folder makes the backup
+// removed. The solo engine's in-process capture (src/hosted/solo/capture.js)
+// renames board files without that lock while it runs, so the backup waits
+// (busyWaitMs) while any board holds a live board-job lock
+// (<board>/capture.lock, src/board-job.js), and fails if it does not end; a
+// capture starts only once the lock is free of a backup's pin. A board the snapshot lists with no folder makes the backup
 // incomplete (`complete: false`, listed under files.skipped.missing): the
 // backup command and the restore drill both fail on it.
 // Open pushes have no staging files in the backup. Restore closes those rows.
@@ -37,6 +41,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { openDatabase, quietSqliteWarning } from './db.js'
 import { ID_PATTERNS } from './crypto.js'
 import { ID_RE } from '../config.js'
+import { readBoardJob } from '../board-job.js'
 
 export const BACKUP_FORMAT = 'shapewall-hosted-backup'
 const BACKUP_DIR_RE = /^shapewall-backup-\d{8}T\d{6}Z(?:-\d+)?$/
@@ -209,7 +214,25 @@ function copySmall(from, to) {
   return true
 }
 
-export async function backup({ dataDir, to, now = new Date(), keepDays = null, log = () => {} }) {
+// The first board (ws/project/board) with a live board-job lock, read under the write lock.
+function busyBoard(conn, source) {
+  for (const row of conn.prepare('SELECT workspace_id, project_id, board_id FROM boards').all()) {
+    if (!ID_PATTERNS.workspace.test(row.workspace_id) || !ID_PATTERNS.project.test(row.project_id) || !ID_RE.test(row.board_id)) continue
+    if (readBoardJob({ outputDir: path.join(source, 'files', row.workspace_id, row.project_id) }, row.board_id))
+      return `${row.workspace_id}/${row.project_id}/${row.board_id}`
+  }
+  return null
+}
+
+export async function backup({
+  dataDir,
+  to,
+  now = new Date(),
+  keepDays = null,
+  log = () => {},
+  busyWaitMs = 10 * 60_000,
+  busyPollMs = 2000,
+}) {
   const source = path.resolve(dataDir)
   const dbFile = path.join(source, 'shapewall.db')
   if (!fs.existsSync(dbFile)) throw new BackupError(`no hosted database at ${dbFile} (is --data right?)`)
@@ -252,7 +275,19 @@ export async function backup({ dataDir, to, now = new Date(), keepDays = null, l
         // write lock. Hold it for the snapshot and the pin of its board
         // folders (links, not copies); the files are copied after it is
         // released so the server's writes do not wait for the copy.
-        conn.exec('BEGIN IMMEDIATE')
+        // A capture running on a board (the solo engine) renames its files
+        // without this lock: wait for it to end.
+        const deadline = Date.now() + busyWaitMs
+        for (let told = false; ;) {
+          conn.exec('BEGIN IMMEDIATE')
+          const busy = busyBoard(conn, source)
+          if (!busy) break
+          conn.exec('ROLLBACK')
+          if (Date.now() >= deadline) throw new BackupError(`a capture of board ${busy} is still running; back up when it finishes`)
+          if (!told) log(`backup: waiting for the capture of board ${busy} to finish`)
+          told = true
+          await new Promise((resolve) => setTimeout(resolve, busyPollMs))
+        }
         const reader = await openRaw(dbFile, { readOnly: true })
         try {
           reader.prepare('VACUUM INTO ?').run(path.join(partial, 'shapewall.db'))

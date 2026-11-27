@@ -17,6 +17,8 @@
 //   batchFixes  batch fixes with the agent
 //   domFallback reading old captures' DOM (needs a separate usercontent origin)
 //   appUpdates  About and updates can check for and apply an update
+// (In-process capture, G3, turns on with the owner's /info allowCapture: true;
+// the engine also lists it as soloFeatures.capture.)
 export const SOLO_FEATURES = ['journeys', 'checksRun', 'batchFixes', 'domFallback', 'appUpdates']
 
 // The signed-in owner of a solo engine. Never a guest or a public visitor

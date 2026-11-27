@@ -3,6 +3,8 @@
 import { isIPv6 } from 'node:net'
 import express from 'express'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
+import * as z from 'zod'
+import { mcpInstructions } from '../mcp-instructions.js'
 import { HOSTED_COMPARE_MAX_PIXELS } from '../compare-captures.js'
 import { fitImage } from '../png.js'
 import { createRemoteMcpServer } from '../remote/remote-mcp.js'
@@ -95,6 +97,42 @@ export function hostedCompare(cleaner = null, { globalMax = 1, workspaceMax = 1 
   }
 }
 
+const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] })
+
+// recapture_pages on the solo engine's /mcp (G3, src/hosted/solo/capture.js):
+// listed only when the engine serves in-process capture and this request's
+// token is its owner's, used on this machine (app.locals.soloCapture.allowed).
+// A team server has no app.locals.soloCapture, so never lists it.
+function addEngineRecapture(server, soloCapture, req, boardIds) {
+  // The hand-in step says the engine captures (the remote server was made for a hosted endpoint that cannot).
+  if (server.server && '_instructions' in server.server)
+    server.server._instructions = mcpInstructions({ handIn: 'engine', hosted: true, github: false })
+  server.registerTool(
+    'recapture_pages',
+    {
+      title: 'Recapture pages',
+      description:
+        'Captures these pages again on this machine (every viewport, screenshot and live HTML) from the board baseUrl in the ' +
+        "project's shapewall.config.json, straight into the board, so it shows the new version. Every other page is left as it is. " +
+        'Returns when done.',
+      inputSchema: {
+        board: z.string().max(64).optional().describe('Board id (default: the first board of the project)'),
+        pageIds: z.array(z.string().max(64)).min(1).max(50),
+      },
+    },
+    async ({ board, pageIds }) => {
+      try {
+        const boardId = board || boardIds[0]
+        if (!boardId) throw new Error('This project has no board yet.')
+        return json(await soloCapture.recapture(req, { boardId, pageIds }))
+      } catch (error) {
+        const code = typeof error?.code === 'string' && error.statusCode >= 400 && error.statusCode < 500 ? `${error.code}: ` : ''
+        return { content: [{ type: 'text', text: `${code}${error.message || String(error)}` }], isError: true }
+      }
+    },
+  )
+}
+
 export function mountMcpHttp(app, { tokenAuth, origin, cleaner = null, now = () => Date.now() }) {
   const compareFor = hostedCompare(cleaner)
   const router = express.Router()
@@ -143,6 +181,15 @@ export function mountMcpHttp(app, { tokenAuth, origin, cleaner = null, now = () 
         now,
         compare: compareFor({ tokenId: req.token.id, workspaceId: req.t?.workspaceId ?? null }),
       })
+      const soloCapture = app.locals.soloCapture
+      if (soloCapture?.allowed(req)) {
+        const boardIds = req.t
+          .all('SELECT board_id FROM boards WHERE workspace_id = :ws AND project_id = :project ORDER BY created_at, board_id', {
+            project: req.project.id,
+          })
+          .map((row) => row.board_id)
+        addEngineRecapture(server, soloCapture, req, boardIds)
+      }
       transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
       await server.connect(transport)
       res.once('close', () => {

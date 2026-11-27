@@ -593,6 +593,8 @@ export function createHostedApp({
         agentsFor,
         localGate: soloLocal,
         boardApi: soloBoardApi,
+        // The workspace's storage quota (the engine's capture counts toward it).
+        quotaOf: (workspaceId) => workspaceQuota ?? quotas.of(workspaceId).storageBytes,
       })
     : null
 
