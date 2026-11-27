@@ -12,6 +12,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
   or a `push` token the owner made, used on this machine); the capture browser reaches the app's origin only, never the
   engine, its live HTML origin or this machine's LAN and tailnet addresses. `--no-capture` and `--read-only` turn it off.
   Team servers never capture. See docs/hosted.md, "The solo engine (experimental)".
+- Solo engine (experimental): the owner makes, edits and deletes the board's own journeys from the board, as on a local
+  board, with the same validation against the config file's pages. They are stored in the board's `journeys.json` in the
+  engine's folder; journeys from the config stay read only. Team servers keep journeys read only. See
+  [Journeys made on the board](docs/journeys.md#journeys-made-on-the-board).
 - Solo engine (experimental): the engine writes `.shapewall/events.jsonl` in the same line format as the local board and sends
   notifications as `serve` does, so `shapewall events`, bots and notification channels keep working. See
   [the event log](docs/notifications.md#the-event-log).

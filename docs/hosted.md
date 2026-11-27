@@ -727,6 +727,11 @@ shapewall serve --engine hosted --open
   not hold "Capture now" back: the capture ends it. A workspace over its storage quota does not capture, and each capture
   counts toward it. Removing the board while it captures stops the capture first. `shapewall hosted backup` waits while a
   capture runs. A team server never captures.
+  comments), `--no-capture`.
+- **Journeys.** You make, edit and delete the board's own journeys from the board, as on a local board, with the same checks
+  against the config file's pages: they go to the board's `journeys.json` in the engine's folder. Journeys from
+  `shapewall.config.json` stay read only (change them in the file). Only you, signed in on this machine, edit them; with
+  `--read-only` nobody does. See [Journeys made on the board](journeys.md#journeys-made-on-the-board).
 - **A migration.** While `shapewall migrate` runs, or after one stopped midway, the engine, `shapewall serve` and
   `shapewall watch` do not start. After a migration, the local `serve` and `watch` refuse the boards that moved to the engine.
 - **Updates.** With `SHAPEWALL_UPDATE_RESTART=1` (set by a managed install), a finished update stops the engine with exit code

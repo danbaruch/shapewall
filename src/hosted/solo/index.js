@@ -29,12 +29,14 @@
 // Mounted so far: signin.js and config.js (G1, G2), info.js (`solo` and
 // `soloFeatures` on the board's /info, G16), events.js (events.jsonl and
 // notifications, G8), update.js (self-update, G10), capture.js (in-process
-// capture from the board and recapture_pages on /mcp, G3). A surface the board turns on (client/src/board/solo.js)
+// capture from the board and recapture_pages on /mcp, G3), journeys.js
+// (journey editing, G5). A surface the board turns on (client/src/board/solo.js)
 // sets its flag in `features`.
 import { mountSoloCapture } from './capture.js'
 import { createSoloBoards } from './config.js'
 import { mountSoloEvents } from './events.js'
 import { mountSoloInfo } from './info.js'
+import { mountSoloJourneys } from './journeys.js'
 import { ensureSoloOwner, mountSoloSignIn } from './signin.js'
 import { mountSoloUpdate } from './update.js'
 
@@ -74,6 +76,8 @@ export function mountSolo(app, deps) {
   // In-process capture and recapture_pages on /mcp (G3): sets features.capture.
   const capture = mountSoloCapture(app, soloDeps, features)
   if (capture) closers.push(() => capture.close())
+  // Journey editing on the board (G5): sets features.journeys.
+  mountSoloJourneys(app, soloDeps, features)
   const update = mountSoloUpdate(app, soloDeps)
   if (update) {
     features.appUpdates = true
