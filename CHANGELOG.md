@@ -12,6 +12,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
   or a `push` token the owner made, used on this machine); the capture browser reaches the app's origin only, never the
   engine, its live HTML origin or this machine's LAN and tailnet addresses. `--no-capture` and `--read-only` turn it off.
   Team servers never capture. See docs/hosted.md, "The solo engine (experimental)".
+- Solo engine (experimental): **Run checks** in the board's Checks panel runs the page checks in the engine itself, from the
+  live `shapewall.config.json`, and the SEO tab shows that run's search previews, as on a local board. Owner only, on this
+  machine; the check browser reaches the app's origin only, like the capture browser. One job at a time on the engine
+  (checks and captures wait for each other); `--read-only` and `--no-capture` turn runs off. Team servers never run checks.
+  See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
 - Solo engine (experimental): the owner makes, edits and deletes the board's own journeys from the board, as on a local
   board, with the same validation against the config file's pages. They are stored in the board's `journeys.json` in the
   engine's folder; journeys from the config stay read only. Team servers keep journeys read only. See

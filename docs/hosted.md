@@ -780,6 +780,15 @@ shapewall serve --engine hosted --open
   counts toward it. Removing the board while it captures stops the capture first. `shapewall hosted backup` waits while a
   capture runs. A team server never captures.
   comments), `--no-capture`.
+- **Checks.** **Run checks** in the board's Checks panel runs `shapewall checks run` in the engine itself, from the live
+  `shapewall.config.json` (pages, auth, actions and setup as the file says now, `checks.seo` included), and the reports go
+  straight into the board, with no push. The SEO tab shows the search previews of the engine's own runs, as on a local
+  board. The default environment only, for now. Only you, signed in on this machine, start or stop a run (from the board's
+  own page); with `--read-only` or `--no-capture` the panel explains that runs are off. The check browser reaches the app's
+  origin only, exactly as the capture browser does (never the engine, its live HTML name, a debugging port, or this
+  machine's LAN or tailnet addresses; other origins the pages load from are refused). One job runs at a time on the
+  engine: checks wait for a capture and a capture waits for checks, a push of the board waits until the run ends, and
+  removing the board stops its run first. A team server never runs checks: it shows the reports a push brought.
 - **Journeys.** You make, edit and delete the board's own journeys from the board, as on a local board, with the same checks
   against the config file's pages: they go to the board's `journeys.json` in the engine's folder. Journeys from
   `shapewall.config.json` stay read only (change them in the file). Only you, signed in on this machine, edit them; with
