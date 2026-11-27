@@ -70,6 +70,7 @@ function folderBytes(dir) {
 export function createSoloCapture({ db, dataDir, publicOrigin, log = () => {}, run = null, chromium = null, lookup, interfaces }) {
   const enginePort = Number(new URL(publicOrigin).port) || (new URL(publicOrigin).protocol === 'https:' ? 443 : 80)
   let current = null
+  let closed = false
 
   // The bound project, the live config with the engine's board folder as its
   // output, and the file's board. Throws HttpError.
@@ -129,11 +130,19 @@ export function createSoloCapture({ db, dataDir, publicOrigin, log = () => {}, r
     if (openPush(bound, board.id)) throw new HttpError(409, 'push_running', 'A push of this board is open. Capture when it finishes.')
     const only = pages ? [...new Set(pages)] : null
     // Taken before the first await: a second start waits for nothing.
+    if (closed) throw new HttpError(503, 'engine_stopping', 'The engine is stopping.')
     const slot = { boardId: board.id, egress: null, done: null }
     current = slot
+    let runner
     try {
       const app = await pinAppOrigin(board.baseUrl, { engine: { origins: [publicOrigin], port: enginePort }, lookup, interfaces })
+      runner = run || (await import('../../capture/capture.js')).runCapture
       slot.egress = await captureEgress(app, { real: chromium })
+      // Stopped while the proxy started: nothing runs.
+      if (closed) {
+        await slot.egress.close().catch(() => {})
+        throw new HttpError(503, 'engine_stopping', 'The engine is stopping.')
+      }
     } catch (error) {
       current = null
       throw error
@@ -144,7 +153,6 @@ export function createSoloCapture({ db, dataDir, publicOrigin, log = () => {}, r
       if (lines.length > LOG_LINES) lines.shift()
     }
     note(`Capturing from ${board.baseUrl} on the engine (only ${new URL(board.baseUrl).origin} is reachable).`)
-    const runner = run || (await import('../../capture/capture.js')).runCapture
     slot.done = (async () => {
       try {
         const result = await runner({ config, boardId: board.id, only, log: note, chromium: slot.egress.chromium, checkExternal: false })
@@ -219,6 +227,7 @@ export function createSoloCapture({ db, dataDir, publicOrigin, log = () => {}, r
     recapture,
     running: () => (current ? current.boardId : null),
     async close() {
+      closed = true
       const slot = current
       if (!slot) return
       await slot.egress?.close().catch(() => {})

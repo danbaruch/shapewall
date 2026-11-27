@@ -373,3 +373,24 @@ test('recapture_pages on /mcp: listed for the owner’s push token here, waits f
   assert.equal((await names(token, { Host: `localhost:${hosted.port}` })).includes('recapture_pages'), false)
   assert.equal(stub.calls.length, 1)
 })
+
+test('stopping the engine closes a running capture’s browser and waits for the run to end', async () => {
+  let closedBrowser = null
+  const browserClosed = new Promise((resolve) => (closedBrowser = resolve))
+  const real = {
+    executablePath: () => '/bin/true',
+    launch: async () => ({ close: async () => closedBrowser(), on: () => {} }),
+  }
+  let ended = false
+  const run = async (options) => {
+    await options.chromium.launch({ args: [] })
+    await browserClosed
+    ended = true
+    throw new Error('the browser closed')
+  }
+  const { hosted, browser, base } = await startSolo('solo-capture-stop', { solo: { capture: { run, chromium: real } } })
+  assert.equal((await browser.post(`${base}/boards/sample/capture`, {})).status, 202)
+  servers.splice(servers.indexOf(hosted), 1)
+  await hosted.close()
+  assert.equal(ended, true)
+})
