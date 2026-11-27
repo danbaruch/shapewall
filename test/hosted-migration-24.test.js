@@ -3,15 +3,17 @@
 // solo_binding table. Up on a new database, up on a version 23 database with
 // data in it (every row kept, nothing run twice), the checks that hold the
 // new values in, and the documented rollback (docs/hosted.md) back to 23.
-// Then retention, which now counts each environment's own comments.
+// Then retention (every pinned version stays, whatever the environment), a
+// passkey check on a local session, and the solo binding's writer.
 
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
 import { openDatabase, quietSqliteWarning } from '../src/hosted/db.js'
-import { planBoardRetention, referencedVersions, versionedEnvironments } from '../src/hosted/retention.js'
-import { tenant } from '../src/hosted/tenancy.js'
+import { runRetention } from '../src/hosted/retention.js'
+import { SoloBindingError, bindSoloProject, readSoloBinding } from '../src/hosted/solo/binding.js'
+import { reauth, signUp, startHostedServer } from './hosted-helpers.js'
 import { tempDir } from './helpers.js'
 
 quietSqliteWarning()
@@ -235,58 +237,126 @@ test('migration 24 checks: a local session has no tailnet login and no passkey c
   }
 })
 
-test('retention counts each environment: only the default environment keeps versions in versions/', async () => {
-  const db = await openDatabase(path.join(tempDir('migration-24-retention'), 'shapewall.db'))
-  try {
-    db.exec(`
-      INSERT INTO workspaces (id, workspace_id, name, created_by, created_at) VALUES ('${WS}', '${WS}', 'W', NULL, '${AT}');
-      INSERT INTO projects (id, workspace_id, slug, name, created_by, created_at) VALUES ('prj_1', '${WS}', 'site', 'Site', NULL, '${AT}');
-    `)
-    const comment = (number, environment, version, replies = '[]') =>
-      db
-        .prepare(
-          `INSERT INTO comments (workspace_id, project_id, board_id, number, page_id, viewport, x, y, body, author, capture_version, status, replies, created_at, updated_at, environment)
-           VALUES (?, 'prj_1', 'sample', ?, 'home', 'desktop', 0, 0, 'x', 'Ada', ?, 'open', ?, ?, ?, ?)`,
-        )
-        .run(WS, number, version, replies, AT, AT, environment)
-    comment(1, 'default', 'v-default')
-    comment(2, 'local', 'v-local')
-    comment(3, 'staging', 'v-staging')
-    comment(4, 'staging', null, '[{"id":"r1","body":"","drawing":{"captureVersion":"v-staging-drawing"}}]')
-    comment(5, 'local', null, '[{"id":"r1","body":"","drawing":{"captureVersion":"v-local-drawing"}}]')
-    const t = tenant(db, WS)
-    const key = (version) => `home\u0000desktop\u0000${version}`
+// A comment's capture_version always points into versions/ (it is only set
+// on the default environment at the time), so retention keeps it whatever
+// the comment's environment says now: reordered or removed environments
+// never cost a comment its before and after (review of PR #50, F1).
+for (const [label, environments, stored] of [
+  ['the environment was removed from the config', [{ id: 'production' }, { id: 'staging' }], 'preview'],
+  ['the environments were reordered', [{ id: 'staging' }, { id: 'production' }], 'production'],
+]) {
+  test(`retention keeps a version a comment pins when ${label}`, async () => {
+    const dataDir = tempDir(`migration-24-retention-${stored}`)
+    const db = await openDatabase(path.join(dataDir, 'shapewall.db'))
+    const project = 'pr_' + 'b'.repeat(24)
+    const versions = ['20261101T100000000Z-aaaa', '20261102T100000000Z-bbbb', '20261103T100000000Z-cccc', '20261104T100000000Z-dddd']
+    try {
+      const definition = {
+        title: 'Site',
+        viewports: [{ name: 'desktop', width: 1280, height: 800 }],
+        board: { id: 'sample', environments },
+      }
+      db.prepare('INSERT INTO workspaces (id, workspace_id, name, created_by, created_at) VALUES (?, ?, ?, NULL, ?)').run(WS, WS, 'W', AT)
+      db.prepare('INSERT INTO projects (id, workspace_id, slug, name, created_by, created_at) VALUES (?, ?, ?, ?, NULL, ?)').run(
+        project,
+        WS,
+        'site',
+        'Site',
+        AT,
+      )
+      db.prepare("INSERT INTO boards (workspace_id, project_id, board_id, definition, created_at) VALUES (?, ?, 'sample', ?, ?)").run(
+        WS,
+        project,
+        JSON.stringify(definition),
+        AT,
+      )
+      const dir = path.join(dataDir, 'files', WS, project, 'sample', 'versions')
+      fs.mkdirSync(dir, { recursive: true })
+      for (const version of versions) fs.writeFileSync(path.join(dir, `home.desktop.${version}.png`), 'x')
+      db.prepare(
+        `INSERT INTO comments (workspace_id, project_id, board_id, number, page_id, viewport, x, y, body, author, capture_version, status, replies, created_at, updated_at, environment)
+         VALUES (?, ?, 'sample', 1, 'home', 'desktop', 0, 0, 'keep my before and after', 'Ada', ?, 'open', '[]', ?, ?, ?)`,
+      ).run(WS, project, versions[0], AT, AT, stored)
 
-    // Every comment, as push.js asks (it carries what any comment points at).
-    assert.deepEqual(
-      [...referencedVersions(t, 'prj_1', 'sample')].sort(),
-      ['v-default', 'v-local', 'v-local-drawing', 'v-staging', 'v-staging-drawing'].map(key).sort(),
-    )
-    // A team board: one environment, 'default'.
-    const team = { boards: [{ id: 'sample', environments: [{ id: 'default' }] }] }
-    assert.deepEqual(versionedEnvironments(team, 'sample'), ['default'])
-    assert.deepEqual(
-      [...referencedVersions(t, 'prj_1', 'sample', { environments: versionedEnvironments(team, 'sample') })],
-      [key('v-default')],
-    )
-    // A solo board whose first environment is 'local': its comments and 'default' ones.
-    const solo = { boards: [{ id: 'sample', environments: [{ id: 'local' }, { id: 'staging' }] }] }
-    assert.deepEqual(versionedEnvironments(solo, 'sample'), ['default', 'local'])
-    const kept = referencedVersions(t, 'prj_1', 'sample', { environments: versionedEnvironments(solo, 'sample') })
-    assert.deepEqual([...kept].sort(), ['v-default', 'v-local', 'v-local-drawing'].map(key).sort())
-
-    // The plan prunes what no comment of that environment points at.
-    const listed = {
-      home: {
-        desktop: ['v-z', 'v-staging', 'v-local', 'v-default'].map((version) => ({
-          version,
-          file: `home.desktop.${version}.png`,
-          thumb: null,
-          live: null,
-        })),
-      },
+      const result = runRetention({ db, dataDir })
+      assert.equal(fs.existsSync(path.join(dir, `home.desktop.${versions[0]}.png`)), true, 'the pinned version stays')
+      assert.equal(fs.existsSync(path.join(dir, `home.desktop.${versions[1]}.png`)), false, 'an unpinned older one goes')
+      assert.equal(result.files, 1)
+    } finally {
+      db.close()
     }
-    assert.deepEqual(planBoardRetention(listed, kept, 1), ['home.desktop.v-staging.png'])
+  })
+}
+
+// A passkey that confirms a local session makes it a passkey session in one
+// statement, so the row never breaks the CHECK that keeps a local session
+// unverified (review of PR #50, F2).
+test('a passkey check on a local session turns it into a passkey session', async () => {
+  const hosted = await startHostedServer('migration-24-reauth')
+  try {
+    const owner = await signUp(hosted, { handle: 'ada' })
+    // The session as a solo sign-in link would make it.
+    hosted.db
+      .prepare("UPDATE sessions SET via = 'local', verified_at = ?, admin_seen_at = NULL WHERE user_id = ?")
+      .run(NEVER, owner.user.id)
+    const session = () => hosted.db.prepare('SELECT via, verified_at, admin_seen_at FROM sessions WHERE user_id = ?').get(owner.user.id)
+    assert.equal(session().via, 'local')
+    await reauth(owner)
+    const after = session()
+    assert.equal(after.via, 'passkey')
+    assert.notEqual(after.verified_at, NEVER)
+    assert.equal(after.admin_seen_at, after.verified_at)
+    // A passkey session from then on: the next check is the ordinary one.
+    await reauth(owner)
+    assert.equal(session().via, 'passkey')
+  } finally {
+    await hosted.close()
+  }
+})
+
+// The binding's workspace is its project's, and its board ids are ids
+// (review of PR #50, F4).
+test('the solo binding takes its workspace from the project and stores only board ids', async () => {
+  const db = await openDatabase(path.join(tempDir('migration-24-binding'), 'shapewall.db'))
+  const other = 'ws_' + 'c'.repeat(24)
+  try {
+    for (const ws of [WS, other])
+      db.prepare('INSERT INTO workspaces (id, workspace_id, name, created_by, created_at) VALUES (?, ?, ?, NULL, ?)').run(ws, ws, 'W', AT)
+    db.prepare('INSERT INTO projects (id, workspace_id, slug, name, created_by, created_at) VALUES (?, ?, ?, ?, NULL, ?)').run(
+      'prj_1',
+      other,
+      'site',
+      'Site',
+      AT,
+    )
+    assert.equal(readSoloBinding(db), null)
+    const config = '/home/ada/site/shapewall.config.json'
+    const bound = bindSoloProject(db, { projectId: 'prj_1', configPath: config, boardIds: ['sample', 'app'], now: () => new Date(AT) })
+    assert.deepEqual(bound, {
+      workspaceId: other,
+      projectId: 'prj_1',
+      configPath: config,
+      boardIds: ['sample', 'app'],
+      boundAt: AT,
+      updatedAt: AT,
+    })
+    for (const boardIds of [[1], [{ a: '../' }], ['../x'], ['Sample'], 'sample'])
+      assert.throws(
+        () => bindSoloProject(db, { projectId: 'prj_1', configPath: config, boardIds }),
+        SoloBindingError,
+        JSON.stringify(boardIds),
+      )
+    assert.throws(() => bindSoloProject(db, { projectId: 'prj_1', configPath: 'shapewall.config.json' }), SoloBindingError)
+    assert.throws(() => bindSoloProject(db, { projectId: 'prj_gone', configPath: config }), SoloBindingError)
+    // A refresh keeps when it was bound.
+    const later = '2026-11-02T00:00:00.000Z'
+    const refreshed = bindSoloProject(db, { projectId: 'prj_1', configPath: config, boardIds: ['sample'], now: () => new Date(later) })
+    assert.deepEqual([refreshed.boundAt, refreshed.updatedAt, refreshed.boardIds], [AT, later, ['sample']])
+    // A row written by hand with another workspace or non-id board ids is refused on read.
+    db.prepare('UPDATE solo_binding SET workspace_id = ?').run(WS)
+    assert.throws(() => readSoloBinding(db), SoloBindingError)
+    db.prepare('UPDATE solo_binding SET workspace_id = ?, board_ids = ?').run(other, '[1, {"a": "../"}]')
+    assert.throws(() => readSoloBinding(db), SoloBindingError)
   } finally {
     db.close()
   }

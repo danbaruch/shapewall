@@ -866,15 +866,17 @@ const MIGRATIONS = [
   //    made on, as the board names it (an id like config.js ID_RE). A hosted
   //    push keeps one environment, 'default' (src/hosted/push.js), so every
   //    existing comment and every comment a team board makes is 'default'; a
-  //    solo board keeps the project's real environments. Retention keeps the
-  //    versions of each environment's own comments (src/hosted/retention.js).
+  //    solo board keeps the project's real environments. Retention does not
+  //    read it: a comment's capture_version is only ever a version of the
+  //    default environment, so every pinned version stays.
   // 2. sessions.via gains 'local': the solo owner's sign-in through the
   //    one-time link from the terminal (no passkey, no tailnet). A local
   //    session never carries a tailnet login and never counts as a passkey
   //    check: its verified_at must stay the "never verified" mark
-  //    (accounts/auth.js NEVER_VERIFIED), so a step-up asks for a passkey on
-  //    this build and on an older one that reads the row (src/hosted/auth.js
-  //    passedPasskey). Same rebuild as 18: SQLite cannot change a CHECK in
+  //    (accounts/auth.js NEVER_VERIFIED) on this build and on an older one
+  //    that reads the row (src/hosted/auth.js passedPasskey). A passkey that
+  //    confirms it (/auth/reauth/verify) makes it a passkey session in the
+  //    same UPDATE. Same rebuild as 18: SQLite cannot change a CHECK in
   //    place, so new table, copy, drop, rename, indexes again, inside the
   //    ledger's transaction. Every row is copied as it is, except (as in
   //    18) a session whose account is gone, which can never be read and
@@ -884,6 +886,8 @@ const MIGRATIONS = [
   //    the board ids that file declared when it was last read. At most one
   //    row (id = 1); a data folder with a row is a solo one, so a team
   //    server can tell it apart. Removing the project removes the binding.
+  //    Its one writer (src/hosted/solo/binding.js) takes the workspace from
+  //    the project's row and stores only valid board ids.
   `
   ALTER TABLE comments ADD COLUMN environment TEXT NOT NULL DEFAULT 'default'
     CHECK (length(environment) BETWEEN 1 AND 64 AND environment NOT GLOB '*[^a-z0-9-]*' AND environment NOT GLOB '-*');

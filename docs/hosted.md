@@ -2943,20 +2943,26 @@ for one project on your own machine). On a team server nothing it does changes w
 
 - column `comments.environment`: the id of the board environment a comment was made on. A push keeps one environment,
   `default`, so every existing comment and every new one on a team board is `default`. A solo board keeps the project's own
-  environments. Retention now keeps an older version for the comments of the environment it belongs to: `versions/` holds the
-  board's first environment's versions, so only comments on that environment (or `default`) keep a version there.
+  environments. Retention is unchanged: every older version a comment points at stays, whatever environment the comment is on
+  (a comment only points at a version made on the board's default environment).
 - `sessions.via` may now be `local` as well: the solo owner's sign-in through a one-time link from the terminal, with no passkey
   and no tailnet login. A check keeps `local` to rows without a `tailnet_login` and whose `verified_at` is
   `1970-01-01T00:00:00.000Z` (the mark for "no passkey was checked"), so a local session never counts as a passkey check, on
-  this build or on an older one that reads the row. No team server makes one.
+  this build or on an older one that reads the row. When a passkey of the account confirms a local session, it becomes a
+  `passkey` session in the same write. No team server makes one.
 - table `solo_binding`: on a solo data folder, the one project it serves, the absolute path of the `shapewall.config.json` it
   reads, and the board ids that file declared when it was last read. At most one row; a team server's is empty. Removing the
-  project removes the row.
+  project removes the row. Its workspace is always its project's, and only valid board ids are stored
+  (`src/hosted/solo/binding.js`, the one writer).
 
 The sessions part is a rebuild, like migration 18 (SQLite cannot change a `CHECK` in place): a new `sessions` table, every row
 copied as it is, the old one dropped, the new one renamed and its two indexes made again, all in the same transaction as the
 ledger entry. Signed-in browsers stay signed in. As in 18, a session whose account no longer exists is not copied. The notes
 under migration 18 about a hand-made view or trigger on `sessions` apply here too.
+
+Stop any `shapewall hosted admin` job (a retention run, a backup) before the first 1.5.0 start. The migration needs the
+database's write lock and waits only 5 seconds for it: if a job holds it, the server does not start (nothing is half applied)
+and you start it again once the job is done.
 
 For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running the previous build on the
 upgraded database of a team server also works with no change to it: it ignores the column and the table, and never writes

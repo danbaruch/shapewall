@@ -495,6 +495,18 @@ export function mountAuthRoutes(authRouter, deps) {
           'This passkey was added with a recovery code; it can confirm this 24 hours after it was added. Use another passkey.',
         )
       }
+      if (req.auth.session.via === 'local') {
+        // A local session (the solo owner's terminal link, migration 24) may
+        // never carry a passkey check (a CHECK keeps its verified_at at the
+        // never-verified mark), so a passkey that confirms it turns it into a
+        // passkey session in the same statement: the row is never invalid.
+        const at = iso()
+        q.run("UPDATE sessions SET via = 'passkey', verified_at = :at, admin_seen_at = :at WHERE token_hash = :hash AND via = 'local'", {
+          at,
+          hash: req.auth.session.hash,
+        })
+        return res.json({ ok: true })
+      }
       if (req.auth.session.via === 'recovery') {
         // A recovery session becomes a passkey session once a trusted passkey confirms it.
         q.run("UPDATE sessions SET via = 'passkey' WHERE token_hash = :hash", { hash: req.auth.session.hash })
