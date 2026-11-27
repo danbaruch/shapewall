@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { STATIC, api } from '../../lib/api'
 import { useResource } from '../../lib/hooks'
+import { hostedOrSolo } from '../solo'
 
 export const CHECKS_TABS = ['issues', 'pages', 'seo', 'performance', 'history']
 const tabParam = (tab) => (CHECKS_TABS.includes(tab) && tab !== 'issues' ? tab : null)
@@ -23,8 +24,9 @@ export function useChecks({ boardId, info, params, updateParams, pages }) {
   // Search previews live only on the installation that ran the checks; a
   // hosted board or an export has none and the SEO tab shows issues only.
   const seoQuery = useResource(canChecks && checksOpen && !STATIC ? `${base}/seo${envQuery}` : null)
-  // Only a local board can start a run; hosted boards never execute checks.
-  const local = canChecks && !STATIC && !info?.hosted
+  // Only a local board (or the solo engine, once it runs checks) can start a
+  // run; team hosted boards never execute checks.
+  const local = canChecks && !STATIC && hostedOrSolo(info, 'checksRun')
   const [runPolling, setRunPolling] = useState(false)
   const runQuery = useResource(local && checksOpen ? `${base}/run` : null, { pollMs: runPolling ? 1500 : 0 })
   const run = runQuery.data?.run || null

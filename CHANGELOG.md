@@ -10,6 +10,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Solo engine (experimental): the engine writes `.shapewall/events.jsonl` in the same line format as the local board and sends
   notifications as `serve` does, so `shapewall events`, bots and notification channels keep working. See
   [the event log](docs/notifications.md#the-event-log).
+- Solo engine (experimental): the board's `/info` says `solo: true` and lists the local-only features the engine serves
+  (`soloFeatures`). The board turns those on for the engine's owner only (journey editing, checks runs, batch fixes, the old
+  captures' DOM fallback, the capture hint in the empty state), each once the engine serves it. Team servers never send
+  `solo` and keep their behaviour.
 
 ### Fixed
 

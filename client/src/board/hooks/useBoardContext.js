@@ -33,7 +33,7 @@ export function useBoardContext(input) {
     commentMode,
     canComment,
     wide,
-    hosted,
+    domFallback,
     imageVersion,
     pinsByTarget,
     me,
@@ -159,8 +159,9 @@ export function useBoardContext(input) {
       elementsUrl: (kind, file, version) => elementsUrl(boardId, kind, file, version || imageVersion),
       // Captures from before element maps: only the local board may still
       // read their DOM (same-origin frame). Hosted boards, static exports and
-      // the demo frame every live page with an opaque origin.
-      domFallback: !STATIC && !DEMO && !hosted,
+      // the demo frame every live page with an opaque origin. The solo engine
+      // may, once it serves live pages from an origin of their own.
+      domFallback: !STATIC && !DEMO && domFallback !== false,
       setLiveReady,
       // The pins the list shows on a frame. The open thread keeps its pin even
       // when the filter hides it (just resolved): the frame adds that one
@@ -201,7 +202,7 @@ export function useBoardContext(input) {
       data?.environments,
       data?.manifest,
       data?.versions,
-      hosted,
+      domFallback,
       imageVersion,
       journeyView,
       me,

@@ -13,6 +13,7 @@ import { rememberAgents } from './lib/agentIdentity'
 import { setSettingsCommand } from './settings/SettingsHint'
 import { PairingScreen, DevicesPanel } from './pairing/Pairing'
 import { DemoResetDialog, DemoShareProblem } from './components/demo-banner'
+import { capturesByPush } from './board/solo'
 const BuzzDialog = lazy(() => import('./buzz/BuzzDialog'))
 
 const REMOTE = !DEMO && typeof document !== 'undefined' && Boolean(document.querySelector('meta[name="shapewall-remote"]'))
@@ -102,7 +103,7 @@ export default function App() {
     return (
       <div className="flex h-full bg-sunken">
         <EmptyState size="lg" icon={LayoutDashboard} title="No boards yet">
-          {info.data?.hosted ? (
+          {capturesByPush(info.data) ? (
             <>
               Capture your app locally, then run <code className="font-mono text-ui text-fg">shapewall push</code> with a project token.
             </>
