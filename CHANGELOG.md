@@ -5,6 +5,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+
+- Solo engine (experimental): the engine writes `.shapewall/events.jsonl` in the same line format as the local board and sends
+  notifications as `serve` does, so `shapewall events`, bots and notification channels keep working. See
+  [the event log](docs/notifications.md#the-event-log).
+
 ### Fixed
 
 - Hosted boards: opening Checks no longer gets a 404 for the SEO tab. The board answers with no search previews (they stay on
