@@ -26,6 +26,9 @@
 // config file (G1, G2). The surfaces after it get the owner's workspace and
 // project (solo.workspaceId, solo.projectId, solo.boardUrl).
 //
+// machine-tokens.js makes the owner's command-line token at every start
+// (cli.token in the data folder; G15) and the board's own agent's (R2).
+//
 // Mounted so far: signin.js and config.js (G1, G2), info.js (`solo` and
 // `soloFeatures` on the board's /info, G16), events.js (events.jsonl and
 // notifications, G8), update.js (self-update, G10). A surface the board turns on (client/src/board/solo.js)
@@ -35,6 +38,7 @@ import { mountSoloEvents } from './events.js'
 import { mountSoloInfo } from './info.js'
 import { ensureSoloOwner, mountSoloSignIn } from './signin.js'
 import { mountSoloUpdate } from './update.js'
+import { mintMachineToken, retireMachineTokens } from './machine-tokens.js'
 
 function mountOwner(app, deps, closers) {
   const solo = deps.solo
@@ -58,7 +62,15 @@ function mountOwner(app, deps, closers) {
     next()
   })
   const boardUrl = solo.boardUrl || `${deps.publicOrigin}/w/${owner.workspaceId}/p/${owner.projectId}/`
-  app.locals.solo = { owner, boardUrl, boards }
+  // The owner's command line in the project folder (G15): a token of its own, new each start, gone at stop.
+  // `watch` takes work, so it is an agent with a token of its own (machine-tokens.js).
+  const tokenFiles = {}
+  if (solo.machineTokens !== false) {
+    closers.push(() => retireMachineTokens(deps.db, { dataDir: deps.dataDir, owner }))
+    for (const which of ['cli', 'watch'])
+      tokenFiles[which] = mintMachineToken(deps.db, { dataDir: deps.dataDir, owner, which, now: deps.now }).file
+  }
+  app.locals.solo = { owner, boardUrl, boards, tokenFiles }
   return { ...deps, solo: { ...solo, workspaceId: owner.workspaceId, projectId: owner.projectId, boardUrl } }
 }
 

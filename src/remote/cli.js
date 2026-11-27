@@ -6,7 +6,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { portableChecks } from '../checks/transport.js'
 import { getBoard, loadConfig } from '../config.js'
-import { formatFeedback, formatFeedbackForAgent, remoteBoardRef, untrustedJson } from '../feedback.js'
+import {
+  formatFeedback,
+  formatFeedbackForAgent,
+  formatFeedbackItem,
+  formatFeedbackItemForAgent,
+  remoteBoardRef,
+  untrustedJson,
+} from '../feedback.js'
 import { AGENT_STATUSES, boardDir, readManifest, readVariants } from '../store.js'
 import { createRemote, pushDefinition, pushFiles, readCaptureFile, remoteSettings } from './remote.js'
 import { safeOut, terminalSafe } from './terminal.js'
@@ -204,6 +211,28 @@ export async function remoteComments(positional, flags, print) {
   const id = positional[1]
   // A share link guest's comment needs --include-guests here too.
   const guests = Boolean(flags['include-guests'])
+  if (action === 'get' || action === 'show') {
+    if (!id) throw new Error('usage: shapewall comments get ID [--json] [--for-agent] --remote URL')
+    const answer = await remote.comment(boardId, id, { guests })
+    if (flags['for-agent']) out(formatFeedbackItemForAgent(answer.comment, boardId))
+    else if (flags.json) out(JSON.stringify(untrustedJson({ board: answer.board, comment: answer.comment }), null, 2))
+    else out(formatFeedbackItem(answer.comment).join('\n'))
+    return
+  }
+  if (action === 'add') {
+    const page = typeof flags.page === 'string' ? flags.page.trim() : ''
+    const body = typeof flags.body === 'string' ? flags.body : ''
+    if (!page || !body.trim()) throw new Error('usage: shapewall comments add --page ID --body TEXT [--viewport NAME] --remote URL')
+    if (flags.selector !== undefined || flags.author !== undefined)
+      throw new Error("comments add --remote takes --page, --body and --viewport (the server signs it with the token's name).")
+    const result = await remote.addComment(boardId, {
+      page,
+      body,
+      viewport: typeof flags.viewport === 'string' ? flags.viewport : undefined,
+    })
+    out(flags.json ? mutationJson(boardId, result) : `Added #${result.comment.id} on ${page}`)
+    return
+  }
   if (action === 'resolve' || action === 'reopen') {
     if (!id) throw new Error(`usage: shapewall comments ${action} ID --remote URL`)
     const result =

@@ -24,7 +24,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { loadConfig } from '../../config.js'
 import { DEFAULT_PORT } from '../../serve-state.js'
-import { acquireLock, isLockLive, readLock, releaseLock } from '../../lock.js'
+import { acquireLock, isLockLive, processStartTime, readLock, releaseLock } from '../../lock.js'
 import { assertMigrationAllows, prepareEngineFolder } from '../../engine-folder.js'
 import { localUserName } from '../../server/local-user.js'
 import { openBrowser } from '../../cli/open.js'
@@ -185,14 +185,34 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
     if (error?.code === 'EADDRINUSE') throw new Error(`Port ${port} is in use. Pick another with --port.`, { cause: error })
     throw error
   }
+  // A stop from this process (a test, an update restart): serve.json goes first, so a command in the folder says
+  // "stopping" rather than reaching for a token being retired, and the lock goes once the engine is down.
+  const stopEngine = handle.stop
+  handle.stop = async (code) => {
+    fs.rmSync(stateFile(dir), { force: true })
+    try {
+      return await stopEngine(code)
+    } finally {
+      release()
+      process.off('exit', release)
+    }
+  }
   holder.stop = handle.stop
-  const { boardUrl } = handle.app.locals.solo
+  const { boardUrl, tokenFiles = {} } = handle.app.locals.solo
+  // serve.json (0600): where the engine answers and which 0600 file holds the command line's token, so
+  // `comments`, `watch`, `mcp` and `export` in this folder read the engine and not the 1.x JSON files (G15,
+  // src/engine-target.js). The token itself is never in it.
   fs.writeFileSync(
     stateFile(dir),
-    `${JSON.stringify({ port: handle.server.address().port, origin: handle.origin, url: boardUrl, pid: process.pid })}\n`,
-    {
-      mode: 0o600,
-    },
+    `${JSON.stringify({
+      port: handle.server.address().port,
+      origin: handle.origin,
+      url: boardUrl,
+      pid: process.pid,
+      start: processStartTime(process.pid),
+      tokens: Object.fromEntries(Object.entries(tokenFiles).map(([which, file]) => [which, path.basename(file)])),
+    })}\n`,
+    { mode: 0o600 },
   )
   out(
     `Shapewall solo engine (experimental) is serving ${config.boards.length} board${config.boards.length === 1 ? '' : 's'} at ${boardUrl}`,
