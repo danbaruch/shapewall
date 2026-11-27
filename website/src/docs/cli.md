@@ -997,7 +997,7 @@ Commands
       --no-comments         captures, history and journeys only
   migrate                   move this project's .shapewall/ into the solo engine (.shapewall/.engine/) (experimental)
                             captures, comments, chat and the local account; a backup goes to
-                            .shapewall/backup-1x-<time>/ first; then run serve --engine hosted. Refuses while
+                            .shapewall/backup-1x-<time>/ first; the solo engine serves it after. Refuses while
                             serve (either engine), capture, watch or an agent runs
       --dry-run             counts, and every item that would not come along; writes nothing
       --board ID            only this board (default: every board)
