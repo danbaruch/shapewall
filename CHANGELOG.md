@@ -5,6 +5,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 1.5.0 - 2026-11-27
+
 1.5.0 adds the solo engine, opt-in and experimental: `shapewall serve --engine hosted` runs the hosted server's engine for
 one project on your own machine, with the project's agent on the same link protocol a team server's agents use, and
 `shapewall migrate` moves an existing `.shapewall/` into it. The plain `shapewall serve` is unchanged and stays the default.
