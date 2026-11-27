@@ -26,6 +26,8 @@ const sha = (value) => createHash('sha256').update(value).digest('hex')
 const docs = fs.readFileSync(new URL('../docs/hosted.md', import.meta.url), 'utf8')
 // The rollback of 18 exactly as docs/hosted.md gives it.
 const ROLLBACK_18 = /```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 18 and rollback')))[1]
+// 24 rebuilds sessions too, and is rolled back first (docs/hosted.md).
+const ROLLBACK_24 = /```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 24 and rollback')))[1]
 // The sessions table as 0.8.0 really makes it (frozen; not derived from this build or from the recipe).
 const SESSIONS_080 = fs.readFileSync(new URL('./fixtures/sessions-0.8.0.sql', import.meta.url), 'utf8')
 const TABLE_080 = /CREATE TABLE sessions \([\s\S]+?\);/.exec(SESSIONS_080)[0].slice(0, -1)
@@ -62,10 +64,11 @@ test('a new database has the tailnet sign-in method in its sessions table, with 
   try {
     assert.deepEqual(
       versions(db),
-      Array.from({ length: 23 }, (_, index) => index + 1),
+      Array.from({ length: 24 }, (_, index) => index + 1),
     )
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 23)
-    assert.match(sessionsSql(db), /CHECK \(via IN \('passkey', 'recovery', 'tailnet'\)\)/)
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 24)
+    // 'local' since migration 24 (test/hosted-migration-24.test.js).
+    assert.match(sessionsSql(db), /CHECK \(via IN \('passkey', 'recovery', 'tailnet', 'local'\)\)/)
     assert.match(sessionsSql(db), /CHECK \(tailnet_login IS NULL OR tailnet_login <> ''\)/)
     assert.match(sessionsSql(db), /CHECK \(via <> 'tailnet' OR \(tailnet_login IS NOT NULL AND tailnet_login <> ''\)\)/)
     assert.deepEqual(sessionIndexes(db), [
@@ -97,7 +100,8 @@ test('migration 18 on a database from before it: every row kept, tailnet session
   const file = path.join(tempDir('session-via-upgrade'), 'shapewall.db')
   const now = () => new Date()
   let db = await openDatabase(file)
-  // A database as 0.8.0 left it: its sessions table from the frozen fixture, and 18 not in the ledger.
+  // A database as 0.8.0 left it: its sessions table from the frozen fixture, and 18 (and 24) not in the ledger.
+  db.exec(ROLLBACK_24)
   db.exec('DROP TABLE sessions')
   db.exec(SESSIONS_080)
   db.exec('DELETE FROM schema_migrations WHERE version = 18; PRAGMA user_version = 17;')
@@ -199,8 +203,8 @@ test('migration 18 on a database from before it: every row kept, tailnet session
 
   // The upgrade.
   db = await openDatabase(file)
-  assert.deepEqual(versions(db).slice(-8), [16, 17, 18, 19, 20, 21, 22, 23])
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 23)
+  assert.deepEqual(versions(db).slice(-9), [16, 17, 18, 19, 20, 21, 22, 23, 24])
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 24)
   assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok')
   assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
   assert.deepEqual(columns(db), before.columns, 'the same columns, in the same order')
@@ -235,10 +239,11 @@ test('migration 18 on a database from before it: every row kept, tailnet session
   // Opened again: 18 does not run twice.
   db.close()
   db = await openDatabase(file)
-  assert.deepEqual(versions(db).slice(-8), [16, 17, 18, 19, 20, 21, 22, 23])
+  assert.deepEqual(versions(db).slice(-9), [16, 17, 18, 19, 20, 21, 22, 23, 24])
   assert.deepEqual(rowsOf(db), expected)
 
   // The rollback as docs/hosted.md gives it: the old table, tailnet sessions back to 'passkey', 18 out of the ledger.
+  db.exec(ROLLBACK_24)
   db.exec(ROLLBACK_18)
   assert.deepEqual(versions(db).slice(-7), [16, 17, 19, 20, 21, 22, 23])
   assert.equal(db.prepare('PRAGMA user_version').get().user_version, 17)

@@ -857,6 +857,75 @@ const MIGRATIONS = [
   ALTER TABLE chat_threads ADD COLUMN trust_v TEXT;
   UPDATE chat_threads SET tainted = 1;
   `,
+  // 24. The solo engine's schema (1.5.0, experimental: shapewall serve
+  // --engine hosted runs this server for one project on loopback), in three
+  // parts. Nothing a team server does changes (docs/hosted.md, "Migration 24
+  // and rollback").
+  //
+  // 1. comments.environment: the id of the board environment a comment was
+  //    made on, as the board names it (an id like config.js ID_RE). A hosted
+  //    push keeps one environment, 'default' (src/hosted/push.js), so every
+  //    existing comment and every comment a team board makes is 'default'; a
+  //    solo board keeps the project's real environments. Retention does not
+  //    read it: a comment's capture_version is only ever a version of the
+  //    default environment, so every pinned version stays.
+  // 2. sessions.via gains 'local': the solo owner's sign-in through the
+  //    one-time link from the terminal (no passkey, no tailnet). A local
+  //    session never carries a tailnet login and never counts as a passkey
+  //    check: its verified_at must stay the "never verified" mark
+  //    (accounts/auth.js NEVER_VERIFIED) on this build and on an older one
+  //    that reads the row (src/hosted/auth.js passedPasskey). A passkey that
+  //    confirms it (/auth/reauth/verify) makes it a passkey session in the
+  //    same UPDATE. Same rebuild as 18: SQLite cannot change a CHECK in
+  //    place, so new table, copy, drop, rename, indexes again, inside the
+  //    ledger's transaction. Every row is copied as it is, except (as in
+  //    18) a session whose account is gone, which can never be read and
+  //    would fail the new table's foreign key.
+  // 3. solo_binding: which project a solo data folder serves and the live
+  //    config file it reads (shapewall.config.json, an absolute path), with
+  //    the board ids that file declared when it was last read. At most one
+  //    row (id = 1); a data folder with a row is a solo one, so a team
+  //    server can tell it apart. Removing the project removes the binding.
+  //    Its one writer (src/hosted/solo/binding.js) takes the workspace from
+  //    the project's row and stores only valid board ids.
+  `
+  ALTER TABLE comments ADD COLUMN environment TEXT NOT NULL DEFAULT 'default'
+    CHECK (length(environment) BETWEEN 1 AND 64 AND environment NOT GLOB '*[^a-z0-9-]*' AND environment NOT GLOB '-*');
+  CREATE TABLE sessions_v24 (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    verified_at TEXT NOT NULL,
+    via TEXT NOT NULL DEFAULT 'passkey' CHECK (via IN ('passkey', 'recovery', 'tailnet', 'local')),
+    id TEXT,
+    user_agent TEXT,
+    ip TEXT,
+    admin_seen_at TEXT,
+    tailnet_login TEXT,
+    CHECK (tailnet_login IS NULL OR tailnet_login <> ''),
+    CHECK (via <> 'tailnet' OR (tailnet_login IS NOT NULL AND tailnet_login <> '')),
+    CHECK (via <> 'local' OR (tailnet_login IS NULL AND verified_at = '1970-01-01T00:00:00.000Z'))
+  );
+  INSERT INTO sessions_v24
+    (token_hash, user_id, created_at, last_seen_at, expires_at, verified_at, via, id, user_agent, ip, admin_seen_at, tailnet_login)
+    SELECT token_hash, user_id, created_at, last_seen_at, expires_at, verified_at, via, id, user_agent, ip, admin_seen_at, tailnet_login
+    FROM sessions WHERE user_id IN (SELECT id FROM users);
+  DROP TABLE sessions;
+  ALTER TABLE sessions_v24 RENAME TO sessions;
+  CREATE INDEX sessions_user ON sessions(user_id);
+  CREATE UNIQUE INDEX sessions_id ON sessions(id);
+  CREATE TABLE solo_binding (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+    config_path TEXT NOT NULL CHECK (config_path <> ''),
+    board_ids TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(board_ids) AND json_type(board_ids) = 'array'),
+    bound_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  `,
 ]
 
 export const openDatabase = (file) => openSqlite(file, migrate)

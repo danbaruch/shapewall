@@ -171,7 +171,7 @@ test('migration 19 adds the heartbeat to a database from before it, filled for o
   db.close()
   db = await openDatabase(file)
   assert.ok(columns().includes('heartbeat_at'))
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 23)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 24)
   const rows = Object.fromEntries(
     db
       .prepare('SELECT id, heartbeat_at FROM agent_claims ORDER BY id')

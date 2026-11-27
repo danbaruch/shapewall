@@ -15,6 +15,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
   captures' DOM fallback, the capture hint in the empty state), each once the engine serves it. Team servers never send
   `solo` and keep their behaviour.
 
+### Changed
+
+- Hosted servers: migration 24 prepares the database for the solo engine. It adds `comments.environment` (every existing comment
+  is on `default`), lets `sessions.via` be `local` (a rebuild of `sessions`, like migration 18) and adds the `solo_binding`
+  table. Nothing changes on a team server. Stop `shapewall hosted admin` jobs before the first start. Rollback notes are in
+  docs/hosted.md, "Migration 24 and rollback".
+
 ### Fixed
 
 - Hosted boards: opening Checks no longer gets a 404 for the SEO tab. The board answers with no search previews (they stay on
