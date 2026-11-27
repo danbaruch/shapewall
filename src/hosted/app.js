@@ -73,6 +73,7 @@ import { createPasskeyPolicy } from './passkey-policy.js'
 import { createTailnetAccounts } from './tailnet.js'
 import { mountTailnetAdmin } from './tailnet-routes.js'
 import { cspWithErrors, reportServerError } from '../error-tracking.js'
+import { mountSoloOpen } from './solo.js'
 
 export { changeEventType, publicBoardView, TOKEN_SCOPES, INVITE_DAYS }
 
@@ -150,6 +151,8 @@ export function createHostedApp({
   // (src/hosted/passkey-policy.js). Without tailnet sign-in passkeys are
   // always the sign-in.
   tailnetPasskeys = false,
+  // SPIKE S5: { ownerId: () => id } mounts GET /open/:nonce (src/hosted/solo.js).
+  solo = null,
 }) {
   if (guestOnly) tailnet = null
   const passkeys = createPasskeyPolicy({ db, tailnet, flag: tailnetPasskeys })
@@ -341,6 +344,8 @@ export function createHostedApp({
     auditOf,
     agentsFor,
   })
+
+  if (solo) mountSoloOpen(app, { auth, setCookie, SESSION_COOKIE, ownerId: solo.ownerId, boardPath: solo.boardPath })
 
   // ---- Health ----
   app.get('/api/health', (req, res) => res.json({ ok: true }))
