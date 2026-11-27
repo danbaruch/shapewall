@@ -16,6 +16,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
   board, with the same validation against the config file's pages. They are stored in the board's `journeys.json` in the
   engine's folder; journeys from the config stay read only. Team servers keep journeys read only. See
   [Journeys made on the board](docs/journeys.md#journeys-made-on-the-board).
+- Solo engine (experimental): `serve --engine hosted` runs this project's agent on the link protocol, as
+  `shapewall agent connect --as local` with a token the engine makes at start (0600 in `.shapewall/.engine/`, rotated each
+  start, retired at stop; the address goes in the environment, never on a command line). The board's chat, Fix with and
+  comments sent to the agent go through it, with the same trust tiers and machine policy as on a team server. The agent's
+  backend, endpoint, name, icon and tint come from Settings > Agent, and branch mode on a coding agent reads as
+  `--approvals owner` while no approvals are saved for the connection (never written, so turning branch mode off takes it
+  away). It acts only when asked (the chat, Fix with, Send to agent, an @mention). A stop, by SIGINT or SIGTERM too, stops
+  it, and it stops by itself when the engine is killed. Neither it nor what it runs gets the engine's command-line or watch
+  tokens. `--no-chat` runs without it. See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
+- `shapewall agent connect --endpoint` (experimental): a model endpoint (Ollama, DeepSeek, OpenAI or any OpenAI-compatible
+  server) as a connected agent, read and answer only: no edits, commands, tools, browser or extensions. The key stays in
+  its variable and is never printed, logged, saved or sent to the server.
 - Solo engine (experimental): the engine writes `.shapewall/events.jsonl` in the same line format as the local board and sends
   notifications as `serve` does, so `shapewall events`, bots and notification channels keep working. See
   [the event log](docs/notifications.md#the-event-log).
@@ -81,8 +93,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Agents: an ACP agent's file reads (`fs/read_text_file`) no longer reach Shapewall's own store (`.shapewall/`: accounts,
   sessions, notification settings, tokens), the recorded logins in `.shapewall-auth/` or the config's `auth.storageState`
   files, through a link either; only writes were refused before. A Claude Code agent also gets `Read` deny rules for those
-  paths in its session settings, since it reads files itself. Comments and captures reach agents through Shapewall's tools as
-  before.
+  paths in its session settings, since it reads files itself (checked against a real Claude Code on Linux: Read, Grep,
+  Glob and links into the store are refused). Comments and captures reach agents through Shapewall's tools as before.
+  Codex, goose and Gemini CLI read files with their own tools, which take no per-path deny, so on a local board they can
+  still read these paths; for a board where people you do not trust write comments, use Claude Code, or a connected agent
+  (`shapewall agent connect`), whose commands run in the OS sandbox.
 
 ### Fixed
 

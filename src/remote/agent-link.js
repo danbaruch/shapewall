@@ -886,7 +886,8 @@ export async function runAgentLink({
         const caps = resolveNow()
         boardComments(caps)
         fixTurn = { capabilities: toPrompt(caps), sessionKey: sessionKeyOf(caps), extensions: extensionsOf(caps, job, answerEnv) }
-        if (answerConfig?.dir) {
+        // A backend that takes no tools (a model endpoint, endpoint-backend.js) gets no tool host either.
+        if (answerConfig?.dir && backend.tools !== 'none') {
           const checkoutConfig = () => {
             if (!answerConfig.file) return answerConfig
             try {

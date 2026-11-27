@@ -52,10 +52,21 @@ const FACTORIES = {
 // Shapewall store) are for ACP: what an agent may read and write.
 export function createBackend(
   settings,
-  { env = process.env, fetchImpl = globalThis.fetch, root, protect, sensitivePaths, limits, log, mcpServersFor, processPool } = {},
+  {
+    env = process.env,
+    fetchImpl = globalThis.fetch,
+    root,
+    protect,
+    sensitivePaths,
+    denyRead,
+    limits,
+    log,
+    mcpServersFor,
+    processPool,
+  } = {},
 ) {
   if (!settings.configured) return null
   const factory = FACTORIES[settings.backend]
   if (!factory) return null
-  return factory(settings, { env, fetchImpl, root, protect, sensitivePaths, limits, log, mcpServersFor, processPool })
+  return factory(settings, { env, fetchImpl, root, protect, sensitivePaths, denyRead, limits, log, mcpServersFor, processPool })
 }

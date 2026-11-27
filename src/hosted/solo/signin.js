@@ -138,6 +138,18 @@ export function soloLocalGate(origin, { peer = sameUserPeer } = {}) {
       if (String(req.headers?.host || '').toLowerCase() !== host) return false
       return samePerson(req, peer)
     },
+    // The token API and /mcp (rev57 R57-2): from this machine and, on Linux, this OS user, with no proxy headers,
+    // addressed to the engine's name or to a loopback address on its port. A bearer token is never sent by a
+    // browser on its own, so the name adds nothing there that a client cannot forge, and the engine's HTTP /mcp
+    // calls its own token API on the loopback address it was reached at (src/hosted/mcp-http.js).
+    admitsMachine(req) {
+      if (PROXY_HEADERS.some((name) => req.headers?.[name] !== undefined)) return false
+      const given = String(req.headers?.host || '').toLowerCase()
+      const port = host.slice(host.lastIndexOf(':') + 1)
+      const loopbackHost = given === `127.0.0.1:${port}` || given === `[::1]:${port}` || given === `localhost:${port}`
+      if (given !== host && !loopbackHost) return false
+      return samePerson(req, peer)
+    },
   }
 }
 

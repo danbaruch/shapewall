@@ -13,7 +13,7 @@
 
 import { getBoard, loadConfig } from '../config.js'
 import { assertMigrationAllows } from '../engine-folder.js'
-import { ENGINE_TOKEN, NO_ENGINE_VAR, engineAtRest, engineTarget, verifyEngine } from '../engine-target.js'
+import { ENGINE_TARGET, ENGINE_TOKEN, NO_ENGINE_VAR, engineAtRest, engineTarget, verifyEngine } from '../engine-target.js'
 
 export const ENGINE_COMMANDS = ['comments', 'watch', 'mcp', 'export']
 
@@ -49,6 +49,7 @@ export async function engineMode(command, flags, { env = process.env, err = () =
     await verify(target)
     flags.remote = target.origin
     flags[ENGINE_TOKEN] = target.token
+    flags[ENGINE_TARGET] = target
     // The board a command works on when it names none: the config's first, as on the JSON files (mcp lists them all).
     if (command !== 'mcp' && flags.board === undefined) flags.board = getBoard(config).id
     if (command === 'comments' && !flags.json && !flags['for-agent']) err(`Solo engine: ${target.url}`)

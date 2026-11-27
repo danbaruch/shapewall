@@ -114,6 +114,8 @@ export async function startHosted({
   // once nothing is left to wait for (tests pass their own).
   exit = (code) => process.exit(code),
   forceExitMs = 8000,
+  // Awaited first by every stop, a SIGINT/SIGTERM's included (the solo engine stops its own agent there).
+  beforeStop = null,
   // The solo profile, passed to createHostedApp (src/hosted/solo/index.js); null: a team server.
   // Started here it is always the owner's engine: { signIn: 'local', configPath, config, ownerName, ... }
   // (src/hosted/solo/serve.js), on loopback, with no proxy, tailnet or exposure of any kind.
@@ -410,6 +412,11 @@ export async function startHosted({
     const stop = (code = 0) => {
       let exitCode = Number.isInteger(code) ? code : 0
       stopping ||= (async () => {
+        try {
+          await beforeStop?.()
+        } catch {
+          /* the stop goes on */
+        }
         const update = app.locals.appUpdate
         update?.stop?.()
         if (update?.applying?.()) {

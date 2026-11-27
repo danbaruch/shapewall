@@ -37,7 +37,7 @@
 
 import { logoForAgent } from '../agent/agent-logos.js'
 import { cleanAgentName, isAgentTint, isBuiltInIcon } from '../agent/identity.js'
-import { handleFor as mentionHandle } from '../mentions.js'
+import { extractMentions, handleFor as mentionHandle } from '../mentions.js'
 import { agentHandles } from '../agent/triggers.js'
 import { cleanCapabilitySummary, LINE_IDS, SUMMARY_PATHS } from '../agent/capability-render.js'
 import { compactCard, summaryCard, viewerTier } from '../agent/capability-views.js'
@@ -667,6 +667,19 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
   function triggerHandles(agent) {
     const members = new Set([...people().values()].map((person) => String(person.handle || '').toLowerCase()).filter(Boolean))
     return agentHandles(agent).filter((handle) => !members.has(handle))
+  }
+
+  // The agent a comment's own text asks for (the solo engine sends a comment to an agent only when asked, as a 1.x
+  // board does): { asked: false } when it mentions none; { asked: true, agentId } for an @handle of a live agent of
+  // the project (its own handle, not the @agent every agent answers to); { asked: true, agentId: undefined } for
+  // @agent (the project's default, else any agent).
+  function mentionedAgent(projectId, body) {
+    const said = extractMentions(body)
+    if (!said.length) return { asked: false }
+    for (const row of rows(projectId))
+      if (live(row) && triggerHandles(row).some((handle) => handle !== 'agent' && said.includes(handle)))
+        return { asked: true, agentId: row.id }
+    return said.includes('agent') ? { asked: true, agentId: undefined } : { asked: false }
   }
 
   // ---- Audience ----
@@ -1478,6 +1491,7 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     setIdentity,
     nameProblem,
     triggerHandles,
+    mentionedAgent,
     setDefault,
     setAudience,
     setApprovalRule,

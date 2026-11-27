@@ -711,10 +711,17 @@ shapewall serve --engine hosted --open
   the files. A token file another user could read, a link in its place, or a `serve.json` that names another address is
   refused, never used. Before a token goes anywhere, the command asks whoever listens on the engine's port to prove it is
   this start's engine (an answer to a challenge under a key only `serve.json` and the engine hold; the question carries no
-  token), so a crashed engine's files never send a token to another program on that port. A rotation never widens a token:
+  token), so a crashed engine's files never send a token to another program on that port. A command that keeps running
+  (`mcp`, `watch`) asks again after any connection error or refused token, before it sends anything more. A rotation
+  never widens a token:
   a scope or an expiry you took away in the console stays away. On the engine, the token API and `/mcp` answer only on the
   engine's own name, from this machine (on Linux, your own OS user), as the sign-in does. A `shapewall` command that an agent
-  started (`watch --exec` without `--pass-token`, or a connected agent's own commands) gets none of these tokens.
+  started (`watch --exec` without `--pass-token`, or a connected agent's own commands) gets none of these tokens. That
+  mark is a guard against accidents, not against an agent set on getting a token: it is an environment variable the
+  agent's command can drop. Where the agent's commands run in the OS sandbox (a connected agent, the board's own agent)
+  the sandbox is what holds: `.shapewall` is unreadable there and the engine's port unreachable. Where they do not (a
+  `watch --exec` command, a local agent session set to `"own"`, the unsandboxed shell a solo owner can turn on), they run
+  as you, can read `.shapewall/.engine/` themselves, and the mark is only advisory.
   Agents never read `.shapewall/.engine/`: Shapewall's own file reads refuse it, and a Claude Code agent gets a deny rule for
   it in its session settings. `comments selectors` and `comments delete` are not on the engine yet; `comments add` takes `--page`,
   `--body` and `--viewport`. `shapewall export` reads the 1.x files, so while the engine runs it is refused unless
@@ -722,6 +729,29 @@ shapewall serve --engine hosted --open
   has kept comments for the project, and refuse a board `shapewall migrate` moved. An explicit `--remote` (or
   `SHAPEWALL_REMOTE`) always wins. `shapewall events` reads `.shapewall/events.jsonl`, which the engine writes, and `ci` does
   not read comments, so neither changes.
+- **The board's own agent.** The engine runs this project's agent the way any machine runs one for a team server: a child
+  `shapewall agent connect --as local` on the same link, so the board's chat, Fix with and comments sent to the agent go
+  through the same code, trust tiers and machine policy as on a team server, and it gets nothing more than it would there. Which agent comes
+  from Settings > Agent (or the config and the environment), as for the local chat: a coding agent (Claude Code over ACP)
+  or a model endpoint (Ollama, DeepSeek, any OpenAI-compatible server, `agent connect --endpoint`: answers only, no tools,
+  the key stays in its variable and is never printed or sent to the engine). Its name, icon and tint become the agent's
+  on the board (again whenever they change in the settings); on a new engine it is the project's default agent. As on a
+  1.x board, it acts only when asked: the chat, Fix with, Send to agent, or an @mention in a comment (`@agent`, or the
+  agent's own handle). A comment you write without one waits for `shapewall watch` (as on a 1.x board) or for you to send
+  it; the board's own agent never answers every comment unasked. Its token
+  (`agent.token`, the scopes an approved `agent connect` gets) is made at start, 0600 in `.shapewall/.engine/`, rotated every
+  start and retired at stop; the child reads it by path and gets the engine's address in its environment, so neither is on
+  a command line. It is read and answer only, as a fresh `agent connect` is, unless branch mode is on for a coding agent:
+  then the connection reads as `--approvals owner` (you allow each edit on the board; fixes are made on a branch in a copy
+  outside the project). That is read from the settings at each start and never saved, so turning branch mode off takes it
+  away; `shapewall agent set --as local --approvals none` (with `SHAPEWALL_REMOTE` set to the engine's address) saves a
+  choice that wins over it. This machine keeps those settings by the
+  engine's host name, not its port, so they stay when the engine starts on another `--port`. No agent that can run: the start says why and the engine runs
+  without one. A child that exits is started again, after a growing pause, five times in a row at most. Stopping the
+  engine stops it, also by Ctrl+C or SIGTERM, and when the engine is killed the child stops by itself (its standard input
+  is a pipe the engine holds, and it watches its parent). It gets only `agent.token`, never the command line's or watch's;
+  what it runs is marked so that a `shapewall` command there gets no engine token, and no agent reads `.shapewall/`.
+  `--no-chat` (or `--read-only`) runs the engine without it.
 - **Data** lives in `.shapewall/.engine/` (a name no board id can take): the database, the captures, the host name's random
   part, the sign-in keys. The folder is made private (0700) with a `.gitignore` of `*`. The engine refuses to start if git
   tracks anything in it, whichever repository could: the project's, a repository or submodule that `.shapewall` is itself,

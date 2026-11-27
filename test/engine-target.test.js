@@ -18,13 +18,13 @@ import { quietSqliteWarning } from '../src/hosted/db.js'
 import { startHosted } from '../src/hosted/server.js'
 import { serveEngine } from '../src/hosted/solo/serve.js'
 import { createComment } from '../src/store.js'
-import { SAMPLE, tempDir } from './helpers.js'
+import { SAMPLE, isolatedEnv, tempDir } from './helpers.js'
 import { createBrowser } from './hosted-helpers.js'
 
 quietSqliteWarning()
 
 const ACP_STUB = new URL('./fixtures/acp-stub.mjs', import.meta.url).pathname
-const ENV = { SHAPEWALL_USER_NAME: 'Robin Tester', PATH: process.env.PATH }
+const ENV = isolatedEnv('solo-env', { SHAPEWALL_USER_NAME: 'Robin Tester' })
 const noExit = (options) => startHosted({ ...options, exitOnStop: false })
 
 function project(name) {
@@ -353,9 +353,21 @@ test("R57-2: on the solo engine the token API and MCP answer the engine's own na
     })
   const own = new URL(handle.origin).host
   assert.equal(await call('/api/v1/project', own), 200)
-  assert.equal(await call('/api/v1/project', '127.0.0.1:' + port), 403)
-  assert.equal(await call('/mcp', '127.0.0.1:' + port), 403)
+  // The loopback address on the engine's port too: the engine's HTTP /mcp calls its own token API there.
+  assert.equal(await call('/api/v1/project', '127.0.0.1:' + port), 200)
+  // Another name, or another port, never.
   assert.equal(await call('/api/v1/project', own.replace(/^[a-z]/, 'z')), 403)
+  assert.equal(await call('/mcp', own.replace(/^[a-z]/, 'z')), 403)
+  assert.equal(await call('/api/v1/project', '127.0.0.1:' + (Number(port) + 1)), 403)
+  // Another OS user (the peer check says no), or a proxy in between: refused whatever the name.
+  const { soloLocalGate } = await import('../src/hosted/solo/signin.js')
+  const socket = { remoteAddress: '127.0.0.1' }
+  const other = soloLocalGate(handle.origin, { peer: () => false })
+  assert.equal(other.admitsMachine({ headers: { host: own }, socket }), false)
+  const same = soloLocalGate(handle.origin, { peer: () => true })
+  assert.equal(same.admitsMachine({ headers: { host: own }, socket }), true)
+  assert.equal(same.admitsMachine({ headers: { host: own, 'x-forwarded-for': '10.0.0.2' }, socket }), false)
+  assert.equal(same.admitsMachine({ headers: { host: own }, socket: { remoteAddress: '10.0.0.2' } }), false)
 })
 
 test("R57-2: an agent never reads the solo engine's folder: Shapewall's own reads refuse it, and Claude Code gets Read deny rules", async () => {
@@ -380,4 +392,67 @@ test("R57-2: an agent never reads the solo engine's folder: Shapewall's own read
     assert.ok(settings.permissions.deny.includes(`Read(/${store}/**)`))
     assert.equal(settings.autoMemoryEnabled, false)
   }
+})
+
+test('rev57 RR1-3: a long-running command asks the proof again after a connection error or a 401, before it sends again', async (t) => {
+  const { createRemote, remoteSettings } = await import('../src/remote/remote.js')
+  const { guardEngineFetch } = await import('../src/engine-target.js')
+  const config = project('engine-target-reverify')
+  const handle = await serveEngine({ engine: 'hosted', config: config.file, port: 0 }, () => {}, { env: ENV, start: noExit })
+  t.after(() => handle.stop())
+  // As main() does for http to the engine's name: every connection to it goes to 127.0.0.1.
+  const { pinSoloLoopback } = await import('../src/remote/loopback-pin.js')
+  await pinSoloLoopback()
+  const flags = { config: config.file }
+  await engineMode('mcp', flags, { env: {} })
+  const settings = remoteSettings(flags, {})
+  assert.equal(settings.source, 'engine')
+  assert.ok(settings.engine?.proof, 'the target goes with the token')
+  const remote = createRemote(settings)
+  assert.ok(await remote.project())
+  const port = new URL(handle.origin).port
+
+  // The engine stops; the next call meets a closed port.
+  await handle.stop()
+  await assert.rejects(remote.project())
+  // Another program takes the port: it is asked for the proof, gets no token, and nothing else is sent.
+  const seen = []
+  const impostor = http.createServer((req, res) => {
+    seen.push({ url: req.url, auth: req.headers.authorization || null })
+    res.setHeader('Content-Type', 'application/json')
+    res.end('{"project":{"id":"not-the-board"}}')
+  })
+  await new Promise((resolve) => impostor.listen(Number(port), '127.0.0.1', resolve))
+  t.after(() => impostor.close())
+  await assert.rejects(remote.project(), (error) => error instanceof EngineTargetError)
+  await assert.rejects(remote.comments('sample'), (error) => error instanceof EngineTargetError)
+  assert.ok(seen.length >= 1)
+  assert.ok(
+    seen.every((item) => item.url === '/solo/whoami' && item.auth === null),
+    JSON.stringify(seen),
+  )
+
+  // A 401 (the token rotated, or someone else answers) asks again too; a good answer goes on; our own abort does not.
+  let verified = 0
+  const answers = [401, 200, 200]
+  const fetched = []
+  const guarded = guardEngineFetch(
+    async (url, init) => {
+      fetched.push(url)
+      if (init?.signal?.aborted) throw new Error('aborted')
+      return { status: answers.shift() ?? 200 }
+    },
+    settings.engine,
+    { verify: async () => void verified++ },
+  )
+  assert.equal((await guarded('a')).status, 401)
+  assert.equal(verified, 0)
+  assert.equal((await guarded('b')).status, 200)
+  assert.equal(verified, 1, 'asked once after the 401')
+  const controller = new AbortController()
+  controller.abort()
+  await assert.rejects(guarded('c', { signal: controller.signal }))
+  await guarded('d')
+  assert.equal(verified, 1, 'an abort of our own is no sign the engine went')
+  assert.deepEqual(fetched, ['a', 'b', 'c', 'd'])
 })

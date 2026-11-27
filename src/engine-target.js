@@ -26,6 +26,8 @@ import { SOLO_HOST_RE } from './net.js'
 // The flag key a resolved engine token travels under from main() to
 // remoteSettings (src/remote/remote.js). A Symbol: no command line can set it.
 export const ENGINE_TOKEN = Symbol('shapewall.engineToken')
+// The engine target itself (engineTarget), next to its token: what the command checks again (guardEngineFetch).
+export const ENGINE_TARGET = Symbol('shapewall.engineTarget')
 // Set in the environment of what an agent runs (`watch --exec` without --pass-token, a connected agent's own
 // process): a `shapewall` command started there never reaches the engine with this machine's tokens (rev57 R57-4).
 export const NO_ENGINE_VAR = 'SHAPEWALL_NO_ENGINE'
@@ -154,6 +156,28 @@ export async function verifyEngine(target, { timeoutMs = 3000 } = {}) {
       `No running solo engine of this project answers at ${target.origin} (its files say pid ${target.pid}). If it stopped without cleaning up, start it again; nothing was sent.`,
     )
   return target
+}
+
+// The fetch a long-running command (`mcp`, `watch`) uses against the engine (rev57 RR1-3): the proof is asked again
+// after any connection error or 401, before anything else is sent. Until then nothing goes to the port: the engine
+// may have stopped and another program may hold its port now. Aborts this process made itself (a wait that timed
+// out) are not a sign of that.
+export function guardEngineFetch(fetchImpl, target, { verify = verifyEngine } = {}) {
+  let trusted = true
+  return async (url, init = {}) => {
+    if (!trusted) {
+      await verify(target)
+      trusted = true
+    }
+    try {
+      const response = await fetchImpl(url, init)
+      if (response.status === 401) trusted = false
+      return response
+    } catch (error) {
+      if (!init?.signal?.aborted) trusted = false
+      throw error
+    }
+  }
 }
 
 // What the solo engine folder says when no engine runs: { data, migrated }.

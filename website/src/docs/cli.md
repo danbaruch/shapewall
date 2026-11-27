@@ -211,8 +211,11 @@ connect straight to 127.0.0.1 for it, never through a proxy. Prefer `SHAPEWALL_R
 a command line. The start prints `SHAPEWALL_REMOTE=http://<name>:<port> shapewall agent connect` for agents. While it runs,
 `shapewall comments`, `watch` and `mcp` in the project folder go to the engine with tokens it made for this machine at
 start (private files in `.shapewall/.engine/`, a new secret each start), not to the 1.x files; `export` is refused unless
-`--no-comments`. The flags that reach beyond this machine (`--host`, `--lan`, `--tailscale`, `--tls-cert`, `--accounts`,
-`--agent-acp`, ...) are refused. Details: [the solo engine](/docs/hosted#the-solo-engine-experimental).
+`--no-comments`. The engine also runs this project's agent (Settings > Agent: a coding agent, or a model endpoint such as
+Ollama or DeepSeek) as `shapewall agent connect --as local`, on the same link a team server's agents use, with a token it
+made at start; the board's chat and Fix with go through it. `--no-chat` (or `--read-only`) runs without it. The flags that
+reach beyond this machine (`--host`, `--lan`, `--tailscale`, `--tls-cert`, `--accounts`, `--agent-acp`, ...) are refused.
+Details: [the solo engine](/docs/hosted#the-solo-engine-experimental).
 
 ## shapewall buzz-bridge
 
@@ -288,6 +291,14 @@ the server's console, where they name the agent and choose who may use it; its t
 then chat with it from the board's Agents panel. By default it reads the project and answers: it does not change files or run
 commands from the board. Ctrl+C disconnects it. On a server with tailnet sign-in, `--project` (and `--workspace`) connects from a
 tailnet machine with no browser; your tailnet user approves it.
+
+`agent connect --endpoint` (experimental) connects a model endpoint instead: Ollama, DeepSeek, OpenAI or any
+OpenAI-compatible server, from this project's `agent.baseUrl` and `agent.model` (or Settings > Agent, or
+`SHAPEWALL_AGENT_BASE_URL` and `SHAPEWALL_AGENT_MODEL`). It answers in the chat and on comments sent to it, and nothing
+else: no edits, no commands, no tools, no browser and no extensions, whatever the server or the policy file says
+(`--approvals` other than `none`, `--auto`, `--allow-path` and `--allow-command` are refused with it). The key is read from
+its variable for each request, never printed, logged, saved or sent to the server; the same rules as the local chat apply
+(https for a key, plain http only to this machine).
 
 Only Claude Code is offered in this release, because its own controls were shown to keep a session read-only. Codex, goose and
 Gemini CLI are refused with a message; use `shapewall watch --remote` for them. The session starts without your Claude Code
@@ -738,7 +749,8 @@ Commands
                             one-time page (--open), data in .shapewall/.engine/; takes --port, --open,
                             --print-owner-link, --read-only, --no-chat, --no-capture, --skip-git-check
                             (start even when git cannot say whether it tracks .engine/); while it runs,
-                            comments, watch and mcp in this folder go to it (experimental)
+                            comments, watch and mcp in this folder go to it, and it runs this project's
+                            agent (a coding agent or a model endpoint) on the link; --no-chat without one (experimental)
   devices list              paired devices and pending requests for this project [--json]
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request
@@ -823,6 +835,10 @@ Commands
       --agent NAME          which agent: claude, or a saved agent's id that runs Claude Code (default: this
                             project's agent, else Claude Code when found). Codex, goose and Gemini CLI are not
                             offered in this release. Never a command from the server
+      --endpoint            a model endpoint instead (Ollama, DeepSeek, OpenAI-compatible: this project's
+                            agent.baseUrl and agent.model, Settings > Agent or SHAPEWALL_AGENT_BASE_URL and
+                            SHAPEWALL_AGENT_MODEL; the key stays in its variable). Answers only: no edits, no
+                            commands, no tools (experimental)
       --name "Builder"      the name to suggest on the approval page (the approver has the last word)
       --project SLUG        on a server with tailnet sign-in, run on a tailnet machine (experimental)
                             no browser, your tailnet user approves it. --project (and --workspace NAME) pick the
