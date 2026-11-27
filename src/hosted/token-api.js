@@ -659,7 +659,7 @@ export function mountTokenApi({
       })
     }),
   )
-  // Every comment of the board as a public viewer of it sees them (guests
+  // The solo engine only. Every comment of the board as a public viewer of it sees them (guests
   // shown as "Guest", no share or account ids), in the board's own comment
   // shape: what `shapewall export` writes into a static board (2.0.0, R5c:
   // export of a project the solo engine holds). Images by name, read through
@@ -668,6 +668,8 @@ export function mountTokenApi({
     '/boards/:bid/export/comments',
     scope('read'),
     v1Board((req, res, ctx) => {
+      // The solo engine only: a team server's guests stay behind ?guests=1 on /comments.
+      if (!solo) return fail(res, 404, 'not_found', 'Not on this server.')
       res.json({ board: boardRef(ctx.board), comments: ctx.comments.list({}).map((comment) => publicView(comment)) })
     }),
   )
