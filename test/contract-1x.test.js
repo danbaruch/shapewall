@@ -281,6 +281,22 @@ test('the stable surfaces on the solo engine keep the 1.x shapes (contract)', as
   // The author labels: what 1.x wrote, still an agent's.
   assert.deepEqual(after.labels, { reply: 'Fixer', comment: 'Fixer' }, 'the --author label on the engine')
 
+  // comments add --selector on the engine: the anchor goes with the comment, as on a 1.x board.
+  const pinned = await json([
+    'comments',
+    'add',
+    '--config',
+    config.file,
+    '--page',
+    'home',
+    '--body',
+    'Pinned to the link',
+    '--selector',
+    'a[data-testid="plus-cta"]',
+    '--json',
+  ])
+  assert.equal(pinned.comment.element?.selector, 'a[data-testid="plus-cta"]', JSON.stringify(pinned.comment))
+
   // Every 1.x tool and argument, except the capture tools 1.x has only in place (see above).
   const problems = []
   for (const [tool, args] of Object.entries(fixture.mcpTools)) {

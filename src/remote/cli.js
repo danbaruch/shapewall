@@ -5,7 +5,8 @@ import { portableManifest, portableVariants } from '../portable-capture.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { portableChecks } from '../checks/transport.js'
-import { getBoard, loadConfig } from '../config.js'
+import { getBoard, loadConfig, noPageMessage } from '../config.js'
+import { listSelectors, selectorPinOnBoard } from '../comments-cli.js'
 import {
   formatFeedback,
   formatFeedbackForAgent,
@@ -207,7 +208,14 @@ function mutationJson(boardId, answer, extra = {}) {
   return JSON.stringify(untrustedJson({ board: remoteBoardRef(boardId, answer), comment: answer.comment, ...extra }), null, 2)
 }
 
-export async function remoteComments(positional, flags, print) {
+// On this project's solo engine: the config with the engine's board folders,
+// where the latest captures and their element maps are (board-home.js).
+async function engineBoard(flags, boardId) {
+  const { config } = await boardHome(loadConfig(flags.config))
+  return { config, board: getBoard(config, boardId) }
+}
+
+export async function remoteComments(positional, flags, print, err = () => {}) {
   // --json prints JSON as is (escaped); text is cleaned before printing.
   const out = (text) => print(flags.json ? text : terminalSafe(text))
   const settings = remoteSettings(flags)
@@ -250,14 +258,20 @@ export async function remoteComments(positional, flags, print) {
     const page = typeof flags.page === 'string' ? flags.page.trim() : ''
     const body = typeof flags.body === 'string' ? flags.body : ''
     if (!page || !body.trim()) throw new Error('usage: shapewall comments add --page ID --body TEXT [--viewport NAME] --remote URL')
-    if (flags.selector !== undefined || (flags.author !== undefined && !engine))
+    if ((flags.selector !== undefined || flags.author !== undefined) && !engine)
       throw new Error("comments add --remote takes --page, --body and --viewport (the server signs it with the token's name).")
-    const result = await remote.addComment(boardId, {
-      page,
-      body,
-      viewport: typeof flags.viewport === 'string' ? flags.viewport : undefined,
-      author,
-    })
+    let viewport = typeof flags.viewport === 'string' ? flags.viewport : undefined
+    let pinned = {}
+    // --selector on the solo engine: pinned from the engine's own latest capture of the page, as on a 1.x board.
+    if (flags.selector !== undefined) {
+      const local = await engineBoard(flags, boardId)
+      const known = local.board.pages.find((item) => item.id === page)
+      if (!known) throw new Error(noPageMessage(local.board, page))
+      viewport = viewport || known.viewports[0]
+      const { anchor, pin } = selectorPinOnBoard(local.config, local.board, { pageId: page, viewport, selector: flags.selector, err })
+      pinned = { ...pin, anchor }
+    }
+    const result = await remote.addComment(boardId, { page, body, viewport, author, ...pinned })
     out(flags.json ? mutationJson(boardId, result) : `Added #${result.comment.id} on ${page}`)
     return
   }
@@ -297,6 +311,11 @@ export async function remoteComments(positional, flags, print) {
     const result = await remote.setAgentStatus(boardId, id, value === 'clear' ? null : value, { guests })
     out(flags.json ? mutationJson(boardId, result) : `#${result.comment.id} agent status: ${result.comment.agentStatus || 'none'}`)
     return
+  }
+  // The selectors of a page's latest capture: on the solo engine, from its own board folder.
+  if (action === 'selectors' && engine) {
+    const local = await engineBoard(flags, boardId)
+    return listSelectors(local.config, local.board, flags, out)
   }
   throw new Error(`unknown comments action "${action}" (list, resolve, reopen, reply, status)`)
 }

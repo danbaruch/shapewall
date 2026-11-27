@@ -50,7 +50,16 @@ Anything that would stop the move (a 1.x `serve` or `watch` still running for th
 the engine cannot take yet) stops `serve` with the reason, and nothing changes.
 
 Once a board has moved, the 1.x writers refuse it: a `shapewall mcp`, `watch` or starter agent started before the move, and the 1.x
-server. `comments`, `watch` and `mcp` need the engine running (`shapewall serve`) to reach the moved board's comments.
+server. Once the engine holds the project (after the move, or in a project whose first board was the engine's):
+
+- `comments`, `watch` and `mcp` go to the engine while it runs. With it stopped they stop and say to start `shapewall serve`;
+  the 1.x files are not the board.
+- `capture`, `links`, `push`, `journeys`, `variant` and `checks` work on the engine's board folders
+  (`.shapewall/.engine/files/`), running or not.
+- `export` needs `--no-comments` (it exports the engine's captures); `share --remote` and `github` refuse an engine board for now.
+- `comments add --selector` and `comments selectors` read the engine's latest captures.
+
+`SHAPEWALL_ENGINE=legacy` puts every command back on the 1.x files (deprecated).
 
 The stable surfaces keep their 1.x shapes on the engine: the comment JSON of `comments --json`, `watch` and `watch --exec`, the MCP
 tools and their arguments (the `author` of `reply_to_comment` and `add_comment`, and `comments reply --author`, label the agent's

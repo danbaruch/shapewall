@@ -5,15 +5,18 @@
 // board people see lives in the engine; the JSON files are not it.
 //
 // An explicit --remote (or $SHAPEWALL_REMOTE) wins: it names a server. With
-// no engine running, a board `shapewall migrate` moved is refused (its
-// comments live in the engine), and a project whose engine kept comments
-// before says on stderr that these are the 1.x board's, not the engine's.
-// `export` reads the 1.x files: while the engine runs it is refused unless
-// --no-comments, so it never ships a board's old comments as if current.
+// no engine running (2.0.0, R5b): once the engine holds the project (its
+// database names it: `serve` started here, or `migrate` moved the 1.x data)
+// the commands refuse and say to start `shapewall serve`, since the 1.x JSON
+// files are not the board; a board `migrate` moved is refused the same way.
+// `SHAPEWALL_ENGINE=legacy` keeps the 1.x files. `export` reads the 1.x
+// comment files: once the engine holds the project (running or not) it is
+// refused unless --no-comments, and then exports the engine's captures.
 
 import { getBoard, loadConfig } from '../config.js'
+import { boardHome } from './board-home.js'
 import { assertMigrationAllows } from '../engine-folder.js'
-import { ENGINE_TARGET, ENGINE_TOKEN, NO_ENGINE_VAR, engineAtRest, engineTarget, verifyEngine } from '../engine-target.js'
+import { ENGINE_TARGET, ENGINE_TOKEN, NO_ENGINE_VAR, engineTarget, verifyEngine } from '../engine-target.js'
 
 export const ENGINE_COMMANDS = ['comments', 'watch', 'mcp', 'export']
 
@@ -55,12 +58,22 @@ export async function engineMode(command, flags, { env = process.env, err = () =
     if (command === 'comments' && !flags.json && !flags['for-agent']) err(`Solo engine: ${target.url}`)
     return { target, config }
   }
-  // No engine runs: the JSON files, unless a board was moved to the engine.
-  const boardIds = command === 'mcp' || command === 'export' ? null : [getBoard(config, flags.board).id]
+  // No engine runs. Once the engine holds the project, its board is in the engine's database, not the JSON files.
+  const held = (await boardHome(config, { env })).engine
+  if (command === 'export') {
+    if (held && !flags['no-comments'])
+      throw new Error(
+        `The solo engine holds this project's comments (${config.outputDir}/.engine/); export reads the 1.x board files. Add --no-comments to export the captures only.`,
+      )
+    if (held) return null
+    assertMigrationAllows(config, { local: true })
+    return null
+  }
+  const boardIds = command === 'mcp' ? null : [getBoard(config, flags.board).id]
   assertMigrationAllows(config, { local: true, boardIds })
-  if (engineAtRest(config).data)
-    err(
-      `Note: this project also has a solo engine (not running). These are the 1.x board's comments in ${config.outputDir}; start shapewall serve to work with the engine's.`,
+  if (held)
+    throw new Error(
+      `The solo engine holds this project's board, and it is not running. Start it with shapewall serve (in another terminal, or as a service), then run shapewall ${command} again; while it runs, ${command} here goes to it. SHAPEWALL_ENGINE=legacy reads the 1.x board files instead (deprecated).`,
     )
   return null
 }

@@ -1,11 +1,12 @@
 // `shapewall variant`: another version of a page, captured beside it.
 
 import { randomBytes } from 'node:crypto'
-import { ID_RE, boardViewports, getBoard, joinUrl, loadConfig } from '../config.js'
+import { ID_RE, boardViewports, getBoard, joinUrl } from '../config.js'
 import { captureVariant } from '../capture/capture.js'
 import { readVariants, removeVariant, saveVariant, variantsWithFiles } from '../store.js'
 import { suggestFlag } from './args.js'
 import { removed } from '../deprecation.js'
+import { projectConfig } from './board-home.js'
 
 function slugify(textValue) {
   return (
@@ -18,7 +19,8 @@ function slugify(textValue) {
 }
 
 export async function variant(positional, flags, out) {
-  const config = loadConfig(flags.config)
+  // Variants live in the board folder: the engine's once it holds the project (board-home.js).
+  const config = await projectConfig(flags)
   const board = getBoard(config, flags.board)
   const action = positional[0]
   if (action === 'list') {

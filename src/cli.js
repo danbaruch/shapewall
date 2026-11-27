@@ -55,7 +55,9 @@ const COMMANDS = {
   capture: ({ flags, out, err }) => capture(flags, out, err),
   checks: async ({ positional, flags, out, err }) => {
     const { checksCommand } = await import('./checks/cli.js')
-    return checksCommand(loadConfig(flags.config), positional, flags, out, err)
+    // Check reports live in the board folder: the engine's once it holds the project (src/cli/board-home.js).
+    const { projectConfig } = await import('./cli/board-home.js')
+    return checksCommand(await projectConfig(flags), positional, flags, out, err)
   },
   links: ({ flags, out }) => links(flags, out),
   serve: async ({ flags, out }) => {

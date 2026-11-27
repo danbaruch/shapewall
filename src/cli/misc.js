@@ -2,9 +2,15 @@
 
 import { getBoard, loadConfig } from '../config.js'
 import { acpFlag } from './serve.js'
+import { assertNotEngineBoard } from './board-home.js'
 
 export async function github(positional, flags, out) {
   const config = loadConfig(flags.config)
+  await assertNotEngineBoard(
+    config,
+    'shapewall github',
+    'Its issues and pull request links for the solo engine are not in this build yet; SHAPEWALL_ENGINE=legacy runs it on the 1.x board files (deprecated).',
+  )
   const { createIssue, linkPull, syncGithub } = await import('../github.js')
   const action = positional[0]
   const print = (value, line) => out(flags.json ? JSON.stringify(value, null, 2) : line)
