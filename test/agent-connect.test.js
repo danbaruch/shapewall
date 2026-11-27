@@ -61,6 +61,25 @@ function project(name) {
   return normalizeConfig(structuredClone(SAMPLE), { dir, file: path.join(dir, 'shapewall.config.json') })
 }
 
+// What a redeemed POST /open answers (src/open-page.js sendTokenHandoff): a
+// no-store page that puts the token in the tab's sessionStorage and replaces
+// itself with the board. No URL holds the token: no Location, nothing to keep in history.
+function handoffOf(answer) {
+  assert.equal(answer.status, 200)
+  assert.equal(answer.headers.location, undefined)
+  assert.equal(answer.headers['cache-control'], 'no-store')
+  const csp = answer.headers['content-security-policy']
+  const nonce = /script-src 'nonce-([^']+)'/.exec(csp)?.[1]
+  assert.ok(nonce, csp)
+  assert.match(csp, /default-src 'none'/)
+  assert.match(csp, /frame-ancestors 'none'/)
+  const script = new RegExp(`<script nonce="${nonce.replace(/[+/=]/g, (c) => `\\${c}`)}">const d = (\\{[^<]*?\\});`).exec(answer.text)
+  assert.ok(script, answer.text)
+  const data = JSON.parse(script[1])
+  assert.equal(data.key, 'shapewall-settings-token')
+  return data
+}
+
 // The page an open link points at (src/open-page.js): its file, nonce and form action.
 function openPageOf(link) {
   const file = fileURLToPath(link)
@@ -424,8 +443,7 @@ test('open link: a 0600 page posts a one-use nonce, a minute, local and direct o
     assert.equal((await request(port, 'GET', `/open/${first.nonce}`)).status, 410)
     assert.equal((await request(port, 'GET', '/open')).status, 410)
     const opened = await redeem(first.nonce)
-    assert.equal(opened.status, 303)
-    assert.equal(opened.headers.location, `./#settings-token=${TOKEN}`)
+    assert.deepEqual(handoffOf(opened), { key: 'shapewall-settings-token', token: TOKEN, target: './' })
     assert.equal(opened.headers['cache-control'], 'no-store')
     assert.equal(fs.existsSync(first.file), false, 'the page is removed once used')
     const second = await redeem(first.nonce)
@@ -460,7 +478,7 @@ test('open link: a 0600 page posts a one-use nonce, a minute, local and direct o
     t.mock.timers.tick(OPEN_LINK_HEADLESS_TTL_MS)
     const tooLate = await redeem(openPageOf(keptLate).nonce)
     t.mock.timers.reset()
-    assert.equal(stillOpen.status, 303)
+    assert.equal(handoffOf(stillOpen).token, TOKEN)
     assert.equal(tooLate.status, 410)
     // At stop, every waiting page goes.
     const waiting = openPageOf(app.locals.openLink(base))
@@ -536,8 +554,7 @@ for (const headless of [false, true])
           })
         if (!headless) {
           const answer = await post(page.nonce)
-          assert.equal(answer.status, 303)
-          assert.equal(answer.headers.location, `./#settings-token=${token}`)
+          assert.equal(handoffOf(answer).token, token)
           assert.equal(fs.existsSync(page.file), false, 'the page is removed once used')
           assert.equal((await post(page.nonce)).status, 410)
         }
@@ -608,8 +625,7 @@ for (const chat of [true, false])
             headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'null' },
           })
         const answer = await post()
-        assert.equal(answer.status, 303)
-        assert.equal(answer.headers.location, `./#settings-token=${token}`)
+        assert.equal(handoffOf(answer).token, token)
         assert.equal((await post()).status, 410)
         const info = await request(Number(opened.port), 'GET', '/api/info', { headers: { 'X-Shapewall-Settings-Token': token } })
         assert.equal(info.json.shareEnabled, true, 'sharing remains available with chat off')

@@ -11,6 +11,7 @@ import { accountEvents, auditAccount, lastRecoverySignIn, seenDevice } from './e
 import { sha256 } from '../shared/account-tokens.js'
 import { createRateLimiter, ACCOUNT_LIMITS } from '../shared/ratelimit.js'
 import { localRequest, settingsRefusal, settingsTokenOk } from '../agent/settings-routes.js'
+import { sameUserPeer } from '../peer-uid.js'
 import { ownerIdentity } from '../server/pairing-routes.js'
 import { avatarUrl, mountAvatarRoutes } from './avatar.js'
 import { tokenEquals } from '../tokens.js'
@@ -81,6 +82,11 @@ function cookie(req, name) {
     .filter((part) => part.startsWith(`${name}=`))
   return matches.length === 1 ? matches[0].slice(name.length + 1) : null
 }
+const loopbackPeer = (address) => {
+  const value = String(address || '').toLowerCase()
+  return value === '::1' || value.startsWith('127.') || value.startsWith('::ffff:127.')
+}
+
 function setupTokenOk(req, token) {
   return tokenEquals(req.headers['x-shapewall-account-setup-token'], token)
 }
@@ -105,6 +111,8 @@ export function createLocalAccounts({
   // no pairing): until the owner account exists, only the owner reaches the
   // board (see the gate below).
   ownerFirst = false,
+  // (socket) => true | false | null: whether a loopback peer is this OS user (null: unknown on this system).
+  peer = sameUserPeer,
 }) {
   origin = accountOrigin(origin)
   const site = new URL(origin)
@@ -118,10 +126,20 @@ export function createLocalAccounts({
   const iso = () => now().toISOString()
   const fail = (res, code, name, message) => res.status(code).json({ error: { code: name, message } })
   const publicUser = (user) => ({ id: user.id, handle: user.handle, displayName: user.display_name, avatarUrl: avatarUrl(db, user.id) })
+  // On a loopback account origin the session cookie is host-only on a name
+  // every port of this machine shares, so a browser may hand it to another
+  // user's listener. A request that carries it must come, where the system
+  // can tell (Linux), from a socket of this OS user; fails closed.
+  const loopbackOrigin = ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(site.hostname.toLowerCase())
+  const peerAllowed = (req) => {
+    if (!loopbackOrigin || !loopbackPeer(req.socket?.remoteAddress)) return true
+    return peer(req.socket) !== false
+  }
   const read = (req) => {
     if (!req.localAccountChecked) {
       req.localAccountChecked = true
-      req.localAccount = auth.readSession(cookie(req, sessionCookie))
+      const token = cookie(req, sessionCookie)
+      req.localAccount = token && peerAllowed(req) ? auth.readSession(token) : null
     }
     return req.localAccount
   }
@@ -147,7 +165,8 @@ export function createLocalAccounts({
     }
   }
   const setCookie = (res, name, value, seconds) =>
-    res.append('Set-Cookie', `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${seconds}${secure ? '; Secure' : ''}`)
+    // Strict, on every renewal too: a link or form on another site, to any port of this host name, never carries it.
+    res.append('Set-Cookie', `${name}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${seconds}${secure ? '; Secure' : ''}`)
   const audit = (req, action, detail = {}) =>
     auditAccount(db, { userId: req.user?.id || null, action, detail, ip: req.socket.remoteAddress, at: iso() })
   const startSession = (req, res, user, options = {}) => {

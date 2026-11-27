@@ -49,7 +49,7 @@ import { checksRouter } from '../checks/routes.js'
 import { checksRunRouter, createChecksRuns } from '../checks/run-control.js'
 import { shareRouter } from './share-routes.js'
 import { localRequest, sameOriginWrite, settingsRefusal, settingsTokenOk } from '../agent/settings-routes.js'
-import { createOpenPages, localOpenRequest } from '../open-page.js'
+import { createOpenPages, localOpenRequest, sendTokenHandoff } from '../open-page.js'
 import { localUserName } from './local-user.js'
 import { boardEvents } from './board-events.js'
 import { listLocalProjects, projectId } from '../local-projects.js'
@@ -428,9 +428,9 @@ export function createApp({
   // .shapewall folder that posts a one-time nonce to POST /open, and returns
   // that page's file:// URL (src/open-page.js): the nonce itself never goes
   // in the opener's argv or any output either. POST /open answers once,
-  // within OPEN_LINK_TTL_MS, to a local and direct request, with a redirect
-  // to the board with the token in its #fragment; then the nonce and its page
-  // are gone. app.locals.keepOpenLink(link) gives the page
+  // within OPEN_LINK_TTL_MS, to a local and direct request, with a page that
+  // hands the token to the tab and opens the board (no URL ever holds it);
+  // then the nonce and its page are gone. app.locals.keepOpenLink(link) gives the page
   // OPEN_LINK_HEADLESS_TTL_MS from now when no browser could be opened for it.
   const openPages = settingsToken
     ? createOpenPages({ dir: config.outputDir, ttlMs: OPEN_LINK_TTL_MS, keepMs: OPEN_LINK_HEADLESS_TTL_MS })
@@ -455,8 +455,8 @@ export function createApp({
     // One try per nonce, whatever happens next.
     const ok = Boolean(openPages?.redeem(req.body?.nonce))
     if (!ok || shared || !localOpenRequest(req)) return openGone(res)
-    // Relative, so it works under a sub-path too; the token only in the #fragment.
-    res.redirect(303, `./#settings-token=${settingsToken}`)
+    // The token in this answer only, never in a URL (browser history keeps those). Relative, for a sub-path too.
+    sendTokenHandoff(res, { token: settingsToken, target: './' })
   })
   // POST only: a nonce in a URL would sit in history and on command lines.
   app.get(['/open', '/open/:nonce'], (req, res) => openGone(openHeaders(res)))

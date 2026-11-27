@@ -393,6 +393,54 @@ test('account session gates APIs, captures, capabilities and logout without touc
   assert.equal(fs.readFileSync(file, 'utf8'), previous)
 })
 
+test('rev55 L3: the session cookie is SameSite=Strict on every issue, and on Linux only this OS user may use it on loopback', async () => {
+  const state = { peer: true, asked: 0 }
+  const instance = await fixture({
+    accounts: {
+      peer: () => {
+        state.asked += 1
+        return state.peer
+      },
+    },
+  })
+  const owner = await enroll(instance)
+  const again = await signIn(instance, owner.authenticator)
+  const issued = await again.post('/auth/login/options', {})
+  assert.equal(issued.status, 200)
+  // Every session cookie set: enrollment, sign-in, and the renewal on a later sign-in.
+  const login = await again.post('/auth/login/verify', { response: owner.authenticator.assert(issued.json.options) })
+  const cookies = [].concat(login.headers['set-cookie'] || [])
+  assert.ok(
+    cookies.some((line) => line.startsWith('sw_local_session=')),
+    cookies.join('\n'),
+  )
+  for (const line of cookies) {
+    assert.match(line, /; SameSite=Strict/, line)
+    assert.doesNotMatch(line, /SameSite=Lax/, line)
+  }
+  assert.equal((await again.get('/auth/me')).json.user.handle, 'dan-fixture')
+  assert.ok(state.asked > 0, 'the peer is checked when the cookie comes in')
+  // Another OS user's socket with the same cookie: no session.
+  state.peer = false
+  assert.equal((await again.get('/auth/me')).json.user, null)
+  assert.equal((await again.get('/api/boards')).status, 401)
+  // Unknown on this system (not Linux): the cookie works as before.
+  state.peer = null
+  assert.equal((await again.get('/auth/me')).json.user.handle, 'dan-fixture')
+  // A request without the cookie never asks.
+  const before = state.asked
+  await instance.browser().get('/auth/me')
+  assert.equal(state.asked, before)
+})
+
+test('rev55 L3: the real peer check passes this process own loopback requests', async () => {
+  const { sameUserPeer } = await import('../src/peer-uid.js')
+  const instance = await fixture()
+  const owner = await enroll(instance)
+  assert.equal((await owner.browser.get('/auth/me')).json.user.handle, 'dan-fixture')
+  assert.equal(sameUserPeer(null, { platform: 'darwin', uid: 1 }), null)
+})
+
 test('setup proxy capability is separate from account and update privileges', async () => {
   const instance = await fixture({
     app: {
