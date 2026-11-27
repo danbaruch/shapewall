@@ -19,9 +19,13 @@
 // mountSolo returns { close() } (optional): app.locals.close() awaits it, so
 // a surface that subscribes to the event bus or holds a lease lets go.
 //
-// Nothing is mounted yet: the stub keeps the hook in place for the 1.5.0 work.
-export function mountSolo(_app, _deps) {
+// Mounted so far: events.js (events.jsonl and notifications, G8).
+import { mountSoloEvents } from './events.js'
+
+export function mountSolo(app, deps) {
   const closers = []
+  const events = mountSoloEvents(app, deps)
+  if (events) closers.push(() => events.close())
   return {
     async close() {
       for (const close of closers.reverse()) await close()

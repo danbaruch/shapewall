@@ -171,19 +171,23 @@ export function startSoloEvents({
       unsubscribe()
       return
     }
-    if (
-      typeof item.type !== 'string' ||
-      !(item.type.startsWith('comment.') || item.type === 'push.committed' || item.type === 'board.removed')
-    )
-      return
-    if (!item.workspace || !item.project || !item.board) return
-    const wantedProject = value(projectId)
-    if (wantedProject && item.project !== wantedProject) return
+    if (!item.workspace) return
     const wantedWorkspace = value(workspaceId)
     if (wantedWorkspace && item.workspace !== wantedWorkspace) return
+    const wantedProject = value(projectId)
+    if (wantedProject && item.project !== wantedProject) return
     let changes
     try {
+      // Any event of the workspace (a push, an agent) teaches this module
+      // its boards before their first comment change.
       preload(item.workspace)
+      if (
+        typeof item.type !== 'string' ||
+        !(item.type.startsWith('comment.') || item.type === 'push.committed' || item.type === 'board.removed') ||
+        !item.project ||
+        !item.board
+      )
+        return
       changes = changesFor(item)
     } catch (error) {
       log(`solo events: ${error.message}`)
@@ -223,31 +227,44 @@ export function startSoloEvents({
   }
 }
 
-// The solo hook's entry (src/hosted/solo/): starts the event log and the
-// notifier for the engine's project and stops them when the app closes.
-// deps: { db, events (or app.locals.events), config, workspaceId, projectId,
-// origin, boardUrl, now, log }. Without a boardUrl, links point at the
-// project's board (/w/<ws>/p/<project>/) once both ids are known.
+// The solo hook's entry (mountSolo, src/hosted/solo/index.js): starts the
+// event log and the notifier for the engine's project. Returns the handle
+// (its close() is awaited by app.locals.close()), or null when the solo
+// profile names no project config (nothing to write to).
+// deps: the hook's deps (db, events, publicOrigin, now, log) and deps.solo:
+//   config       the project's loaded config (outputDir, notifications, boards)
+//   workspaceId, projectId   the owner's workspace and project (values or functions)
+//   notify       false: the log only, no notifications
+//   boardUrl     where notification links point; default the project's board
+//                (/w/<ws>/p/<project>/ on the engine's origin)
+//   notifyOptions  passed to src/notify/run.js (tests: env, backoffMs, pollMs)
 export function mountSoloEvents(app, deps = {}) {
-  const events = deps.events || app.locals?.events
+  const solo = deps.solo || {}
+  if (!solo.config?.outputDir) return null
   const value = (item) => (typeof item === 'function' ? item() : item) || null
+  const origin = deps.publicOrigin
   const boardUrl =
-    deps.boardUrl ||
-    (deps.origin
+    solo.boardUrl ||
+    (origin
       ? () => {
-          const ws = value(deps.workspaceId)
-          const project = value(deps.projectId)
-          return ws && project ? new URL(`/w/${ws}/p/${project}/`, deps.origin).toString() : new URL('/', deps.origin).toString()
+          const ws = value(solo.workspaceId)
+          const project = value(solo.projectId)
+          return new URL(ws && project ? `/w/${ws}/p/${project}/` : '/', origin).toString()
         }
       : null)
-  const handle = startSoloEvents({ ...deps, events, boardUrl })
-  const previous = app.locals?.close
-  if (app.locals) {
-    app.locals.soloEvents = handle
-    app.locals.close = async (...args) => {
-      await handle.close()
-      return previous?.(...args)
-    }
-  }
+  const handle = startSoloEvents({
+    db: deps.db,
+    events: deps.events,
+    config: solo.config,
+    workspaceId: solo.workspaceId ?? null,
+    projectId: solo.projectId ?? null,
+    boardUrl,
+    notify: solo.notify !== false,
+    notifyOptions: solo.notifyOptions || {},
+    now: deps.now,
+    log: deps.log,
+  })
+  // For `serve` (its startup line names the channels) and tests.
+  if (app?.locals) app.locals.soloEvents = handle
   return handle
 }

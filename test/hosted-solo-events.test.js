@@ -73,30 +73,31 @@ async function pushSample() {
 const boardApi = (rest) => `/w/${ws}/p/${project.id}/api/boards/sample${rest}`
 
 before(async () => {
-  hosted = await startHostedServer('hosted-solo-events', { signup: 'open' })
+  config = makeConfig('hosted-solo-events-project')
+  hook = await stub()
+  // Through the hook (createHostedApp({ solo }) -> mountSolo): the owner and
+  // the project are made after the start, as on a first solo start.
+  hosted = await startHostedServer('hosted-solo-events', {
+    signup: 'open',
+    solo: {
+      config,
+      workspaceId: () => ws,
+      projectId: () => project?.id,
+      notifyOptions: {
+        env: { SHAPEWALL_WEBHOOK_URL: `${hook.base}/hook`, SHAPEWALL_WEBHOOK_SECRET: 'whsec-solo' },
+        backoffMs: 5,
+        pollMs: 20,
+      },
+    },
+  })
+  solo = hosted.app.locals.soloEvents
+  assert.ok(solo.notifications.holdsLease(), 'the engine is the notifier for its project folder')
   alice = await signUp(hosted, { handle: 'alice', displayName: 'Alice' })
   ws = alice.workspaceId
   project = await createProject(alice, ws, 'Site')
   token = await createToken(alice, ws, project.id, ['read', 'reply', 'status', 'resolve', 'push', 'claim'])
-  config = makeConfig('hosted-solo-events-project')
+  // The push teaches the engine the board before its first comment.
   await pushSample()
-  hook = await stub()
-  // A comment from before the engine's events started: known, never "new".
-  const old = await alice.browser.post(boardApi('/comments'), { ...pin, body: 'From before' })
-  assert.equal(old.status, 201, old.text)
-  solo = mountSoloEvents(hosted.app, {
-    db: hosted.db,
-    config,
-    workspaceId: ws,
-    projectId: () => project.id,
-    origin: hosted.origin,
-    notifyOptions: {
-      env: { SHAPEWALL_WEBHOOK_URL: `${hook.base}/hook`, SHAPEWALL_WEBHOOK_SECRET: 'whsec-solo' },
-      backoffMs: 5,
-      pollMs: 20,
-    },
-  })
-  assert.ok(solo.notifications.holdsLease(), 'the engine is the notifier for its project folder')
 })
 after(async () => {
   await hosted?.close()
@@ -138,7 +139,6 @@ test('solo events: board and token changes become local comment events in events
   assert.ok(types.includes('comment.resolved'))
   assert.ok(types.includes('comment.reopened'))
   assert.deepEqual(rows.at(-1), ['comment.mentioned', number, 'kim'], 'only the mention the edit added')
-  assert.ok(!records.some((record) => record.comment?.body === 'From before'), 'old comments are not new')
 
   const created = records[0]
   assert.equal(created.version, 1)
@@ -199,7 +199,11 @@ test('solo events: the engine sends the notifications, with links to the project
   assert.equal(url.searchParams.get('board'), 'sample')
   assert.equal(url.searchParams.get('c'), String(created.comment.id))
   const sent = hook.requests.map((item) => item.type)
-  assert.equal(sent.filter((type) => type === 'comment.created').length, 1, 'nothing twice')
+  assert.equal(
+    hook.requests.filter((item) => item.type === 'comment.created' && item.comment.id === created.comment.id).length,
+    1,
+    'nothing twice',
+  )
   assert.ok(sent.includes('comment.resolved'))
 })
 
@@ -232,6 +236,34 @@ test('solo events: guests never @mention, and an unseen comment on a fresh board
     ['comment.replied'],
   )
   assert.deepEqual(commentChanges('sample', null, guest, at, { known: false }), [])
+})
+
+test('solo events: with the workspace known at start, comments already there are diffed, never new', async () => {
+  const second = makeConfig('hosted-solo-events-known')
+  const events = startSoloEvents({
+    db: hosted.db,
+    events: hosted.app.locals.events,
+    config: second,
+    workspaceId: ws,
+    projectId: project.id,
+    notify: false,
+  })
+  try {
+    const old = (await alice.browser.get(boardApi('/comments?status=open'))).json.comments.at(-1)
+    const resolved = await alice.browser.post(boardApi(`/comments/${old.id}/resolve`), {})
+    assert.equal(resolved.status, 200, resolved.text)
+    await events.flush()
+    assert.deepEqual(
+      readEventLog(second).map((record) => [record.type, record.commentId]),
+      [['comment.resolved', old.id]],
+    )
+  } finally {
+    await events.close()
+  }
+})
+
+test('solo events: a solo profile with no project config mounts nothing', () => {
+  assert.equal(mountSoloEvents({ locals: {} }, { solo: {} }), null)
 })
 
 test('solo events: closing the app releases the notifier lease and stops listening', async () => {
