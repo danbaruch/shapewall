@@ -11,6 +11,7 @@
 //   engine's board folder (<data>/files/<ws>/<project>/<board>/), the same
 //   file a local board keeps in .shapewall/<board>/ and the one `shapewall
 //   migrate` moves there, so migrated journeys stay editable.
+//   A whole push carries the file over (push.js BOARD_LOCAL_FILES).
 // - Steps are checked against the pages of the config file the solo binding
 //   names, read fresh for each change, and a journey id never takes one the
 //   file already uses.

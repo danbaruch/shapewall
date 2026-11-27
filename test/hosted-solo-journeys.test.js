@@ -12,8 +12,9 @@ import { loadConfig } from '../src/config.js'
 import { quietSqliteWarning } from '../src/hosted/db.js'
 import { projectDir } from '../src/hosted/projects.js'
 import { soloOrigin } from '../src/hosted/solo/signin.js'
+import { createRemote, pushDefinition, pushFiles } from '../src/remote/remote.js'
 import { SAMPLE, tempDir } from './helpers.js'
-import { createBrowser, createProject, signUp, startHostedServer } from './hosted-helpers.js'
+import { createBrowser, createProject, createToken, signUp, startHostedServer, writeLocalCaptures } from './hosted-helpers.js'
 
 quietSqliteWarning()
 
@@ -140,4 +141,45 @@ test('only the owner, on this machine: no session, a proxy header, another Host 
   assert.equal(refused.status, 403)
   assert.equal(refused.json.error.code, 'read_only')
   assert.notEqual((await readOnly.browser.get(`${readOnly.base}/info`)).json.soloFeatures?.journeys, true)
+})
+
+test('rev58 G5-1: a whole push to the engine keeps the journeys made on the board', async () => {
+  const { hosted, browser, owner, base, config } = await startSolo('solo-journeys-push')
+  const token = await createToken({ browser }, owner.workspaceId, owner.projectId)
+  const remote = createRemote({ origin: hosted.origin, token })
+  const board = config.boards[0]
+  const push = async () => {
+    writeLocalCaptures(config, 'sample')
+    const started = await remote.startPush(pushDefinition(config, board))
+    for (const [area, name, file] of pushFiles(config, board)) await remote.pushFile(started.id, area, name, fs.readFileSync(file))
+    const manifest = JSON.parse(fs.readFileSync(path.join(config.outputDir, 'sample', 'captures', 'manifest.json'), 'utf8'))
+    return remote.commitPush(started.id, { manifest, variants: [] })
+  }
+  await push()
+  const made = await browser.post(`${base}/boards/sample/journeys`, { name: 'Upgrade', steps: ['home', 'pricing'] })
+  assert.equal(made.status, 201, made.text)
+  const file = path.join(projectDir(hosted.dataDir, owner.workspaceId, owner.projectId), 'sample', 'journeys.json')
+  const before = fs.readFileSync(file, 'utf8')
+  await push()
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'the file came across the swap byte for byte')
+  assert.deepEqual(
+    (await browser.get(`${base}/boards/sample/journeys`)).json.journeys.map((item) => item.id),
+    ['upgrade'],
+  )
+  assert.deepEqual(
+    fs.readdirSync(path.dirname(file)).filter((name) => name.endsWith('.carrying')),
+    [],
+  )
+  // Still editable after the push, and a second push keeps the change.
+  const renamed = await browser.call('PATCH', `${base}/boards/sample/journeys/upgrade`, { body: { name: 'Upgrade to Plus' } })
+  assert.equal(renamed.status, 200, renamed.text)
+  await push()
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).journeys[0].name, 'Upgrade to Plus')
+  // A link in its place is never followed into the board.
+  fs.rmSync(file)
+  const elsewhere = path.join(tempDir('solo-journeys-push-link'), 'journeys.json')
+  fs.writeFileSync(elsewhere, JSON.stringify({ journeys: [{ id: 'planted', name: 'Planted', steps: ['home', 'app'] }] }))
+  fs.symlinkSync(elsewhere, file)
+  await push()
+  assert.equal(fs.existsSync(file), false, 'a symbolic link is not carried')
 })
