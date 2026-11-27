@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUpCircle, RefreshCw } from 'lucide-react'
 import { api, STATIC } from '../lib/api'
 import { DEMO } from '../lib/demo'
-import { Button, Dialog, Spinner } from './ui'
+import { Button, Dialog, Input, Spinner } from './ui'
 import { BUILD, VERSION } from '../lib/app-version'
 
 const ENDPOINT = '/api/app-update'
@@ -14,6 +14,10 @@ export default function AppUpdateDialog({ open, onClose, onCloseAutoFocus, trans
   const [error, setError] = useState(null)
   const [reconnecting, setReconnecting] = useState(false)
   const [updated, setUpdated] = useState(false)
+  // A server without passkeys (the solo engine) asks for a typed confirmation before an apply:
+  // { phrase, message } from its confirm_required answer, and what the person typed.
+  const [confirmAsk, setConfirmAsk] = useState(null)
+  const [typed, setTyped] = useState('')
   const alive = useRef(true)
   const staticView = DEMO || STATIC
   useEffect(() => {
@@ -38,9 +42,13 @@ export default function AppUpdateDialog({ open, onClose, onCloseAutoFocus, trans
   }, [transport])
   useEffect(() => {
     if (open && !staticView) void readStatus()
+    if (open) {
+      setConfirmAsk(null)
+      setTyped('')
+    }
   }, [open, staticView, readStatus])
 
-  const run = async (nextAction) => {
+  const run = async (nextAction, confirmed = null) => {
     setAction(nextAction)
     setError(null)
     setUpdated(false)
@@ -55,8 +63,14 @@ export default function AppUpdateDialog({ open, onClose, onCloseAutoFocus, trans
       if (nextAction === 'apply' && (!target || (!target.revision && target.version === status?.current?.version))) {
         throw new Error('This update has no distinct build identity. Ask the installer to prepare a versioned release.')
       }
-      let result = await transport.post(`${ENDPOINT}/${nextAction}`)
+      let result = await transport.post(
+        `${ENDPOINT}/${nextAction}`,
+        {},
+        confirmed ? { headers: { 'X-Shapewall-Confirm': encodeURIComponent(confirmed) } } : undefined,
+      )
       if (!alive.current) return
+      setConfirmAsk(null)
+      setTyped('')
       setStatus(result)
       while (
         alive.current &&
@@ -85,7 +99,14 @@ export default function AppUpdateDialog({ open, onClose, onCloseAutoFocus, trans
         throw new Error(result.job.error || 'The update could not finish. Try again or contact the installer.')
       if (nextAction === 'apply' && atTarget(result)) setUpdated(true)
     } catch (err) {
-      if (alive.current) setError(err.message || 'Could not reach Shapewall. Check your connection and try again.')
+      if (!alive.current) return
+      if (nextAction === 'apply' && err.code === 'confirm_required' && err.confirm) {
+        setConfirmAsk({ phrase: err.confirm, message: err.message })
+        // A wrong phrase says so; the first ask is only the question.
+        if (confirmed) setError('That did not match. Type it exactly as shown.')
+        return
+      }
+      setError(err.message || 'Could not reach Shapewall. Check your connection and try again.')
     } finally {
       if (alive.current) {
         setAction(null)
@@ -145,11 +166,11 @@ export default function AppUpdateDialog({ open, onClose, onCloseAutoFocus, trans
                   <Button
                     size="touch"
                     className="lg:h-9"
-                    disabled={Boolean(running || loading)}
-                    onClick={() => run('apply')}
+                    disabled={Boolean(running || loading || (confirmAsk && typed.trim() !== confirmAsk.phrase.trim()))}
+                    onClick={() => run('apply', confirmAsk ? typed.trim() : null)}
                     data-sw-app-update
                   >
-                    <ArrowUpCircle size={15} aria-hidden="true" /> Update now
+                    <ArrowUpCircle size={15} aria-hidden="true" /> {confirmAsk ? 'Confirm update' : 'Update now'}
                   </Button>
                 ) : null}
               </>
@@ -196,6 +217,19 @@ export default function AppUpdateDialog({ open, onClose, onCloseAutoFocus, trans
                   <p className="text-xs text-muted">Last checked: {new Date(status.checkedAt).toLocaleString()}</p>
                 ) : null}
               </>
+            ) : null}
+            {confirmAsk && !action && !updated ? (
+              <label className="block space-y-2" data-sw-app-update-confirm>
+                <span className="block text-fg">{confirmAsk.message}</span>
+                <Input
+                  value={typed}
+                  onChange={(event) => setTyped(event.target.value)}
+                  autoFocus
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={confirmAsk.phrase}
+                />
+              </label>
             ) : null}
             {error ? (
               <p className="text-bad" role="alert">

@@ -116,6 +116,17 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 - Hosted boards: opening Checks no longer gets a 404 for the SEO tab. The board answers with no search previews (they stay on
   the machine that ran the checks), so the tab shows the pushed reports' SEO issues.
+- Solo engine: a whole push no longer drops the board's journeys.json when it cannot be carried (a link, a FIFO or other
+  special file, or over 4 MB). The commit is refused with 409 `board_local_unreadable` and the board stays as it was; a FIFO
+  is refused at once instead of hanging the commit inside the write lock.
+- Solo engine: deleting the workspace the engine serves, or the account that owns it, is refused with 409 (`solo_workspace`,
+  `solo_owner`). Deleting either would leave the engine bound to nothing, and a capture or checks run going at that moment
+  would write its files back under the removed folder. To start over, stop the engine and move its data folder aside.
+- Hosted backups: a capture that takes its board lock while the backup pins board folders (from another process) no longer
+  risks a half-renamed pin. The locks are read again after the pin; if one appeared, the pin is dropped and the backup waits
+  and pins again.
+- Solo engine: "Update now" asks the owner to type the workspace's name first, as the console does for its other
+  always-asking actions (passkeys are off on the engine). A check does not ask.
 
 ### Security
 

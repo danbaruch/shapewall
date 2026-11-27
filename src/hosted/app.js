@@ -587,6 +587,8 @@ export function createHostedApp({
         needSession,
         inWorkspace,
         inProject,
+        // The fixed core's check (a typed confirmation for the engine's local session): before an update apply.
+        coreFreshOrThrow,
         setCookie,
         SESSION_COOKIE,
         boardContext,

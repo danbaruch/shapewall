@@ -163,6 +163,70 @@ test('an update without a distinct version or revision cannot be claimed as inst
   }
 })
 
+// The solo engine (passkeys off) answers an apply with confirm_required: the dialog asks for the phrase,
+// keeps the button off until it matches, and sends it in X-Shapewall-Confirm (PR #53 F4).
+test('an apply that asks for a typed confirmation sends the phrase and then installs', async () => {
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  const applies = []
+  let state = {
+    current: { version: '0.1.0', revision: '1111111' },
+    latest: { version: '0.2.0', revision: '2222222' },
+    updateAvailable: true,
+    supported: true,
+    canUpdate: true,
+    reason: null,
+    checkedAt: new Date().toISOString(),
+    job: null,
+  }
+  await page.route('**/api/app-update**', async (route) => {
+    const request = route.request()
+    if (request.method() === 'POST') {
+      const said = request.headers()['x-shapewall-confirm']
+      applies.push(said ? decodeURIComponent(said) : null)
+      if (said !== encodeURIComponent('Sample site'))
+        return route.fulfill({
+          status: 403,
+          json: {
+            error: {
+              code: 'confirm_required',
+              message: 'Type the workspace’s name, Sample site, to confirm. Shapewall always asks before this.',
+              stepUp: 'always',
+              confirm: 'Sample site',
+              confirms: 'workspace',
+            },
+          },
+        })
+      state = { ...state, current: state.latest, job: { action: 'apply', state: 'succeeded' } }
+      return route.fulfill({ status: 202, json: state })
+    }
+    await route.fulfill({ json: state })
+  })
+  try {
+    await page.goto(url)
+    await openAbout(page)
+    await page.locator('[data-sw-app-update]').click()
+    const ask = page.locator('[data-sw-app-update-confirm]')
+    await ask.getByText('Type the workspace’s name, Sample site, to confirm.').waitFor()
+    assert.equal(await page.getByRole('alert').count(), 0, 'the first ask is a question, not an error')
+    const button = page.locator('[data-sw-app-update]')
+    assert.match(await button.innerText(), /Confirm update/)
+    assert.equal(await button.isDisabled(), true)
+    await ask.locator('input').fill('Sample')
+    assert.equal(await button.isDisabled(), true)
+    await ask.locator('input').fill('Sample site')
+    await button.click()
+    await page.locator('[data-sw-app-reload]').waitFor()
+    assert.deepEqual(applies, [null, 'Sample site'])
+    assert.equal(await ask.count(), 0)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
 test('static export shows version and credit without making update requests', async () => {
   const out = path.join(setup.dir, 'static-export')
   await exportStatic(setup.config, { out })

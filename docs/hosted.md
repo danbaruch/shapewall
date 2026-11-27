@@ -692,7 +692,8 @@ shapewall serve --engine hosted --open
   a link from another site opens the board signed out (open the board's address yourself). A sign-in lasts 24 hours from
   the last use and 7 days at most, and is checked the same way (this machine, your OS user, the engine's name) on every
   request; the account's Sessions list shows it as "Signed in from the terminal". With no passkeys, the console asks you to
-  type the name of what you remove or delete.
+  type the name of what you remove or delete. The workspace the engine serves, and your account, cannot be deleted on the
+  engine (409): to start over, stop the engine and move its data folder (by default `.shapewall/.engine`) aside.
 - **The boards** are the ones `shapewall.config.json` declares; the engine reads it again when it changes. `shapewall push`,
   `shapewall comments`, `shapewall login` and `shapewall agent connect` take the engine's address in `SHAPEWALL_REMOTE` (or
   `--remote`), as with a team server (approve them on `/device` in the signed-in browser). The start prints the line for

@@ -9,8 +9,10 @@ import path from 'node:path'
 import test, { after } from 'node:test'
 import { quietSqliteWarning } from '../src/hosted/db.js'
 import { createBrowser, createProject, invite, signUp, startHostedServer } from './hosted-helpers.js'
-import { tempDir } from './helpers.js'
+import { SAMPLE, tempDir } from './helpers.js'
 import { bindSoloProject } from '../src/hosted/solo/binding.js'
+import { loadConfig } from '../src/config.js'
+import { soloOrigin } from '../src/hosted/solo/signin.js'
 
 quietSqliteWarning()
 
@@ -261,4 +263,54 @@ test('no solo binding: nobody can update (fails closed)', async () => {
   const check = await owner.browser.post(`${url}/check`, {})
   assert.equal(check.status, 403)
   assert.equal(check.json.error.code, 'update_forbidden')
+})
+
+// PR #53 F4: the engine's own local session (the terminal's one-time link, passkeys off) must pass the
+// fixed core before an apply: it types the workspace's name, as for the console's other always-asking
+// actions. A check never asks.
+test('F4: the owner’s local session confirms an apply by typing the workspace name; a check does not ask', async () => {
+  const dir = tempDir('solo-update-local-project')
+  const configFile = path.join(dir, 'shapewall.config.json')
+  fs.writeFileSync(configFile, JSON.stringify(structuredClone(SAMPLE), null, 2))
+  const config = loadConfig(configFile)
+  const calls = path.join(tempDir('solo-update-local-log'), 'calls')
+  const file = helper(`
+    import fs from 'node:fs'
+    fs.appendFileSync(${JSON.stringify(calls)}, process.argv[2] + '\\n')
+    console.log(${JSON.stringify(answer())})
+  `)
+  const hosted = await startHostedServer('solo-update-local', {
+    origin: (port) => soloOrigin('Sample site', port),
+    solo: { signIn: 'local', config, configPath: config.file, ownerName: 'Robin Tester', env: {}, appUpdate: { helper: file } },
+  })
+  servers.push(hosted)
+  const browser = createBrowser(hosted.port, hosted.origin)
+  const nonce = /name="nonce" value="([A-Za-z0-9_-]{32})"/.exec(fs.readFileSync(hosted.app.locals.soloOpenFile(), 'utf8'))[1]
+  const opened = await browser.post('/open', `nonce=${nonce}`, {
+    sendOrigin: false,
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'null' },
+  })
+  assert.equal(opened.status, 200)
+  const { owner } = hosted.app.locals.solo
+  const url = `/w/${owner.workspaceId}/p/${owner.projectId}/api/app-update`
+  const name = hosted.db.prepare('SELECT name FROM workspaces WHERE id = ?').get(owner.workspaceId).name
+
+  const check = await browser.post(`${url}/check`, {})
+  assert.equal(check.status, 202, check.text)
+  assert.equal((await settled(browser, url)).updateAvailable, true)
+
+  const bare = await browser.post(`${url}/apply`, {})
+  assert.equal(bare.status, 403)
+  assert.equal(bare.json.error.code, 'confirm_required')
+  assert.equal(bare.json.error.confirm, name)
+  const wrong = await browser.post(`${url}/apply`, {}, { headers: { 'X-Shapewall-Confirm': encodeURIComponent('not it') } })
+  assert.equal(wrong.status, 403)
+  assert.equal(wrong.json.error.code, 'confirm_required')
+  assert.equal(hosted.app.locals.appUpdate.applying(), false, 'nothing ran without the confirmation')
+
+  const confirmed = await browser.post(`${url}/apply`, {}, { headers: { 'X-Shapewall-Confirm': encodeURIComponent(name) } })
+  assert.equal(confirmed.status, 202, confirmed.text)
+  assert.equal((await settled(browser, url)).job.state, 'succeeded')
+  await hosted.app.locals.appUpdate.settled()
+  assert.deepEqual(fs.readFileSync(calls, 'utf8').trim().split('\n'), ['check', 'apply'])
 })

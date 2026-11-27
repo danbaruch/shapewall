@@ -5,6 +5,7 @@
 // keeps journeys read only.
 
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import test, { after } from 'node:test'
@@ -175,11 +176,76 @@ test('rev58 G5-1: a whole push to the engine keeps the journeys made on the boar
   assert.equal(renamed.status, 200, renamed.text)
   await push()
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).journeys[0].name, 'Upgrade to Plus')
-  // A link in its place is never followed into the board.
+  // rev58 RR1-L3: a journeys.json that cannot be carried refuses the commit instead of being dropped.
+  // A link in its place is never followed into the board, and the board stays as it was.
+  const kept = fs.readFileSync(file)
+  const refused = async () => {
+    await assert.rejects(push(), (error) => {
+      assert.equal(error.status, 409)
+      assert.equal(error.code, 'board_local_unreadable')
+      return true
+    })
+    assert.deepEqual(
+      fs.readdirSync(path.dirname(file)).filter((name) => name.endsWith('.carrying')),
+      [],
+    )
+  }
   fs.rmSync(file)
   const elsewhere = path.join(tempDir('solo-journeys-push-link'), 'journeys.json')
   fs.writeFileSync(elsewhere, JSON.stringify({ journeys: [{ id: 'planted', name: 'Planted', steps: ['home', 'app'] }] }))
   fs.symlinkSync(elsewhere, file)
+  await refused()
+  assert.equal(fs.lstatSync(file).isSymbolicLink(), true, 'the board folder was not swapped')
+  // Too large to carry.
+  fs.rmSync(file)
+  fs.writeFileSync(file, Buffer.alloc(4 * 1024 * 1024 + 1, 0x20))
+  await refused()
+  // rev58 RR1-L2: a FIFO never blocks the commit inside the write lock; it is refused at once.
+  if (process.platform !== 'win32') {
+    fs.rmSync(file)
+    execFileSync('mkfifo', [file])
+    const at = Date.now()
+    await refused()
+    assert.ok(Date.now() - at < 5000, 'the commit did not wait on the FIFO')
+  }
+  // Put right, the push goes through and the journeys come across.
+  fs.rmSync(file)
+  fs.writeFileSync(file, kept)
   await push()
-  assert.equal(fs.existsSync(file), false, 'a symbolic link is not carried')
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).journeys[0].name, 'Upgrade to Plus')
+})
+
+// rev58 G5-1 residual race: a journey write while a whole push of that board commits. The commit (carry
+// and swap) runs in one synchronous step inside the write lock, and a journey write reads, changes and
+// writes journeys.json in one synchronous step inside its file lock, so in the engine one always lands
+// wholly before or after the other: no write goes into the folder being swapped away.
+test('rev58 G5-1: journey writes racing whole pushes are never lost', async () => {
+  const { hosted, browser, owner, base, config } = await startSolo('solo-journeys-push-race')
+  const token = await createToken({ browser }, owner.workspaceId, owner.projectId)
+  const remote = createRemote({ origin: hosted.origin, token })
+  const board = config.boards[0]
+  writeLocalCaptures(config, 'sample')
+  const manifest = JSON.parse(fs.readFileSync(path.join(config.outputDir, 'sample', 'captures', 'manifest.json'), 'utf8'))
+  const ready = async () => {
+    const started = await remote.startPush(pushDefinition(config, board))
+    for (const [area, name, file] of pushFiles(config, board)) await remote.pushFile(started.id, area, name, fs.readFileSync(file))
+    return started.id
+  }
+  await remote.commitPush(await ready(), { manifest, variants: [] })
+  const names = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo']
+  for (const name of names) {
+    const id = await ready()
+    const [made] = await Promise.all([
+      browser.post(`${base}/boards/sample/journeys`, { name, steps: ['home', 'pricing'] }),
+      remote.commitPush(id, { manifest, variants: [] }),
+    ])
+    assert.equal(made.status, 201, made.text)
+  }
+  const listed = (await browser.get(`${base}/boards/sample/journeys`)).json.journeys.map((item) => item.name)
+  assert.deepEqual(listed.sort(), [...names].sort())
+  const folder = path.join(projectDir(hosted.dataDir, owner.workspaceId, owner.projectId), 'sample')
+  assert.deepEqual(
+    fs.readdirSync(folder).filter((name) => name.includes('.lock') || name.endsWith('.carrying')),
+    [],
+  )
 })
