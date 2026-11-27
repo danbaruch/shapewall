@@ -69,7 +69,8 @@ export function readTeamSetting(dataDir) {
   if (!stat.isFile()) return { on: false, httpsPort: DEFAULT_TEAM_PORT, problem: `${file} is not a plain file` }
   try {
     const value = JSON.parse(fs.readFileSync(file, 'utf8'))
-    const httpsPort = Number.isInteger(value?.httpsPort) && value.httpsPort > 0 && value.httpsPort < 65536 ? value.httpsPort : DEFAULT_TEAM_PORT
+    const httpsPort =
+      Number.isInteger(value?.httpsPort) && value.httpsPort > 0 && value.httpsPort < 65536 ? value.httpsPort : DEFAULT_TEAM_PORT
     return { on: value?.on === true, httpsPort }
   } catch {
     return { on: false, httpsPort: DEFAULT_TEAM_PORT, problem: `${file} is damaged` }
@@ -94,7 +95,9 @@ export function writeTeamSetting(dataDir, { on, httpsPort = DEFAULT_TEAM_PORT, n
 
 export function teamPortProblem(value) {
   const port = Number(value)
-  return Number.isInteger(port) && port > 0 && port < 65536 ? null : '--team-port: the HTTPS port on the tailnet (443 by default, like 8443)'
+  return Number.isInteger(port) && port > 0 && port < 65536
+    ? null
+    : '--team-port: the HTTPS port on the tailnet (443 by default, like 8443)'
 }
 
 // ---- What the team listener refuses (on top of a team server) ----
@@ -108,7 +111,12 @@ const REFUSED = [
     'Only the owner invites people to this board, from the machine that runs it (the console there, Invite people).',
   ],
   ['POST', /^\/api\/workspaces\/?$/, 'one_project', 'This board serves one project of its owner; it makes no new workspaces.'],
-  ['POST', new RegExp(`^/api/workspaces/${WS}/projects/?$`), 'one_project', 'This board serves one project of its owner; it makes no new projects.'],
+  [
+    'POST',
+    new RegExp(`^/api/workspaces/${WS}/projects/?$`),
+    'one_project',
+    'This board serves one project of its owner; it makes no new projects.',
+  ],
   [
     'DELETE',
     new RegExp(`^/api/workspaces/${WS}/projects/${WS}(?:/boards/${WS})?/?$`),
@@ -118,7 +126,11 @@ const REFUSED = [
 ]
 
 const refuse = (res, status, code, message) => {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+  })
   res.end(JSON.stringify({ error: { code, message } }))
 }
 
@@ -135,7 +147,12 @@ export function teamFilter(app, { db, dataDir }) {
         const ids = machineTokenIds(dataDir)
         const row = ids.length ? db.prepare('SELECT id FROM api_tokens WHERE token_hash = ?').get(sha256(match[1])) : null
         if (row && ids.includes(row.id))
-          return refuse(res, 403, 'machine_token', 'This token is for the machine that runs the engine; it does not work through the tailnet.')
+          return refuse(
+            res,
+            403,
+            'machine_token',
+            'This token is for the machine that runs the engine; it does not work through the tailnet.',
+          )
       }
     }
     return app(req, res)
@@ -236,8 +253,7 @@ export function createSoloTeam({
     saved,
     problem,
   })
-  const lines = () =>
-    reachLines({ ...status(), ownerOrigin, httpsPort: status().httpsPort, people: teamPeople(db) })
+  const lines = () => reachLines({ ...status(), ownerOrigin, httpsPort: status().httpsPort, people: teamPeople(db) })
 
   async function bringUp(httpsPort) {
     const proofModule = await import('../../tailnet-proof.js')

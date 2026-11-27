@@ -156,7 +156,11 @@ const BEN = { login: 'ben@example.com', name: 'Ben' }
 const CYD = { login: 'cyd@example.com', name: 'Cyd' }
 
 async function invite(engine, owner, who, role = 'member') {
-  const made = await owner.post(`/api/workspaces/${engine.solo.owner.workspaceId}/invites`, { role, tailnetLogin: who.login }, confirmFor(engine))
+  const made = await owner.post(
+    `/api/workspaces/${engine.solo.owner.workspaceId}/invites`,
+    { role, tailnetLogin: who.login },
+    confirmFor(engine),
+  )
   assert.equal(made.status, 201, made.text)
   return made
 }
@@ -293,7 +297,10 @@ test('nothing the owner’s machine trusts works through the tailnet: the local 
     (await request(teamPort, 'GET', `/api/workspaces/${ws}`, { headers: { Host: TAILNET_HOST, Cookie: ownerCookie } })).status,
     401,
   )
-  assert.equal((await request(teamPort, 'GET', '/solo/team', { headers: { Host: new URL(engine.ownerOrigin).host, Cookie: ownerCookie } })).status, 404)
+  assert.equal(
+    (await request(teamPort, 'GET', '/solo/team', { headers: { Host: new URL(engine.ownerOrigin).host, Cookie: ownerCookie } })).status,
+    404,
+  )
   // The open-link and switch routes of the owner's app are not on the team listener either.
   const key = fs.readFileSync(path.join(engine.dataDir, OPEN_KEY_FILE), 'utf8').trim()
   assert.equal(
@@ -354,7 +361,11 @@ test('teamFilter refuses what the engine keeps for its owner, and passes the res
   answer('DELETE', '/api/workspaces/ws_1/invites/iv_1')
   answer('GET', '/api/workspaces/ws_1')
   answer('POST', '/api/workspaces/ws_1/projects/pr_1/tokens')
-  assert.deepEqual(calls, ['DELETE /api/workspaces/ws_1/invites/iv_1', 'GET /api/workspaces/ws_1', 'POST /api/workspaces/ws_1/projects/pr_1/tokens'])
+  assert.deepEqual(calls, [
+    'DELETE /api/workspaces/ws_1/invites/iv_1',
+    'GET /api/workspaces/ws_1',
+    'POST /api/workspaces/ws_1/projects/pr_1/tokens',
+  ])
 })
 
 test('the switch: the console button (typed confirmation), off back to loopback, the command line, and a restart', async () => {
@@ -419,7 +430,10 @@ test('the switch: the console button (typed confirmation), off back to loopback,
     403,
     'never from a page',
   )
-  const cli = await request(engine.port, 'POST', '/solo/team-switch', { body: { on: true }, headers: { Host: host, 'X-Shapewall-Solo-Key': key } })
+  const cli = await request(engine.port, 'POST', '/solo/team-switch', {
+    body: { on: true },
+    headers: { Host: host, 'X-Shapewall-Solo-Key': key },
+  })
   assert.equal(cli.status, 200, cli.text)
   assert.equal(cli.json.on, true)
   assert.match(cli.json.lines.join('\n'), /Members \(1\): @cyd/)

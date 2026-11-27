@@ -224,6 +224,17 @@ The engine is the hosted server's code, under its Functional Source License (Apa
 core's Apache 2.0. An existing `.shapewall/` moves into it with [`shapewall migrate`](#shapewall-migrate).
 Details: [the solo engine](/docs/hosted#the-solo-engine-experimental).
 
+```sh
+shapewall serve --team [on|off] [--team-port 443]
+```
+
+Team mode: `--team` puts the engine on your tailnet for the people you invite, through `tailscale serve` with tailnet sign-in
+(never Funnel, never the public internet), on the same data with nothing copied; you stay the one owner. `--team off` puts it
+back on this machine only. The setting is kept in `.shapewall/.engine/`, so the next `serve` starts the way it was left, and
+each start prints who can reach the board. While the engine runs, `serve --team [off]` in the project folder switches it
+there. Invite people on the console's Members page does the same after you type the workspace's name; only you, on this
+machine, invite. Details: [team mode](/docs/hosted#inviting-people-team-mode).
+
 ## shapewall buzz-bridge
 
 **Experimental.** Outside the [stability promise](/docs/stability): it can change, or go, in a minor release.
@@ -786,6 +797,12 @@ Commands
                             (start even when git cannot say whether it tracks .engine/); while it runs,
                             comments, watch and mcp in this folder go to it, and it runs this project's
                             agent (a coding agent or a model endpoint) on the link; --no-chat without one
+      --team [on|off]       hosted engine: put this board on your tailnet (tailscale serve, tailnet sign-in) for
+                            the people you invite: the same data, nothing copied, you stay the owner. off: this
+                            machine only again. Kept in .shapewall/.engine/, so the next serve starts the way it
+                            was left; each start prints who can reach it. While the engine runs it switches
+                            there. Invite people in the console does the same
+      --team-port N         with --team: the HTTPS port on your tailnet (default 443)
       --engine legacy       the 1.x board server (deprecated, removed in 3.0; also $SHAPEWALL_ENGINE=legacy);
                             --host, --lan, --tailscale, --accounts, --agent-acp and the other 1.x-only flags pick it too
   devices list              paired devices and pending requests for this project [--json]

@@ -28,6 +28,7 @@ import { useAction, useLoad, useSession, useToast } from '../state'
 import { InviteDialog } from './invites'
 import { useWorkspace } from './workspace'
 import { TailnetVisitors } from './tailnet'
+import { TeamCard, TeamOnDialog, useTeam } from './team'
 
 export function MembersSection() {
   const { data, role, isAdmin, workspaceId, reload } = useWorkspace()
@@ -35,6 +36,9 @@ export function MembersSection() {
   const toast = useToast()
   const [query, setQuery] = useState('')
   const [inviting, setInviting] = useState(false)
+  // The solo engine: with team mode off, Invite people first puts the board on the tailnet (./team.jsx).
+  const { team } = useTeam()
+  const [teamAsk, setTeamAsk] = useState(false)
   const [change, setChange] = useState(null) // { member, role }
   const [removing, setRemoving] = useState(null)
   const action = useAction()
@@ -114,12 +118,27 @@ export function MembersSection() {
               </Button>
             )}
             {isAdmin ? (
-              <Button size="touch" variant="default" onClick={() => setInviting(true)} className="lg:h-9" data-sw-invite-people>
+              <Button
+                size="touch"
+                variant="default"
+                onClick={() => (team && !team.on ? setTeamAsk(true) : setInviting(true))}
+                className="lg:h-9"
+                data-sw-invite-people
+              >
                 <UserPlus size={16} aria-hidden="true" /> Invite people
               </Button>
             ) : null}
           </>
         }
+      />
+      <TeamCard onInvite={() => setInviting(true)} />
+      <TeamOnDialog
+        open={teamAsk}
+        onClose={() => setTeamAsk(false)}
+        onDone={() => {
+          setTeamAsk(false)
+          setInviting(true)
+        }}
       />
       {isAdmin ? <TailnetVisitors /> : null}
       <Card>

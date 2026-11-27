@@ -7,6 +7,7 @@ Shapewall has two shapes. Pick by who needs the board and when, not by how big t
 | One person, building with an agent              | `npx shapewall serve` in the project, next to its dev server | You, on this machine                 | No: start it when you work |
 | One person, also on your phone or second laptop | `npx shapewall serve --tailscale`                            | Your own devices on your tailnet     | No                         |
 | One person, on the hosted engine (experimental) | `npx shapewall serve --engine hosted` in the project         | You, on this machine                 | No: start it when you work |
+| The same, with a few people invited             | `npx shapewall serve --team` (or Invite people)              | You, and tailnet users you invite    | No: while it runs          |
 | A team, or you and your agents around the clock | `shapewall hosted --tailscale` on a machine that stays on    | Everyone you invite, on your tailnet | Yes                        |
 | The same, with no passkeys to set up            | `shapewall hosted --tailscale --tailnet-sign-in`             | Tailnet users you invite by login    | Yes                        |
 | A team with people outside your tailnet         | `shapewall hosted` behind your own domain                    | Everyone you invite, from anywhere   | Yes                        |
@@ -95,6 +96,15 @@ The engine is the hosted server's code (`src/hosted`), so it is under the hosted
 [Functional Source License 1.1, ALv2 future license](../src/hosted/LICENSE.md). Anyone may use, change and run it, at work too;
 what it does not allow is offering it as a competing hosted service, and each release becomes Apache 2.0 two years after it ships.
 The CLI, capture, the local board and the migration planner, backup and rollback stay Apache 2.0.
+
+### Inviting people to the engine
+
+`shapewall serve --team`, or **Invite people** on the console's Members page, puts the same engine on your tailnet for the people
+you invite: `tailscale serve` with tailnet sign-in, the same data, nothing copied, and you stay the owner. `shapewall serve --team
+off` (or **Stop sharing**) puts it back on this machine only. Every start prints exactly who can reach the board. It is never on
+the public internet: for that, run a team server on your own domain. The board is there only while the engine runs, so a team
+that needs it around the clock wants a team server on a machine that stays on; `shapewall share` moves the project there.
+Details: [team mode](hosted.md#inviting-people-team-mode).
 
 Every detail (sign-in, tokens, the board's own agent, capturing, what it refuses): [the solo engine](hosted.md#the-solo-engine-experimental).
 

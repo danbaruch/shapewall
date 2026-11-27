@@ -240,7 +240,8 @@ export function createHostedApp({
   // (primary) and the old one (previous; sign-in and the move only). Each has
   // its own passkey checks; `related` checks old passkeys on the new origin
   // (WebAuthn Related Origin Requests). The site of a request is its Host.
-  const previous = guestOnly || secondary ? null : prepareOrigins({ db, origin: publicOrigin, rpId: base.hostname, previousOrigin, now, log })
+  const previous =
+    guestOnly || secondary ? null : prepareOrigins({ db, origin: publicOrigin, rpId: base.hostname, previousOrigin, now, log })
   const sites = {
     primary: { origin: publicOrigin, host: base.host, auth },
     previous: previous

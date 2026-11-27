@@ -58,7 +58,9 @@ export async function serveCommand(flags, out, { env = process.env, version = 'd
   if (choice.engine === 'legacy') {
     // Team mode is the engine's (src/hosted/solo/team.js); the 1.x server shares through --tailscale and --lan.
     if (flags.team !== undefined || flags['team-port'] !== undefined)
-      throw new Error('--team is for the solo engine (the default). Leave out the 1.x flags (--host, --lan, --tailscale, ...) or --engine legacy.')
+      throw new Error(
+        '--team is for the solo engine (the default). Leave out the 1.x flags (--host, --lan, --tailscale, ...) or --engine legacy.',
+      )
     const { serve } = await import('./serve.js')
     return serve(flags, out)
   }

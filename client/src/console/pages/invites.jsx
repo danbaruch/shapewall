@@ -215,7 +215,8 @@ export function InviteDialog({ open, onClose, onCreated }) {
     setLogin('')
     setError(null)
   })
-  const roles = invitableRoles(myRole)
+  // The solo engine keeps one owner: nobody is invited as one there.
+  const roles = invitableRoles(myRole).filter((item) => !(features.team && item === 'owner'))
   const create = (event) => {
     event.preventDefault()
     run(async () => {
