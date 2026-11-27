@@ -13,6 +13,30 @@ export function tempDir(name) {
   return dir
 }
 
+// PATH without any folder that holds an agent adapter this machine may have
+// (claude-agent-acp, codex-acp, goose, gemini): a test that starts the solo
+// engine (its own agent, src/remote/local-agent.js) never finds a real agent.
+const AGENT_PROGRAMS = ['claude-agent-acp', 'codex-acp', 'goose', 'gemini', 'claude', 'codex']
+export function pathWithoutAgents(value = process.env.PATH || '') {
+  return value
+    .split(path.delimiter)
+    .filter((dir) => dir && !AGENT_PROGRAMS.some((name) => fs.existsSync(path.join(dir, name))))
+    .join(path.delimiter)
+}
+
+// An environment of its own for a test: a home and config folder nobody else uses (never the person's Settings >
+// Agent, keys or policy file) and no agent on PATH.
+export function isolatedEnv(name, extra = {}) {
+  const home = tempDir(name + '-home')
+  return {
+    PATH: pathWithoutAgents(),
+    HOME: home,
+    XDG_CONFIG_HOME: path.join(home, '.config'),
+    XDG_STATE_HOME: path.join(home, '.state'),
+    ...extra,
+  }
+}
+
 export const SAMPLE = {
   title: 'Sample',
   id: 'sample',

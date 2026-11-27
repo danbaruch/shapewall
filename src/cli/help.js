@@ -98,7 +98,8 @@ export const SECTIONS = {
                             one-time page (--open), data in .shapewall/.engine/; takes --port, --open,
                             --print-owner-link, --read-only, --no-chat, --no-capture, --skip-git-check
                             (start even when git cannot say whether it tracks .engine/); while it runs,
-                            comments, watch and mcp in this folder go to it${EXPERIMENTAL}`,
+                            comments, watch and mcp in this folder go to it, and it runs this project's
+                            agent (a coding agent or a model endpoint) on the link; --no-chat without one${EXPERIMENTAL}`,
   devices: `  devices list              paired devices and pending requests for this project [--json]
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request
@@ -183,6 +184,10 @@ export const SECTIONS = {
       --agent NAME          which agent: claude, or a saved agent's id that runs Claude Code (default: this
                             project's agent, else Claude Code when found). Codex, goose and Gemini CLI are not
                             offered in this release. Never a command from the server
+      --endpoint            a model endpoint instead (Ollama, DeepSeek, OpenAI-compatible: this project's
+                            agent.baseUrl and agent.model, Settings > Agent or SHAPEWALL_AGENT_BASE_URL and
+                            SHAPEWALL_AGENT_MODEL; the key stays in its variable). Answers only: no edits, no
+                            commands, no tools (experimental)
       --name "Builder"      the name to suggest on the approval page (the approver has the last word)
       --project SLUG        on a server with tailnet sign-in, run on a tailnet machine (experimental)
                             no browser, your tailnet user approves it. --project (and --workspace NAME) pick the

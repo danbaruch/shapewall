@@ -114,7 +114,7 @@ function showLink(flags, env) {
   return Boolean(process.stdout.isTTY) && env.TERM !== 'dumb'
 }
 
-export async function serveEngine(flags, out, { env = process.env, start = null, spawnImpl = undefined } = {}) {
+export async function serveEngine(flags, out, { env = process.env, start = null, spawnImpl = undefined, agentSpawn = null } = {}) {
   const problem = engineFlagProblem(flags)
   if (problem) throw new Error(problem)
   const config = loadConfig(flags.config)
@@ -156,6 +156,10 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
   const holder = { stop: null }
   // This start's proof key (engine-target.js verifyEngine): only in serve.json (0600) and the engine's memory.
   const proofKey = randomBytes(32).toString('base64url')
+  // The board's own agent (R2): planned from this project's agent settings before the engine starts, so its token is
+  // made with it; started once the engine answers. --no-chat runs without one.
+  const { planLocalAgent, startLocalAgent } = await import('../../remote/local-agent.js')
+  const agentPlan = flags['no-chat'] || flags['read-only'] ? null : planLocalAgent(config, env)
   const solo = {
     signIn: 'local',
     config,
@@ -167,6 +171,7 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
     allowCapture: !flags['read-only'] && !flags['no-capture'],
     env,
     proofKey,
+    localAgent: agentPlan && !agentPlan.off ? { ...agentPlan.identity, machine: null } : null,
     // A managed installer opts in to a restart after its helper switched the release (exit 75), as `serve`.
     appUpdate: env.SHAPEWALL_UPDATE_RESTART === '1' ? { onRestart: () => holder.stop?.(UPDATE_RESTART_EXIT) } : {},
   }
@@ -192,8 +197,14 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
   // A stop from this process (a test, an update restart): serve.json goes first, so a command in the folder says
   // "stopping" rather than reaching for a token being retired, and the lock goes once the engine is down.
   const stopEngine = handle.stop
+  let localAgent = null
   handle.stop = async (code) => {
     fs.rmSync(stateFile(dir), { force: true })
+    try {
+      await localAgent?.stop()
+    } catch {
+      /* gone already */
+    }
     try {
       return await stopEngine(code)
     } finally {
@@ -226,6 +237,17 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
   // The address goes in the environment, not on the agent's command line: any local user can read a process's
   // arguments (ps), and the name's random part is one of the layers that keep the cookie in (rev54 N3).
   out(`Agents: SHAPEWALL_REMOTE=${handle.origin} shapewall agent connect`)
+  if (agentPlan)
+    localAgent = startLocalAgent({
+      config,
+      origin: handle.origin,
+      tokenFile: tokenFiles.agent,
+      plan: agentPlan,
+      env,
+      out,
+      ...(agentSpawn ? { spawnImpl: agentSpawn } : {}),
+    })
+  handle.localAgent = localAgent
   if (flags.open) {
     const file = handle.app.locals.soloOpenFile()
     signIn(file, out, { open: true, spawnImpl, keep: () => handle.app.locals.soloKeepOpenFile(file) })

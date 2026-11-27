@@ -722,6 +722,23 @@ shapewall serve --engine hosted --open
   has kept comments for the project, and refuse a board `shapewall migrate` moved. An explicit `--remote` (or
   `SHAPEWALL_REMOTE`) always wins. `shapewall events` reads `.shapewall/events.jsonl`, which the engine writes, and `ci` does
   not read comments, so neither changes.
+- **The board's own agent.** The engine runs this project's agent the way any machine runs one for a team server: a child
+  `shapewall agent connect --as local` on the same link, so the board's chat, Fix with and comments sent to the agent go
+  through the same code, trust tiers and machine policy as on a team server, and it gets nothing more than it would there. Which agent comes
+  from Settings > Agent (or the config and the environment), as for the local chat: a coding agent (Claude Code over ACP)
+  or a model endpoint (Ollama, DeepSeek, any OpenAI-compatible server, `agent connect --endpoint`: answers only, no tools,
+  the key stays in its variable and is never printed or sent to the engine). Its name, icon and tint become the agent's
+  on the board (again whenever they change in the settings); on a new engine it is the project's default agent, so the
+  comments you write go to it and it answers on them, as a team server's agents do. Its token
+  (`agent.token`, the scopes an approved `agent connect` gets) is made at start, 0600 in `.shapewall/.engine/`, rotated every
+  start and retired at stop; the child reads it by path and gets the engine's address in its environment, so neither is on
+  a command line. It is read and answer only, as a fresh `agent connect` is, unless branch mode is on for a coding agent:
+  then the connection starts at `--approvals owner` (you allow each edit on the board; fixes are made on a branch in a copy
+  outside the project). That is set once, when nothing is saved for the connection yet; `shapewall agent set --as local`
+  (with `SHAPEWALL_REMOTE` set to the engine's address) changes it afterwards, and the settings are kept per address, so
+  a different `--port` starts from the settings again. No agent that can run: the start says why and the engine runs
+  without one. A child that exits is started again, after a growing pause, five times in a row at most. `--no-chat` (or
+  `--read-only`) runs the engine without it.
 - **Data** lives in `.shapewall/.engine/` (a name no board id can take): the database, the captures, the host name's random
   part, the sign-in keys. The folder is made private (0700) with a `.gitignore` of `*`. The engine refuses to start if git
   tracks anything in it, whichever repository could: the project's, a repository or submodule that `.shapewall` is itself,

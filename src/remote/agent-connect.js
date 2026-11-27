@@ -29,6 +29,7 @@ import { closeSandbox } from '../agent/sandbox-exec.js'
 import { AGENT_SLUG_RE, forgetAgentCredential, pinAgentOwner, readAgentCredential, saveAgentCredential } from './credentials.js'
 import { fixRoot, sweepFixes } from './agent-fix.js'
 import { fatalLinkError, runAgentLink } from './agent-link.js'
+import { createEndpointBackend, endpointHost, endpointSettings } from './endpoint-backend.js'
 import {
   POLICY_APPROVALS,
   POLICY_AUDIENCES,
@@ -48,7 +49,7 @@ import {
 import { createRemote, remoteOrigin } from './remote.js'
 import { NO_ENGINE_VAR } from '../engine-target.js'
 import { safeOut, terminalSafe } from './terminal.js'
-import { hostPlatform, machineView, markBrowserProfile } from '../agent/capabilities.js'
+import { CAPABILITY_NARROWEST, hostPlatform, machineView, markBrowserProfile } from '../agent/capabilities.js'
 import { policyExtensions } from '../agent/agent-config-folder.js'
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version
@@ -372,9 +373,16 @@ export async function agentConnect(
   const concurrency = flags.concurrency === undefined ? 2 : Number(flags.concurrency)
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) throw new Error('--concurrency must be 1 to 4')
   const config = projectFor(flags, cwd)
-  const settings = connectSettings(config, flags, env)
-  const kind = acpAgentKind(settings.acp.argv) || 'custom'
-  const label = terminalSafe(settings.label)
+  // --endpoint: a model endpoint behind the same link (endpoint-backend.js), read and answer only.
+  const endpoint = Boolean(flags.endpoint)
+  if (endpoint && flags.agent !== undefined) throw new Error('--endpoint and --agent: pick one (a model endpoint, or a coding agent).')
+  if (endpoint && flags.approvals !== undefined && flags.approvals !== 'none')
+    throw new Error('--endpoint answers only: a model endpoint cannot make edits this machine checks first (--approvals none).')
+  if (endpoint && (flags.auto !== undefined || flags['allow-path'] !== undefined || flags['allow-command'] !== undefined))
+    throw new Error('--endpoint answers only: --auto, --allow-path and --allow-command are for a coding agent.')
+  const settings = endpoint ? endpointSettings(config, env) : connectSettings(config, flags, env)
+  const kind = endpoint ? 'custom' : acpAgentKind(settings.acp.argv) || 'custom'
+  const label = terminalSafe(settings.label || (endpoint ? 'Model endpoint' : 'Agent'))
   // Checked before anything is asked of anyone: a wrong flag changes nothing.
   // A value in the file that is not understood reads as the narrowest setting, and is said.
   const policyNow = readMachinePolicy(origin, slug, env, {
@@ -454,7 +462,25 @@ export async function agentConnect(
   // ---- This machine's own rules ----
   const saved = Object.keys(changes).length ? saveMachinePolicy(origin, slug, changes, env) : policyNow
   // Commands in the file (written by hand, or for another agent) are not in effect for an agent they were not proven with.
-  const policy = COMMANDS_PROVEN.includes(kind) ? saved : { ...saved, commands: [], auto: saved.auto.filter((item) => item !== 'commands') }
+  // A model endpoint answers only, whatever the file says (written by hand, or for this name's coding agent before).
+  // Its capability keys go to the narrowest too: it gets no tool host, so the board is never told it may run or browse.
+  const answerOnly = (read) =>
+    endpoint
+      ? {
+          ...read,
+          ...CAPABILITY_NARROWEST,
+          approvals: 'none',
+          commands: [],
+          auto: [],
+          allowPaths: [],
+          agentConfig: null,
+          extensionsFor: [],
+          allowTool: [],
+        }
+      : read
+  const policy = answerOnly(
+    COMMANDS_PROVEN.includes(kind) ? saved : { ...saved, commands: [], auto: saved.auto.filter((item) => item !== 'commands') },
+  )
   if (saved.commands.length && !policy.commands.length) log(`Not in effect: the commands in ${policyFile(env)}. ${NO_COMMANDS}`)
   const edits = policy.approvals !== 'none'
   if (edits) {
@@ -468,110 +494,130 @@ export async function agentConnect(
     const swept = sweepFixes(config.dir, env)
     if (swept.length) log(`Removed ${swept.length} unfinished fix cop${swept.length === 1 ? 'y' : 'ies'} an earlier run left behind.`)
   }
-  const profile = profileProblems(kind, config.dir, env)
-  if (profile.refuse.length)
-    throw new Error(
-      `${label} is not started read-only on this machine. ${profile.refuse.join(' ')} See https://shapewall.com/docs/agent-hardening.`,
-    )
-  for (const line of profile.notes) log(line)
+  // ---- The agent this machine runs: a coding agent over ACP, or a model endpoint ----
+  const made = endpoint ? endpointLink() : await codingAgentLink()
+  const { backend, editBackend, extensions, instructionsNote, instructions } = made
 
-  // ---- Instruction files (src/agent/instructions.js) ----
-  // Read here for the list the board is shown; each session reads them again
-  // when it starts (a fix from its own copy of the project).
-  const configDir = agentConfigFor(policy, slug, { env, projectDir: config.dir }).dir
-  const instructions = { mode: policy.instructions, configDir }
-  const loaded = loadInstructions({ root: config.dir, ...instructions })
-  for (const line of instructionsLines(loaded)) log(terminalSafe(line))
-  if (!loaded.files.length)
-    log(
-      policy.instructions === 'none'
-        ? 'Instructions: off on this machine (--instructions none).'
-        : 'Instructions: none found (CLAUDE.md or AGENTS.md in the project, or in the agent config folder).',
-    )
-  const instructionsNote = createInstructionsNote(instructionsSummary(loaded))
-
-  // ---- Extensions (src/agent/agent-config-folder.js) ----
-  // Skills and MCP servers, only from a folder this machine names itself
-  // (--agent-config DIR), never the default one, ~/.claude or the checkout.
-  // Read once here; each turn gets them only when its capabilities say so
-  // (a trusted turn on a thread that never carried outside text).
-  const extensions = policyExtensions(policy.agentConfig, { projectDir: config.dir, outputDir: config.outputDir, env })
-  for (const line of extensionLines(extensions, policy, kind)) log(terminalSafe(line))
-
-  // ---- Can a session be opened at all? ----
-  // Asked of the agent now, the way a question from the board would start it
-  // (no prompt is sent, so nothing is spent): an adapter that cannot open the
-  // session, or that this release was not tested with, is said here and not
-  // at somebody's first question.
-  const opens = async (what, how) => {
-    const result = await acpHandshake({ ...settings, ...how }, { env: agentEnv, root: config.dir, timeoutMs: ACP_DEFAULTS.startMs })
-    if (result.ok) return result
-    const said = adapterName(result.agentInfo)
-    if (result.stderr) log(`${label} last output: ${terminalSafe(result.stderr)}`)
-    throw new Error(
-      `${label} could not open ${what} on this machine, so it is not connected${said && !result.message.includes(said) ? ` (adapter: ${terminalSafe(said)})` : ''}. ${terminalSafe(result.message)}`,
-    )
+  // A model endpoint: no session to open, no instruction files (it reads no files), no extensions, no edit backend.
+  function endpointLink() {
+    log(`${label} answers through the model endpoint at ${terminalSafe(endpointHost(settings.baseUrl))} (read and answer only).`)
+    log('Instructions and extensions: not for a model endpoint (it reads no files and runs no tools).')
+    return {
+      backend: createEndpointBackend(settings, { env, fetchImpl }),
+      editBackend: null,
+      extensions: { found: null },
+      instructionsNote: createInstructionsNote([]),
+      instructions: null,
+    }
   }
-  const opened = await opens('a read-only session', { readOnly: true, instructions })
-  if (edits)
-    await opens('a session for edits', {
-      readOnly: false,
-      remoteEdit: { commands: policy.commands, allowPaths: policy.allowPaths },
-      instructions,
-    })
-  const adapter = terminalSafe(adapterName(opened.agentInfo) || 'an adapter that does not say its version')
-  const untested = adapterWarning(kind, opened.agentInfo, label)
-  if (untested) log(`Warning: ${terminalSafe(untested)}`)
-  else log(`${label} answers through ${adapter}, a version this release was tested with.`)
 
-  const backend = createBackend(
-    // Read and answer only (src/agent/backends/acp.js readOnly), with the
-    // connected agent's own first words. Images are not sent to it yet.
-    {
-      ...settings,
-      readOnly: true,
-      preamble: remotePreamble(askedOf(policy, kind)),
-      vision: false,
-      // Each chat session reads the files afresh; a different set is told to the board (hello).
-      instructions: { ...instructions, onLoad: (read) => instructionsNote.update(instructionsSummary(read)) },
-    },
-    {
-      env: agentEnv,
-      root: config.dir,
-      protect: [config.outputDir],
-      sensitivePaths: () => authFiles(config),
-      denyRead: storageStateFiles(config),
-      limits: { processesMax: Math.max(concurrency, 2) },
-      log: (line) => log(line),
-    },
-  )
-  if (!backend) throw new Error('That agent could not be set up on this machine.')
-  // The same agent, started for fixes: it may ask to edit files of the
-  // project (and to run the listed commands), each request checked here and
-  // answered on the board (acp.js remoteEdit). Only when this machine said so.
-  const editBackend = edits
-    ? createBackend(
-        {
-          ...settings,
-          readOnly: false,
-          remoteEdit: { commands: policy.commands, allowPaths: policy.allowPaths },
-          preamble: REMOTE_FIX_PREAMBLE,
-          vision: false,
-          // Read from the fix's own copy (the base commit) when its session starts.
-          instructions,
-        },
-        {
-          env: agentEnv,
-          // Each fix gives its own folder (a worktree) as the turn's workdir; this root is never written.
-          root: config.dir,
-          protect: [config.outputDir],
-          sensitivePaths: () => authFiles(config),
-          denyRead: storageStateFiles(config),
-          limits: { processesMax: Math.max(concurrency, 2) },
-          log: (line) => log(line),
-        },
+  async function codingAgentLink() {
+    const profile = profileProblems(kind, config.dir, env)
+    if (profile.refuse.length)
+      throw new Error(
+        `${label} is not started read-only on this machine. ${profile.refuse.join(' ')} See https://shapewall.com/docs/agent-hardening.`,
       )
-    : null
+    for (const line of profile.notes) log(line)
+
+    // ---- Instruction files (src/agent/instructions.js) ----
+    // Read here for the list the board is shown; each session reads them again
+    // when it starts (a fix from its own copy of the project).
+    const configDir = agentConfigFor(policy, slug, { env, projectDir: config.dir }).dir
+    const instructions = { mode: policy.instructions, configDir }
+    const loaded = loadInstructions({ root: config.dir, ...instructions })
+    for (const line of instructionsLines(loaded)) log(terminalSafe(line))
+    if (!loaded.files.length)
+      log(
+        policy.instructions === 'none'
+          ? 'Instructions: off on this machine (--instructions none).'
+          : 'Instructions: none found (CLAUDE.md or AGENTS.md in the project, or in the agent config folder).',
+      )
+    const instructionsNote = createInstructionsNote(instructionsSummary(loaded))
+
+    // ---- Extensions (src/agent/agent-config-folder.js) ----
+    // Skills and MCP servers, only from a folder this machine names itself
+    // (--agent-config DIR), never the default one, ~/.claude or the checkout.
+    // Read once here; each turn gets them only when its capabilities say so
+    // (a trusted turn on a thread that never carried outside text).
+    const extensions = policyExtensions(policy.agentConfig, { projectDir: config.dir, outputDir: config.outputDir, env })
+    for (const line of extensionLines(extensions, policy, kind)) log(terminalSafe(line))
+
+    // ---- Can a session be opened at all? ----
+    // Asked of the agent now, the way a question from the board would start it
+    // (no prompt is sent, so nothing is spent): an adapter that cannot open the
+    // session, or that this release was not tested with, is said here and not
+    // at somebody's first question.
+    const opens = async (what, how) => {
+      const result = await acpHandshake({ ...settings, ...how }, { env: agentEnv, root: config.dir, timeoutMs: ACP_DEFAULTS.startMs })
+      if (result.ok) return result
+      const said = adapterName(result.agentInfo)
+      if (result.stderr) log(`${label} last output: ${terminalSafe(result.stderr)}`)
+      throw new Error(
+        `${label} could not open ${what} on this machine, so it is not connected${said && !result.message.includes(said) ? ` (adapter: ${terminalSafe(said)})` : ''}. ${terminalSafe(result.message)}`,
+      )
+    }
+    const opened = await opens('a read-only session', { readOnly: true, instructions })
+    if (edits)
+      await opens('a session for edits', {
+        readOnly: false,
+        remoteEdit: { commands: policy.commands, allowPaths: policy.allowPaths },
+        instructions,
+      })
+    const adapter = terminalSafe(adapterName(opened.agentInfo) || 'an adapter that does not say its version')
+    const untested = adapterWarning(kind, opened.agentInfo, label)
+    if (untested) log(`Warning: ${terminalSafe(untested)}`)
+    else log(`${label} answers through ${adapter}, a version this release was tested with.`)
+
+    const backend = createBackend(
+      // Read and answer only (src/agent/backends/acp.js readOnly), with the
+      // connected agent's own first words. Images are not sent to it yet.
+      {
+        ...settings,
+        readOnly: true,
+        preamble: remotePreamble(askedOf(policy, kind)),
+        vision: false,
+        // Each chat session reads the files afresh; a different set is told to the board (hello).
+        instructions: { ...instructions, onLoad: (read) => instructionsNote.update(instructionsSummary(read)) },
+      },
+      {
+        env: agentEnv,
+        root: config.dir,
+        protect: [config.outputDir],
+        sensitivePaths: () => authFiles(config),
+        denyRead: storageStateFiles(config),
+        limits: { processesMax: Math.max(concurrency, 2) },
+        log: (line) => log(line),
+      },
+    )
+    if (!backend) throw new Error('That agent could not be set up on this machine.')
+    // The same agent, started for fixes: it may ask to edit files of the
+    // project (and to run the listed commands), each request checked here and
+    // answered on the board (acp.js remoteEdit). Only when this machine said so.
+    const editBackend = edits
+      ? createBackend(
+          {
+            ...settings,
+            readOnly: false,
+            remoteEdit: { commands: policy.commands, allowPaths: policy.allowPaths },
+            preamble: REMOTE_FIX_PREAMBLE,
+            vision: false,
+            // Read from the fix's own copy (the base commit) when its session starts.
+            instructions,
+          },
+          {
+            env: agentEnv,
+            // Each fix gives its own folder (a worktree) as the turn's workdir; this root is never written.
+            root: config.dir,
+            protect: [config.outputDir],
+            sensitivePaths: () => authFiles(config),
+            denyRead: storageStateFiles(config),
+            limits: { processesMax: Math.max(concurrency, 2) },
+            log: (line) => log(line),
+          },
+        )
+      : null
+    return { backend, editBackend, extensions, instructionsNote, instructions }
+  }
 
   const controller = new AbortController()
   const stop = () => controller.abort()
@@ -614,7 +660,9 @@ export async function agentConnect(
             log(`Not understood, so read as the narrowest setting: ${text}`)
           },
         })
-        return COMMANDS_PROVEN.includes(kind) ? read : { ...read, commands: [], auto: read.auto.filter((item) => item !== 'commands') }
+        return answerOnly(
+          COMMANDS_PROVEN.includes(kind) ? read : { ...read, commands: [], auto: read.auto.filter((item) => item !== 'commands') },
+        )
       },
       remote,
       takeover: Boolean(flags.takeover),

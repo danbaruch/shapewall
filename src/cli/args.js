@@ -40,6 +40,7 @@ const BOOLEAN_FLAGS = new Set([
   'status',
   'pass-token',
   'takeover',
+  'endpoint',
   'browser-no-sandbox',
   'include-guests',
   'dry-run',
@@ -210,6 +211,7 @@ export const COMMAND_FLAGS = {
     'board',
     // agent connect
     'agent',
+    'endpoint',
     'name',
     'as',
     'audience',

@@ -20,12 +20,12 @@ import { startHosted } from '../src/hosted/server.js'
 import { soloFlagGate } from '../src/hosted/solo/flags.js'
 import { removeStaleAnswerFolders } from '../src/update/routes.js'
 import { engineFlagProblem, serveEngine } from '../src/hosted/solo/serve.js'
-import { SAMPLE, request, tempDir } from './helpers.js'
+import { SAMPLE, isolatedEnv, request, tempDir } from './helpers.js'
 import { signUp, startHostedServer } from './hosted-helpers.js'
 
 quietSqliteWarning()
 
-const ENV = { SHAPEWALL_USER_NAME: 'Robin Tester', PATH: process.env.PATH }
+const ENV = isolatedEnv('solo-env', { SHAPEWALL_USER_NAME: 'Robin Tester' })
 
 function project(name) {
   const dir = tempDir(name)

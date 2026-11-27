@@ -8,7 +8,9 @@
 // comment, a reply and a resolve on the board; a reply from the command
 // line (`comments reply --remote`); and `agent connect --remote` with the
 // ACP stub standing in for Claude Code's adapter, which answers on the
-// board's chat.
+// board's chat. The engine's own agent (R2: `agent connect --as local`,
+// started by the engine with the stub on PATH) answers there too, and
+// `agent connect --endpoint` with a stub chat completions server.
 // Set SHAPEWALL_SHOTS=<dir> to keep screenshots.
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -18,7 +20,8 @@ import http from 'node:http'
 import { spawn } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
-import { SAMPLE, tempDir } from '../helpers.js'
+import { SAMPLE, pathWithoutAgents, tempDir } from '../helpers.js'
+import { startOpenAIStub } from '../fixtures/openai-stub.js'
 import { writeLocalCaptures } from '../hosted-helpers.js'
 import { stopChild } from '../child-process-helpers.js'
 import { loadConfig } from '../../src/config.js'
@@ -40,10 +43,12 @@ const errors = []
 const children = []
 
 const HOME = tempDir('solo-e2e-home')
+// No real agent on PATH: the engine's own agent (and every agent here) is the ACP stub or the endpoint stub.
 const ENV = {
-  PATH: process.env.PATH,
+  PATH: pathWithoutAgents(),
   HOME,
   XDG_CONFIG_HOME: path.join(HOME, '.config'),
+  XDG_STATE_HOME: path.join(HOME, '.state'),
   SHAPEWALL_NO_BROWSER: '1',
   SHAPEWALL_USER_NAME: 'Robin Tester',
 }
@@ -88,6 +93,41 @@ async function approve(code, { agent = false } = {}) {
 }
 const CODE_RE = /[A-Z]{4}-[A-Z]{4}/
 
+// A folder with the ACP stub as Claude Code's adapter.
+function stubBin(name) {
+  const bin = tempDir(name)
+  fs.writeFileSync(path.join(bin, 'claude-agent-acp'), `#!/bin/sh\nexec "${process.execPath}" "${ACP_STUB}" --ro-modes "$@"\n`, {
+    mode: 0o755,
+  })
+  return bin
+}
+
+// The board's chat with one agent, by its row in the Agents panel: -> the answer's text.
+async function chatWith(name, text, expected) {
+  await page.goto(boardUrl)
+  await page.waitForSelector('[data-sw-chat-toggle]')
+  await page.click('[data-sw-chat-toggle]')
+  const row = page.locator(`[data-sw-hosted-agent-name="${name}"]`)
+  await row.waitFor()
+  await until(async () => (await row.getAttribute('data-sw-agent-state')) === 'online', `${name} online`)
+  await row.locator('[data-sw-hosted-agent-chat]').click()
+  await page.waitForSelector('[data-sw-chat-input]')
+  await page.fill('[data-sw-chat-input]', text)
+  const ask = page.locator('[data-sw-chat-ask]')
+  await page.click((await ask.count()) ? '[data-sw-chat-ask]' : '[data-sw-chat-send]')
+  await until(
+    async () =>
+      expected.test(
+        (await page
+          .locator('[data-sw-chat-message="assistant"]')
+          .last()
+          .textContent()
+          .catch(() => '')) || '',
+      ),
+    `${name} to answer`,
+  )
+}
+
 before(async () => {
   assert.ok(fs.existsSync(path.join(ROOT_DIR, 'dist', 'client', 'index.html')), 'run "npm run build" before the solo engine e2e test')
   assert.ok(fs.existsSync(path.join(ROOT_DIR, 'dist', 'console', 'console.html')), 'run "npm run build" before the solo engine e2e test')
@@ -99,7 +139,10 @@ before(async () => {
   )
   config = loadConfig(path.join(projectDir, 'shapewall.config.json'))
   writeLocalCaptures(config, 'sample')
-  engine = run(['serve', '--engine', 'hosted', '--port', '0', '--print-owner-link'])
+  // The engine's own agent (R2): the ACP stub as Claude Code, found on PATH as a person's would be.
+  engine = run(['serve', '--engine', 'hosted', '--port', '0', '--print-owner-link'], {
+    env: { PATH: `${stubBin('solo-e2e-local-bin')}${path.delimiter}${ENV.PATH}` },
+  })
   await until(() => /Sign in: open file:/.test(engine.state.out), `the engine to start\n${engine.state.out}\n${engine.state.err}`)
   boardUrl = /serving 1 board at (\S+)/.exec(engine.state.out)[1]
   origin = new URL(boardUrl).origin
@@ -232,8 +275,10 @@ test('shapewall login --remote, approved on /device; push; a comment, a reply an
   )
   const stored = (after.comments || after).find((item) => String(item.id) === String(id))
   assert.equal(stored.status, 'resolved')
+  // The engine's own agent takes the owner's comment as a team server's agent would, and answers on it (the stub's
+  // words); the people's replies are in order around it.
   assert.deepEqual(
-    stored.replies.map((reply) => reply.body),
+    stored.replies.map((reply) => reply.body).filter((body) => body !== 'Hello from the ACP stub.'),
     ['Done in the header component', 'Looks right, thanks'],
   )
 
@@ -258,7 +303,7 @@ test('agent connect --remote with the ACP stub: approved on /device, then it ans
     mode: 0o755,
   })
   const agent = run(['agent', 'connect', '--remote', origin, '--agent', 'claude', '--name', 'Builder'], {
-    env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+    env: { PATH: `${bin}${path.delimiter}${ENV.PATH}` },
   })
   await until(() => CODE_RE.test(agent.state.out), `the agent code\n${agent.state.out}\n${agent.state.err}`)
   assert.doesNotMatch(agent.state.out + agent.state.err, /swp_/)
@@ -289,4 +334,40 @@ test('agent connect --remote with the ACP stub: approved on /device, then it ans
   )
   await shot('chat')
   assert.deepEqual(realErrors(), [])
+})
+
+test("the engine's own agent: the board chat answers through the link, with no approval and no token in the output", async () => {
+  await until(() => /Local agent: Connected/.test(engine.state.out), `the local agent\n${engine.state.out}\n${engine.state.err}`)
+  assert.doesNotMatch(engine.state.out + engine.state.err, /swp_/)
+  await chatWith('Claude Code', 'What is on the home page?', /Hello from the ACP stub/)
+  await shot('local-agent-chat')
+  assert.deepEqual(realErrors(), [])
+})
+
+test('agent connect --endpoint with a stub endpoint: approved on /device, it answers on the board chat; the key is never shown', async () => {
+  const stub = await startOpenAIStub()
+  const key = 'sk-solo-e2e-not-a-real-key-0123456789'
+  try {
+    const agent = run(['agent', 'connect', '--endpoint', '--as', 'ep', '--name', 'Notes model'], {
+      env: {
+        SHAPEWALL_REMOTE: origin,
+        SHAPEWALL_AGENT_BASE_URL: `http://127.0.0.1:${stub.port}/v1`,
+        SHAPEWALL_AGENT_MODEL: 'stub-model',
+        SHAPEWALL_AGENT_API_KEY: key,
+      },
+    })
+    await until(() => CODE_RE.test(agent.state.out), `the agent code\n${agent.state.out}\n${agent.state.err}`)
+    await approve(CODE_RE.exec(agent.state.out)[0], { agent: true })
+    await until(() => /Connected: Notes model/.test(agent.state.err), `the link\n${agent.state.out}\n${agent.state.err}`)
+    await chatWith('Notes model', 'What is on the home page?', /Hello from the stub/)
+    await shot('endpoint-chat')
+    const sent = stub.calls.filter((call) => call.url.endsWith('/chat/completions'))
+    assert.ok(sent.length)
+    for (const call of sent) assert.equal(call.body.tools, undefined, 'no tools offered')
+    assert.doesNotMatch(agent.state.out + agent.state.err + engine.state.out + engine.state.err, new RegExp(`${key}|swp_`))
+    assert.deepEqual(realErrors(), [])
+    await agent.close()
+  } finally {
+    await stub.close()
+  }
 })

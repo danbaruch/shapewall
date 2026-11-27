@@ -18,13 +18,13 @@ import { quietSqliteWarning } from '../src/hosted/db.js'
 import { startHosted } from '../src/hosted/server.js'
 import { serveEngine } from '../src/hosted/solo/serve.js'
 import { createComment } from '../src/store.js'
-import { SAMPLE, tempDir } from './helpers.js'
+import { SAMPLE, isolatedEnv, tempDir } from './helpers.js'
 import { createBrowser } from './hosted-helpers.js'
 
 quietSqliteWarning()
 
 const ACP_STUB = new URL('./fixtures/acp-stub.mjs', import.meta.url).pathname
-const ENV = { SHAPEWALL_USER_NAME: 'Robin Tester', PATH: process.env.PATH }
+const ENV = isolatedEnv('solo-env', { SHAPEWALL_USER_NAME: 'Robin Tester' })
 const noExit = (options) => startHosted({ ...options, exitOnStop: false })
 
 function project(name) {

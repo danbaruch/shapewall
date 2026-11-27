@@ -319,6 +319,13 @@ export function readMachinePolicy(origin, slug = 'default', env = process.env, {
   return clean(fileVersion(data) === 1 ? upgradeV1Entry(entry) : entry, (text) => warn(`${file}: ${text}`), env)
 }
 
+// Whether anything is saved for one connection (the solo engine's own agent
+// is given this machine's settings once, never over what was set after).
+export function hasMachinePolicy(origin, slug = 'default', env = process.env) {
+  const entry = readAll(policyFile(env)).connections[`${origin}#${slug}`]
+  return Boolean(entry && typeof entry === 'object' && !Array.isArray(entry))
+}
+
 // Saves what was chosen for one connection; returns the policy in effect.
 export function saveMachinePolicy(origin, slug, changes, env = process.env) {
   const file = policyFile(env)

@@ -99,6 +99,14 @@ export function mintMachineToken(db, { dataDir, owner, which, now = () => new Da
         )
       : null
     const agents = createAgentStore(t, { now })
+    const actor = {
+      userId: owner.userId,
+      role: 'owner',
+      audit: (action, target, detail) => audit(t, { userId: owner.userId, action, target, ip: null, at, detail }),
+    }
+    // What this machine's settings say the agent looks like (G13). Put on the agent when it is made, and again only
+    // when those settings changed since the last start: a rename on the board stays until the settings change.
+    const look = agent ? JSON.stringify([agent.name || null, agent.kind || null, agent.icon || null, agent.tint || null]) : null
     if (row) {
       // The same row, a new secret: what the old file held stops working now. Never wider than it is: a scope or an
       // expiry the owner took away stays away (rev57 R57-3); only what this release no longer gives is dropped.
@@ -117,7 +125,20 @@ export function mintMachineToken(db, { dataDir, owner, which, now = () => new Da
       })
       audit(t, { userId: owner.userId, action: 'token_rotated', target: row.id, ip: null, at, detail: { solo: which } })
       const agentId = spec.scopes.includes('claim') ? agents.forToken(owner.projectId, row.id)?.id || null : null
-      return { tokenId: row.id, agentId, created: false }
+      if (agentId && look && look !== ids[`${which}Look`]) {
+        const changes = { kind: agent.kind || spec.kind, icon: agent.icon || null, tint: agent.tint || null }
+        try {
+          agents.setIdentity(actor, owner.projectId, agentId, agent.name ? { ...changes, name: agent.name } : changes)
+        } catch {
+          // A name another agent has: the look still follows the settings, the name stays.
+          try {
+            agents.setIdentity(actor, owner.projectId, agentId, changes)
+          } catch {
+            /* an icon or tint this release does not know: left as it is */
+          }
+        }
+      }
+      return { tokenId: row.id, agentId, created: false, look }
     }
     const tokenId = newId('tk')
     t.run(
@@ -128,11 +149,6 @@ export function mintMachineToken(db, { dataDir, owner, which, now = () => new Da
     audit(t, { userId: owner.userId, action: 'token_created', target: tokenId, ip: null, at, detail: { solo: which } })
     // Only a token that takes work is an agent (as createApiToken does).
     if (!spec.scopes.includes('claim')) return { tokenId, agentId: null, created: true }
-    const actor = {
-      userId: owner.userId,
-      role: 'owner',
-      audit: (action, target, detail) => audit(t, { userId: owner.userId, action, target, ip: null, at, detail }),
-    }
     const agentId = agents.create(actor, {
       projectId: owner.projectId,
       tokenId,
@@ -142,11 +158,17 @@ export function mintMachineToken(db, { dataDir, owner, which, now = () => new Da
       icon: agent?.icon || null,
       tint: agent?.tint || null,
     })
-    return { tokenId, agentId, created: true }
+    // The board's own agent is the project's default, as the local chat agent is on a 1.x board: "Send to agent"
+    // and the chat panel name it. Only when nothing else is the default yet; the owner can change it.
+    if (agent && !agents.defaultAgent(owner.projectId)) agents.setDefault(actor, owner.projectId, agentId)
+    return { tokenId, agentId, created: true, look }
   })
   const file = path.join(dataDir, spec.file)
   writePrivate(file, `${token}\n`)
-  writePrivate(path.join(dataDir, IDS_FILE), `${JSON.stringify({ ...readIds(dataDir), [which]: made.tokenId }, null, 2)}\n`)
+  const next = { ...readIds(dataDir), [which]: made.tokenId }
+  if (made.look) next[`${which}Look`] = made.look
+  writePrivate(path.join(dataDir, IDS_FILE), `${JSON.stringify(next, null, 2)}\n`)
+  delete made.look
   return { token, file, ...made }
 }
 

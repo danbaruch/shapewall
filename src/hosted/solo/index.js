@@ -74,6 +74,15 @@ function mountOwner(app, deps, closers) {
     closers.push(() => retireMachineTokens(deps.db, { dataDir: deps.dataDir, owner }))
     for (const which of ['cli', 'watch'])
       tokenFiles[which] = mintMachineToken(deps.db, { dataDir: deps.dataDir, owner, which, now: deps.now }).file
+    // The board's own agent (R2): its token, its name and look from this machine's agent settings (G13).
+    if (solo.localAgent)
+      tokenFiles.agent = mintMachineToken(deps.db, {
+        dataDir: deps.dataDir,
+        owner,
+        which: 'agent',
+        now: deps.now,
+        agent: solo.localAgent,
+      }).file
   }
   // The proof a command line asks for before it sends a token (engine-target.js verifyEngine): an HMAC of its
   // challenge under this start's key, which only serve.json (0600) and this process hold. No session, no token.

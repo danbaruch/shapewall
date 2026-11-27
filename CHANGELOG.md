@@ -16,6 +16,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
   board, with the same validation against the config file's pages. They are stored in the board's `journeys.json` in the
   engine's folder; journeys from the config stay read only. Team servers keep journeys read only. See
   [Journeys made on the board](docs/journeys.md#journeys-made-on-the-board).
+- Solo engine (experimental): `serve --engine hosted` runs this project's agent on the link protocol, as
+  `shapewall agent connect --as local` with a token the engine makes at start (0600 in `.shapewall/.engine/`, rotated each
+  start, retired at stop; the address goes in the environment, never on a command line). The board's chat, Fix with and
+  comments sent to the agent go through it, with the same trust tiers and machine policy as on a team server. The agent's
+  backend, endpoint, name, icon and tint come from Settings > Agent, and branch mode on a coding agent starts the
+  connection at `--approvals owner`. `--no-chat` runs without it. See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
+- `shapewall agent connect --endpoint` (experimental): a model endpoint (Ollama, DeepSeek, OpenAI or any OpenAI-compatible
+  server) as a connected agent, read and answer only: no edits, commands, tools, browser or extensions. The key stays in
+  its variable and is never printed, logged, saved or sent to the server.
 - Solo engine (experimental): the engine writes `.shapewall/events.jsonl` in the same line format as the local board and sends
   notifications as `serve` does, so `shapewall events`, bots and notification channels keep working. See
   [the event log](docs/notifications.md#the-event-log).
