@@ -33,9 +33,8 @@ const engineRunning = (config) => isLockLive(readLock(path.join(engineDir(config
 export async function autoMigrate(config, out, { env = process.env, version = 'dev', now, migrate = null } = {}) {
   if (!fs.existsSync(config.outputDir)) return { migrated: false, boards: [] }
   const M = migrate || (await import('../migrate/index.js'))
-  ;(await import('../hosted/migrate/engine.js')).quietSqliteWarning()
   // From the files only: nothing is written to learn whether anything moves.
-  const plan = await M.planMigration(config, { env })
+  const plan = await M.pendingMigration(config, { env })
   if (!plan.boards.length) return { migrated: false, boards: [] }
   const ids = plan.boards.map((board) => board.id)
   const folder = path.basename(config.outputDir)
@@ -53,7 +52,8 @@ export async function autoMigrate(config, out, { env = process.env, version = 'd
   return { migrated: true, boards: ids }
 }
 
-export async function serveCommand(flags, out, { env = process.env, version = 'dev' } = {}) {
+// startEngine: src/cli.js hands in the engine's start (src/hosted/ops-cli.js serveEngine), the one place core loads it.
+export async function serveCommand(flags, out, { env = process.env, version = 'dev', startEngine } = {}) {
   const choice = chooseEngine(flags, env)
   if (choice.engine === 'legacy') {
     const { serve } = await import('./serve.js')
@@ -65,6 +65,5 @@ export async function serveCommand(flags, out, { env = process.env, version = 'd
     assertMigrationAllows(config)
     await autoMigrate(config, out, { env, version })
   }
-  const { serveEngine } = await import('../hosted/ops-cli.js')
-  return serveEngine({ ...flags, engine: 'hosted' }, out, { env })
+  return startEngine({ ...flags, engine: 'hosted' }, out, { env })
 }

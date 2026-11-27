@@ -161,6 +161,29 @@ function ownerOf(config, account, env, handleFor) {
   return { name, handle: handleFor(name), names: [name], source: 'machine', account: null }
 }
 
+// The plan for the first `shapewall serve` of 2.x (src/cli/serve-command.js), with the engine's SQLite warning off.
+export async function pendingMigration(config, { env = process.env } = {}) {
+  ;(await loadEngine()).quietSqliteWarning()
+  return planMigration(config, { env })
+}
+
+// The engine's workspace and project ids, read from a private copy of its
+// database (src/cli/board-home.js: where `capture` writes once the engine
+// holds the project): { workspaceId, projectId, problem }, or null when the
+// engine has no database yet.
+export async function engineProject(outputDir) {
+  const E = await loadEngine()
+  E.quietSqliteWarning()
+  const db = await E.readEngineDb(outputDir)
+  if (!db) return null
+  try {
+    const { workspaceId, projectId, problem } = E.readEngine(db)
+    return { workspaceId, projectId, problem }
+  } finally {
+    db.close()
+  }
+}
+
 // The whole plan, from the files only. Nothing is written.
 export async function planMigration(config, { board: only = null, env = process.env } = {}) {
   const E = await loadEngine()

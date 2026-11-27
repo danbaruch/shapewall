@@ -41,7 +41,7 @@ export const LEGACY_ONLY_FLAGS = [
 ]
 
 const LEGACY_HOW =
-  'it runs the 1.x board server, which goes in Shapewall 3.0. Leave it out for the solo engine (the default), and see https://shapewall.com/docs/upgrading'
+  'it runs the 1.x board server, which goes in Shapewall 3.0. Leave it out for the solo engine (the default), and see https://shapewall.com/docs/where-to-run'
 
 // -> { engine: 'hosted' | 'legacy', source: 'flag' | 'env' | 'flags' | 'default', flag? }.
 // Throws on a value that names no engine. Says the deprecation line for

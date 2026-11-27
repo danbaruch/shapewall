@@ -96,9 +96,17 @@ export async function mcp(flags, err) {
     const { runRemoteMcp } = await import('../remote/remote-mcp.js')
     const readOnly = Boolean(flags['read-only'])
     const allowCapture = !readOnly && !flags['no-capture']
-    const remote = createRemote(remoteSettings(flags))
     const board = typeof flags.board === 'string' ? flags.board : null
-    await runRemoteMcp({ remote, readOnly, board, allowCapture, config: allowCapture ? remoteMcpConfig(flags, err) : null })
+    // On this project's solo engine (src/cli/engine-mode.js) the tools keep the 1.x `author` argument.
+    const settings = remoteSettings(flags)
+    await runRemoteMcp({
+      remote: createRemote(settings),
+      readOnly,
+      board,
+      allowCapture,
+      config: allowCapture ? remoteMcpConfig(flags, err) : null,
+      localAuthor: settings.source === 'engine',
+    })
     return 0
   }
   if (flags.board !== undefined) throw new Error('mcp --board picks a hosted board: use it with --remote URL.')

@@ -19,6 +19,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { engineDir } from '../engine-folder.js'
+import { ID_PATTERNS } from '../remote/ids.js'
 import { ENGINE_VAR } from './engine-choice.js'
 
 export class BoardHomeError extends Error {}
@@ -32,19 +33,13 @@ export async function boardHome(config, { env = process.env, envId = null, board
       .toLowerCase() === 'legacy'
   if (legacy || !config?.outputDir || !fs.existsSync(path.join(engineDir(config.outputDir), 'shapewall.db')))
     return { config, engine: false }
-  const E = await import('../hosted/migrate/engine.js')
-  E.quietSqliteWarning()
-  const { projectDir } = await import('../hosted/projects.js')
-  const db = await E.readEngineDb(config.outputDir)
-  let ids
-  try {
-    ids = E.readEngine(db)
-  } finally {
-    db?.close()
-  }
-  if (ids.problem) throw new BoardHomeError(ids.problem)
+  const { engineProject } = await import('../migrate/index.js')
+  const ids = await engineProject(config.outputDir)
+  if (ids?.problem) throw new BoardHomeError(ids.problem)
   // A database with no project yet (an engine stopped before its first start finished): the 1.x folders.
-  if (!ids.workspaceId || !ids.projectId) return { config, engine: false }
+  if (!ids?.workspaceId || !ids.projectId) return { config, engine: false }
+  if (!ID_PATTERNS.workspace.test(ids.workspaceId) || !ID_PATTERNS.project.test(ids.projectId))
+    throw new BoardHomeError("The solo engine's database names a project this build cannot read.")
   if (envId) {
     const { getBoard } = await import('../config.js')
     const board = getBoard(config, boardId)
@@ -53,5 +48,5 @@ export async function boardHome(config, { env = process.env, envId = null, board
         `The solo engine keeps the default environment (${board.environments[0].id}) only for now, so --env ${envId} has nowhere to go. Run it with SHAPEWALL_ENGINE=legacy for the 1.x board folders (deprecated).`,
       )
   }
-  return { config: { ...config, outputDir: projectDir(engineDir(config.outputDir), ids.workspaceId, ids.projectId) }, engine: true }
+  return { config: { ...config, outputDir: path.join(engineDir(config.outputDir), 'files', ids.workspaceId, ids.projectId) }, engine: true }
 }

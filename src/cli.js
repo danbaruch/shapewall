@@ -60,7 +60,10 @@ const COMMANDS = {
   serve: async ({ flags, out }) => {
     // The solo engine by default (src/hosted/solo/serve.js), after moving any 1.x board data into it;
     // --engine legacy or SHAPEWALL_ENGINE=legacy: the 1.x board server, deprecated (src/cli/serve-command.js).
-    await serveCommand(flags, out, { version: VERSION })
+    await serveCommand(flags, out, {
+      version: VERSION,
+      startEngine: async (...args) => (await import('./hosted/ops-cli.js')).serveEngine(...args),
+    })
     return null
   },
   devices: ({ positional, flags, out }) => {

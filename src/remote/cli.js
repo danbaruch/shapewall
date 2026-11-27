@@ -188,9 +188,14 @@ function mutationJson(boardId, answer, extra = {}) {
 export async function remoteComments(positional, flags, print) {
   // --json prints JSON as is (escaped); text is cleaned before printing.
   const out = (text) => print(flags.json ? text : terminalSafe(text))
-  const remote = createRemote(remoteSettings(flags))
+  const settings = remoteSettings(flags)
+  const remote = createRemote(settings)
   const { boardId } = await remoteBoard(remote, flags.board)
   const action = positional[0] || 'list'
+  // On this project's solo engine, --author labels what the command writes, as on the 1.x board files (marked as an
+  // agent's there; a team server signs with the token's name only).
+  const engine = settings.source === 'engine'
+  const author = engine && typeof flags.author === 'string' && flags.author.trim() ? flags.author : undefined
   if (action === 'list') {
     const status = flags.all ? 'all' : flags.resolved ? 'resolved' : 'open'
     const report = await remote.comments(boardId, {
@@ -223,12 +228,13 @@ export async function remoteComments(positional, flags, print) {
     const page = typeof flags.page === 'string' ? flags.page.trim() : ''
     const body = typeof flags.body === 'string' ? flags.body : ''
     if (!page || !body.trim()) throw new Error('usage: shapewall comments add --page ID --body TEXT [--viewport NAME] --remote URL')
-    if (flags.selector !== undefined || flags.author !== undefined)
+    if (flags.selector !== undefined || (flags.author !== undefined && !engine))
       throw new Error("comments add --remote takes --page, --body and --viewport (the server signs it with the token's name).")
     const result = await remote.addComment(boardId, {
       page,
       body,
       viewport: typeof flags.viewport === 'string' ? flags.viewport : undefined,
+      author,
     })
     out(flags.json ? mutationJson(boardId, result) : `Added #${result.comment.id} on ${page}`)
     return
@@ -249,7 +255,7 @@ export async function remoteComments(positional, flags, print) {
   if (action === 'reply') {
     const body = typeof flags.body === 'string' ? flags.body : positional[2]
     if (!id || !body) throw new Error('usage: shapewall comments reply ID --body TEXT --remote URL')
-    const result = await remote.reply(boardId, id, { body, guests })
+    const result = await remote.reply(boardId, id, { body, guests, author })
     out(
       flags.json
         ? mutationJson(boardId, result, { reply: result.reply })
@@ -264,7 +270,7 @@ export async function remoteComments(positional, flags, print) {
       throw new Error(`unknown status '${value.slice(0, 40)}' (use: ${[...AGENT_STATUSES, 'clear'].join(', ')})`)
     }
     if (typeof flags.note === 'string' && flags.note.trim()) {
-      await remote.reply(boardId, id, { body: flags.note, guests })
+      await remote.reply(boardId, id, { body: flags.note, guests, author })
     }
     const result = await remote.setAgentStatus(boardId, id, value === 'clear' ? null : value, { guests })
     out(flags.json ? mutationJson(boardId, result) : `#${result.comment.id} agent status: ${result.comment.agentStatus || 'none'}`)

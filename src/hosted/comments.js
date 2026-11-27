@@ -25,6 +25,9 @@ export { GUEST_SHARE, guestView } from './guest-view.js'
 // Which account or token wrote a reply ({ user, token }), stored with it but
 // kept off the JSON (a symbol key): agent views use it to decide trust.
 export const REPLY_AUTHOR = Symbol('replyAuthor')
+// The account that wrote a comment (author_user_id), never serialized: the solo engine's token API reads it for
+// the 1.x `byOwner` flag (src/hosted/token-api.js).
+export const COMMENT_AUTHOR = Symbol('commentAuthor')
 
 const COMMENTS_MAX = 5000
 const REPLIES_MAX = 200
@@ -120,6 +123,7 @@ export function rowToComment(row) {
     replies: replies.filter((reply) => !reply.guest),
   })
   comment[GUEST_SHARE] = { comment: row.author_share_id || null, replies: stored.map((reply) => reply.share || null) }
+  comment[COMMENT_AUTHOR] = { user: row.author_user_id || null }
   return comment
 }
 
