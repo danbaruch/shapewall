@@ -184,10 +184,10 @@ export const SECTIONS = {
       --agent NAME          which agent: claude, or a saved agent's id that runs Claude Code (default: this
                             project's agent, else Claude Code when found). Codex, goose and Gemini CLI are not
                             offered in this release. Never a command from the server
-      --endpoint            a model endpoint instead (Ollama, DeepSeek, OpenAI-compatible: this project's
-                            agent.baseUrl and agent.model, Settings > Agent or SHAPEWALL_AGENT_BASE_URL and
-                            SHAPEWALL_AGENT_MODEL; the key stays in its variable). Answers only: no edits, no
-                            commands, no tools (experimental)
+      --endpoint            a model endpoint instead (experimental): Ollama, DeepSeek, OpenAI-compatible, from
+                            this project's agent.baseUrl and agent.model, Settings > Agent or SHAPEWALL_AGENT_BASE_URL
+                            and SHAPEWALL_AGENT_MODEL; the key stays in its variable. Answers only: no edits, no
+                            commands, no tools
       --name "Builder"      the name to suggest on the approval page (the approver has the last word)
       --project SLUG        on a server with tailnet sign-in, run on a tailnet machine (experimental)
                             no browser, your tailnet user approves it. --project (and --workspace NAME) pick the
@@ -326,7 +326,8 @@ export const SECTIONS = {
       --no-comments         captures, history and journeys only`,
   migrate: `  migrate                   move this project's .shapewall/ into the solo engine (.shapewall/.engine/)${EXPERIMENTAL}
                             captures, comments, chat and the local account; a backup goes to
-                            .shapewall/backup-1x-<time>/ first. Refuses while serve, capture, watch or an agent runs
+                            .shapewall/backup-1x-<time>/ first; then run serve --engine hosted. Refuses while
+                            serve (either engine), capture, watch or an agent runs
       --dry-run             counts, and every item that would not come along; writes nothing
       --board ID            only this board (default: every board)
       --rollback            put every migration back from its backup (checked byte for byte)

@@ -61,5 +61,6 @@ docs cover installing it, configuring your screens, steering your agents and run
 
 These docs describe the current release. [Stability and versioning](/docs/stability) says what stays the same within 1.x and
 what is marked experimental. The local tool is open source under Apache 2.0; the self-hosted team server (`shapewall
-hosted`) is source-available under the Functional Source License and becomes Apache 2.0 two years after each release. See
-[licenses and self-hosting](/open-source).
+hosted`) and the experimental solo engine (`shapewall serve --engine hosted`), both in `src/hosted`, are source-available
+under the Functional Source License: anyone may use, change and run them, at work too, but not offer competing hosting, and each
+release becomes Apache 2.0 two years after it ships. See [licenses and self-hosting](/open-source).
