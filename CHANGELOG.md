@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `shapewall capture` and `links` write and read the solo engine's board folders (`.shapewall/.engine/files/`) once the
+  engine holds the project, so a capture from the terminal shows on the engine's board, with or without the engine running.
+  The engine captures the default environment only for now, so `capture --env` of another one is refused there.
+- On the solo engine, the `author` of the MCP tools `reply_to_comment` and `add_comment`, and `comments reply --author` and
+  `comments add --author`, label the agent's text as they do on a 1.x board (it stays marked as an agent's). The engine's
+  comment JSON says `byOwner` for comments its owner wrote, as a 1.x board does.
 - Solo engine (experimental): "Capture now" on the board and `recapture_pages` on the engine's `/mcp` capture in the engine
   itself, from the live `shapewall.config.json`, straight into the board, with no push. Owner only (the board on this machine,
   or a `push` token the owner made, used on this machine); the capture browser reaches the app's origin only, never the
@@ -73,6 +79,19 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **`shapewall serve` runs the solo engine by default** (2.0.0): the hosted engine for this project, one owner, on this
+  machine only, data in `.shapewall/.engine/`. `npx shapewall init && npx shapewall serve` is still a board in seconds with no
+  account. The first start in a project with 1.x board data says which boards move, runs `shapewall migrate` (a backup in
+  `.shapewall/backup-1x-<time>/` first; a failed run puts the folder back), then starts. Anything that stops the move (a 1.x
+  `serve` or `watch` still running, a migration stopped midway, a board the engine cannot take) stops `serve` with the reason
+  and changes nothing. See [Upgrading a 1.x project](docs/where-to-run.md#upgrading-a-1x-project).
+- The 1.x writers refuse a board the engine holds (409 `board_migrated`): comments and replies, the board chat, the starter
+  agent and `capture` into the 1.x folders, also from a `shapewall mcp` or `watch` started before the move.
+- `shapewall share --remote` stops on a board the engine holds instead of sending what is left in the 1.x folders. Moving an
+  engine board to a hosted server is not in this build yet; `shapewall migrate --rollback` puts the 1.x board back.
+- The stable surfaces keep their 1.x shapes on the engine, checked against a committed 1.x snapshot
+  (test/contract-1x.test.js): `comments --json`, `watch` and `watch --exec` JSON, the MCP tools and their arguments, and the
+  lines of `.shapewall/events.jsonl`. New fields may appear, as docs/stability.md allows.
 - Solo engine (experimental): while `shapewall serve --engine hosted` runs, `shapewall comments`, `watch` and `mcp` in the
   project folder go to the engine instead of the 1.x files in `.shapewall/<board>/`, which before showed comments that were
   not the board's. The engine makes their project tokens at each start (owned by you, private files in `.shapewall/.engine/`,
@@ -100,6 +119,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
   is on `default`), lets `sessions.via` be `local` (a rebuild of `sessions`, like migration 18) and adds the `solo_binding`
   table. Nothing changes on a team server. Stop `shapewall hosted admin` jobs before the first start. Rollback notes are in
   docs/hosted.md, "Migration 24 and rollback".
+
+### Deprecated
+
+- The 1.x board server: `shapewall serve --engine legacy`, or `SHAPEWALL_ENGINE=legacy` for a service or a script. It stays
+  through 2.x and goes in 3.0. A flag only the 1.x server takes (`--host`, `--lan`, `--tailscale`, `--tls-cert`, `--tls-key`,
+  `--allowed-host`, `--accounts`, `--accounts-origin`, `--agent-acp`, `--allow-remote-agent`, `--buzz-bridge`,
+  `--trust-proxy` and the device flags) also runs it, with the same warning, so `serve --host 0.0.0.0` in a container keeps
+  working. With `SHAPEWALL_ENGINE=legacy`, `capture` writes the 1.x board folders again.
 
 ### Security
 

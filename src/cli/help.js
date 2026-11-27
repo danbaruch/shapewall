@@ -73,7 +73,7 @@ export const SECTIONS = {
       --build-mode MODE     the app's build: production, development or unknown (default)
       --browser-version V   require this installed browser version
                             exit code: 0 every view complete, 2 some partial or failed, 1 error`,
-  serve: `  serve                     serve the board (http://127.0.0.1:4600/ by default)
+  serve: `  serve                     serve the board on this machine (the solo engine; port 4600 by default)
       --port N              default ${DEFAULT_PORT}
       --host ADDR           default 127.0.0.1 (see https://shapewall.com/docs/self-hosting before changing)
       --tailscale[=print]    private HTTPS over Tailscale; =print changes nothing
@@ -94,12 +94,15 @@ export const SECTIONS = {
       --agent-acp "CMD"     chat with an agent CLI over ACP, e.g. "claude-agent-acp" (installed globally)
                             (also $SHAPEWALL_AGENT_ACP; never read from the config; https://shapewall.com/docs/chat)
       --allow-remote-agent  with --chat on a shared board, let an ACP agent run anyway (anyone reaching it acts as you)
-      --engine hosted       run the hosted engine for this project, on this machine only: one owner, signed in by a
-                            one-time page (--open), data in .shapewall/.engine/; takes --port, --open,
+      --engine hosted       the default from 2.0: the hosted engine for this project, on this machine only: one
+                            owner, signed in by a one-time page (--open), data in .shapewall/.engine/; the first
+                            start in a 1.x project runs shapewall migrate (backup first); takes --port, --open,
                             --print-owner-link, --read-only, --no-chat, --no-capture, --skip-git-check
                             (start even when git cannot say whether it tracks .engine/); while it runs,
                             comments, watch and mcp in this folder go to it, and it runs this project's
-                            agent (a coding agent or a model endpoint) on the link; --no-chat without one${EXPERIMENTAL}`,
+                            agent (a coding agent or a model endpoint) on the link; --no-chat without one
+      --engine legacy       the 1.x board server (deprecated, removed in 3.0; also $SHAPEWALL_ENGINE=legacy);
+                            --host, --lan, --tailscale, --accounts, --agent-acp and the other 1.x-only flags pick it too`,
   devices: `  devices list              paired devices and pending requests for this project [--json]
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request

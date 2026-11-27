@@ -88,7 +88,10 @@ test('autoMigrate: nothing to move in a new project; says what happens, then mig
   assert.match(lines[1], /backup-1x-<time>.*migrate --rollback.*--engine legacy/)
   assert.equal(calls[0].fromServe, true)
   assert.equal(calls[0].version, '2.0.0')
-  await assert.rejects(autoMigrate(fresh, () => {}, { env: ENV, migrate: fake(1) }), AutoMigrateError)
+  await assert.rejects(
+    autoMigrate(fresh, () => {}, { env: ENV, migrate: fake(1) }),
+    AutoMigrateError,
+  )
 })
 
 test('autoMigrate for real: a 1.x project moves once, with a backup; capture then writes into the engine folder', async () => {
@@ -132,7 +135,10 @@ test('serveCommand: starts the engine on a new project, refuses on a migration s
 
   fs.mkdirSync(config.outputDir, { recursive: true })
   fs.writeFileSync(path.join(config.outputDir, MIGRATING), '{}')
-  await assert.rejects(serveCommand(flags, () => {}, { env: ENV, startEngine }), /stopped midway/)
+  await assert.rejects(
+    serveCommand(flags, () => {}, { env: ENV, startEngine }),
+    /stopped midway/,
+  )
   assert.equal(started.length, 1, 'the engine did not start')
 })
 
@@ -144,5 +150,15 @@ test('the 1.x comment and chat writers refuse a board the engine holds (409 boar
   await assert.rejects(
     appendUserMessage(config, config.boards[0].id, 'board', { text: 'hello', attachments: [] }),
     (error) => error.status === 409 && error.code === 'board_migrated' && /migrated to the solo engine/.test(error.message),
+  )
+})
+
+test('share --remote stops on a board the engine holds instead of sending a stale copy', async () => {
+  const config = project('guard-share')
+  await comment(config)
+  markMigrated(config)
+  await assert.rejects(
+    share({ remote: 'https://board.example.test', 'dry-run': true }, () => {}, { config, env: ENV }),
+    /lives in the solo engine now .*migrate --rollback/,
   )
 })

@@ -61,7 +61,9 @@ export const REFUSED_FLAGS = Object.keys(REFUSED)
 export function engineFlagProblem(flags) {
   if (!ENGINES.includes(flags.engine))
     return `--engine: "hosted" (the solo engine, the default) or "legacy" (the 1.x board server, deprecated).`
-  for (const [flag, why] of Object.entries(REFUSED)) if (flags[flag] !== undefined) return `--${flag} is not for the solo engine: ${why}. The 1.x board server still takes it (shapewall serve --engine legacy, deprecated).`
+  for (const [flag, why] of Object.entries(REFUSED))
+    if (flags[flag] !== undefined)
+      return `--${flag} is not for the solo engine: ${why}. The 1.x board server still takes it (shapewall serve --engine legacy, deprecated).`
   return null
 }
 
@@ -240,9 +242,7 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
     })}\n`,
     { mode: 0o600 },
   )
-  out(
-    `Shapewall is serving ${config.boards.length} board${config.boards.length === 1 ? '' : 's'} at ${boardUrl} (the solo engine)`,
-  )
+  out(`Shapewall is serving ${config.boards.length} board${config.boards.length === 1 ? '' : 's'} at ${boardUrl} (the solo engine)`)
   out(`Data: ${dir} (never commit it)`)
   // The address goes in the environment, not on the agent's command line: any local user can read a process's
   // arguments (ps), and the name's random part is one of the layers that keep the cookie in (rev54 N3).

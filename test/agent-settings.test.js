@@ -617,7 +617,10 @@ test('review 5: a file replaced with the same size and mtime is read again; para
 // Starts `shapewall serve` and reads its first lines until `until` matches.
 function startServe(args, env) {
   const cli = fileURLToPath(new URL('../bin/shapewall.js', import.meta.url))
-  const child = spawn(process.execPath, [cli, 'serve', '--engine', 'legacy', '--port', '0', ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+  const child = spawn(process.execPath, [cli, 'serve', '--engine', 'legacy', '--port', '0', ...args], {
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
   let output = ''
   const ready = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`serve did not start: ${output}`)), 15000)

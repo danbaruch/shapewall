@@ -189,11 +189,7 @@ test('serve --engine hosted: its own random host, no sign-in off a terminal; --o
     const dir = engineDir(config.outputDir)
     const suffix = fs.readFileSync(path.join(dir, 'host.key'), 'utf8').trim()
     assert.equal(handle.origin, `http://lumen-notes-${suffix}.shapewall.localhost:${handle.server.address().port}`)
-    assert.ok(
-      first.lines.some((line) =>
-        line.startsWith(`Shapewall is serving 1 board at http://lumen-notes-${suffix}`),
-      ),
-    )
+    assert.ok(first.lines.some((line) => line.startsWith(`Shapewall is serving 1 board at http://lumen-notes-${suffix}`)))
     assert.ok(first.lines.some((line) => /Sign in: run shapewall serve --open/.test(line)))
     // rev54 N3: the agent line gives the address in the environment, never as an argument other users can read.
     assert.ok(first.lines.includes(`Agents: SHAPEWALL_REMOTE=${handle.origin} shapewall agent connect`), first.lines.join('\n'))

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Fresh-machine check: packs this checkout the way npm would publish it,
 # installs the tarball into an empty project folder (no lockfile, no repo
-# files), and runs the quickstart a new user would: init, capture, serve.
+# files), and runs the quickstart a new user would: init, capture, serve (the
+# solo engine, then the 1.x server with --engine legacy for the board checks).
 # Also checks that serve picks up a config edit without a restart.
 #
 #   scripts/fresh-install.sh [--dir DIR] [--site URL] [--keep]
@@ -127,12 +128,24 @@ npx --no -- shapewall doctor >"$work/doctor.log" 2>&1 || { tail -30 "$work/docto
 step "capture"
 npx --no -- shapewall capture | tee "$work/capture.log"
 
-step "serve"
-board_port="$(free_port)"
-board="http://127.0.0.1:$board_port"
+step "serve (the solo engine, the default)"
+engine_port="$(free_port)"
 # Start the installed entry point directly so cleanup owns the server PID,
 # rather than an npx parent that can leave the server behind after SIGTERM.
-node node_modules/shapewall/bin/shapewall.js serve --port "$board_port" >"$work/serve.log" 2>&1 &
+node node_modules/shapewall/bin/shapewall.js serve --port "$engine_port" --no-chat >"$work/engine.log" 2>&1 &
+engine_pid=$!
+pids+=($engine_pid)
+wait_for "http://127.0.0.1:$engine_port/api/health" || { cat "$work/engine.log"; fail "serve did not start the solo engine"; }
+grep -q "the solo engine" "$work/engine.log" || { cat "$work/engine.log"; fail "serve did not say it runs the solo engine"; }
+kill -TERM "$engine_pid" 2>/dev/null || true
+wait "$engine_pid" 2>/dev/null || true
+
+step "serve --engine legacy (the 1.x board server, deprecated)"
+# The board checks below read the 1.x server's open /api/boards; the engine
+# signs its owner in first. The board data stays the same files.
+board_port="$(free_port)"
+board="http://127.0.0.1:$board_port"
+node node_modules/shapewall/bin/shapewall.js serve --engine legacy --port "$board_port" >"$work/serve.log" 2>&1 &
 pids+=($!)
 wait_for "$board/api/health" || { cat "$work/serve.log"; fail "serve did not start"; }
 node -e "
