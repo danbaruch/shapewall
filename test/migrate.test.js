@@ -14,7 +14,7 @@ import { openDatabase, quietSqliteWarning } from '../src/hosted/db.js'
 import { rowToComment } from '../src/hosted/comments.js'
 import { processStartTime } from '../src/lock.js'
 import { migrateCommand, MigrateError } from '../src/migrate/index.js'
-import { MARKER, engineDbFile, treeDigest } from '../src/migrate/files.js'
+import { JOURNAL, MARKER, engineDbFile, treeDigest } from '../src/migrate/files.js'
 
 quietSqliteWarning()
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrate-fixtures')
@@ -571,7 +571,6 @@ test('F5: a run stopped midway makes the next migrate point at --rollback, which
   const done = await run(p, { json: true })
   assert.equal(done.code, 0)
   // As if the process died after the rows and moves, before the marker.
-  const { JOURNAL } = await import('../src/migrate/files.js')
   fs.writeFileSync(path.join(p.out, JOURNAL), JSON.stringify({ version: 1, backup: done.json.backup, pid: 1 }))
   fs.rmSync(path.join(p.out, MARKER))
   const again = await run(p)
@@ -647,4 +646,121 @@ test('F9: the engine database, its folder and its copy in the backup are owner-o
   const db = await openEngine(q.out, { create: true })
   db.close()
   assert.equal(mode(engineDbFile(q.out)), 0o600)
+})
+
+// Re-review 1: each finding's regression test.
+
+// A planted backup the journal names, as a planter would write it.
+function plantBackup(p, { boards = [], engine = false, digest = {} } = {}) {
+  const name = 'backup-1x-20000101T000000Z'
+  const backup = path.join(p.out, name)
+  fs.mkdirSync(backup)
+  fs.writeFileSync(path.join(backup, 'backup.json'), JSON.stringify({ version: 1, stamp: 'x', boards, engine, marker: false, digest }))
+  fs.writeFileSync(path.join(p.out, JOURNAL), JSON.stringify({ version: 1, backup: name, stamp: 'x', pid: 1 }))
+  return backup
+}
+
+test('N1: a backup with a symbolic link anywhere (boards/, engine, deeper) is refused; nothing outside is reached', async () => {
+  const outside = tempDir('migrate-outside')
+  made.push(outside)
+  fs.mkdirSync(path.join(outside, 'brain'))
+  fs.writeFileSync(path.join(outside, 'brain', 'secret.md'), 'SECRET\n')
+  for (const variant of ['boards', 'engine', 'deep']) {
+    const p = project('v1.2.0')
+    let backup
+    if (variant === 'boards') {
+      backup = plantBackup(p, { boards: ['brain'], digest: { brain: treeDigest(path.join(outside, 'brain')) } })
+      fs.symlinkSync(outside, path.join(backup, 'boards'))
+    } else if (variant === 'engine') {
+      backup = plantBackup(p, { engine: true })
+      fs.symlinkSync(outside, path.join(backup, 'engine'))
+    } else {
+      backup = plantBackup(p, { boards: ['brain'], digest: {} })
+      fs.mkdirSync(path.join(backup, 'boards', 'brain', 'captures'), { recursive: true })
+      fs.symlinkSync(path.join(outside, 'brain', 'secret.md'), path.join(backup, 'boards', 'brain', 'captures', 'secret.md'))
+    }
+    const before = digest(p.out)
+    await assert.rejects(run(p, { rollback: true }), /symbolic link/, variant)
+    assert.equal(fs.existsSync(path.join(p.out, 'brain')), false, `${variant}: nothing pulled in`)
+    assert.equal(fs.existsSync(path.join(p.out, 'server')), false, `${variant}: no engine folder made`)
+    assert.deepEqual(digest(p.out), before, `${variant}: nothing changed`)
+  }
+  assert.deepEqual(fs.readdirSync(path.join(outside, 'brain')), ['secret.md'])
+  // linkTree refuses a link at the top too.
+  const { linkTree } = await import('../src/migrate/files.js')
+  const from = path.join(outside, 'link')
+  fs.symlinkSync(path.join(outside, 'brain'), from)
+  assert.throws(() => linkTree(from, path.join(outside, 'copy')), /symbolic link/)
+})
+
+test('N1: a restore target that became a symbolic link is refused, not followed', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  const done = await run(p, { json: true })
+  assert.equal(done.code, 0)
+  const outside = tempDir('migrate-target')
+  made.push(outside)
+  // The board folder is gone after the run; a link takes its place.
+  fs.rmSync(path.join(p.out, 'site'), { recursive: true, force: true })
+  fs.symlinkSync(outside, path.join(p.out, 'site'))
+  await assert.rejects(run(p, { rollback: true }), /symbolic link/)
+  assert.deepEqual(fs.readdirSync(outside), [], 'nothing written through the link')
+})
+
+test('N1: a board with a symbolic link anywhere inside (chat/files included) is refused', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  const files = path.join(p.out, 'site', 'chat', 'files')
+  fs.renameSync(files, path.join(p.dir, 'elsewhere-files'))
+  fs.symlinkSync(path.join(p.dir, 'elsewhere-files'), files)
+  const before = digest(p.out)
+  const dry = await run(p, { 'dry-run': true })
+  assert.equal(dry.code, 1)
+  assert.match(dry.text, /chat\/files is a symbolic link/)
+  assert.equal((await run(p)).code, 1)
+  assert.deepEqual(digest(p.out), before)
+})
+
+test('N2: a journal whose run left nothing to put back is cleared by --rollback, which says so', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  const name = 'backup-1x-20000101T000000Z'
+  fs.mkdirSync(path.join(p.out, name)) // stopped while writing the backup: no backup.json
+  fs.writeFileSync(path.join(p.out, JOURNAL), JSON.stringify({ version: 1, backup: name, stamp: 'x', pid: 1 }))
+  const refused = await run(p)
+  assert.equal(refused.code, 1)
+  assert.match(refused.text, /To give up on that run instead, delete \.shapewall\/MIGRATING-TO-2/)
+  const back = await run(p, { rollback: true })
+  assert.equal(back.code, 0)
+  assert.match(back.text, /before it changed anything; nothing needs restoring and MIGRATING-TO-2 was removed/)
+  assert.equal(fs.existsSync(path.join(p.out, JOURNAL)), false)
+  assert.equal((await run(p)).code, 0, 'migrate works again')
+  // Stopped after its restore, before the journal went: also cleared.
+  const q = project('v1.2.0')
+  await withEnvironmentColumn(q.out)
+  const done = await run(q, { json: true })
+  assert.equal((await run(q, { rollback: true })).code, 0)
+  fs.writeFileSync(path.join(q.out, JOURNAL), JSON.stringify({ version: 1, backup: done.json.backup, stamp: 'x', pid: 1 }))
+  const again = await run(q, { rollback: true })
+  assert.match(again.text, /was already put back; MIGRATING-TO-2 was removed/)
+  assert.equal(fs.existsSync(path.join(q.out, JOURNAL)), false)
+})
+
+test('N3: a chat thread written while the files move stops the run, and is kept', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  const before = digest(p.out)
+  const chat = path.join(p.out, 'site', 'chat')
+  const fault = (step) => {
+    if (step !== 'convert') return
+    fs.writeFileSync(
+      path.join(chat, 'chat-aaaaaaaaaaaaaaaa.json'),
+      JSON.stringify({ owner: 'owner', messages: [{ role: 'user', text: 'WRITTEN-DURING-MOVE', createdAt: new Date().toISOString() }] }),
+    )
+  }
+  await assert.rejects(run(p, {}, { fault }), /changed during the migration/)
+  assert.deepEqual(digest(p.out), before, 'the folder as it was before the run')
+  const kept = fs.readdirSync(p.out, { recursive: true }).filter((name) => String(name).endsWith('chat-aaaaaaaaaaaaaaaa.json'))
+  assert.equal(kept.length, 1, 'the new thread is kept in the backup')
+  assert.match(kept[0], /replaced-/)
 })

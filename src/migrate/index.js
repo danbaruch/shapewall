@@ -44,6 +44,7 @@ import {
   engineDir,
   listBackups,
   moveEntry,
+  linksIn,
   readJournal,
   reservedBoardId,
   restoreBackup,
@@ -159,7 +160,7 @@ export async function planMigration(config, { board: only = null, env = process.
   const journal = readJournal(outputDir)
   if (journal)
     problems.push(
-      `An earlier shapewall migrate was stopped midway (${journal.backup}). Run shapewall migrate --rollback to put the folder back as it was, then migrate again.`,
+      `An earlier shapewall migrate was stopped midway (${journal.backup}). Run shapewall migrate --rollback to put the folder back as it was, then migrate again. To give up on that run instead, delete ${rel(config, path.join(outputDir, JOURNAL))}.`,
     )
   if (isLink(engineDir(outputDir)))
     problems.push(`${rel(config, engineDir(outputDir))} is a symbolic link; the migration writes the engine only into a real folder`)
@@ -203,9 +204,10 @@ export async function planMigration(config, { board: only = null, env = process.
       continue
     }
     const files = classifyBoard(dir)
-    if (files.links.length)
+    const links = linksIn(dir)
+    if (links.length)
       problems.push(
-        `board ${board.id}: ${files.links.join(', ')} ${files.links.length === 1 ? 'is a symbolic link' : 'are symbolic links'}; replace them with the real folders first`,
+        `board ${board.id}: ${links.slice(0, 3).join(', ')}${links.length > 3 ? ` and ${links.length - 3} more` : ''} ${links.length === 1 ? 'is a symbolic link' : 'are symbolic links'}; replace them with the real files or folders first (the migration never follows a link)`,
       )
     const comments = planComments(config, board, { owner })
     const chat = planChat(config, board)
@@ -446,6 +448,15 @@ export async function runMigration(config, plan, { now = new Date(), version = '
         fault('move', name)
       }
       for (const name of board.chatFiles) moveEntry(path.join(board.dir, 'chat', 'files', name), path.join(target, 'chat', 'files', name))
+      // Again right before the converted files go: a new chat thread takes a
+      // lock that did not exist when the run took its locks.
+      fault('convert')
+      const moved = new Set(board.chatFiles.map((name) => `chat/files/${name}`))
+      const expected = JSON.stringify(Object.fromEntries(Object.entries(JSON.parse(board.source)).filter(([file]) => !moved.has(file))))
+      if (sourceDigest(board.dir) !== expected)
+        throw new Error(
+          `board ${board.id} changed during the migration (a comment or chat message was written); what was written is kept in ${path.basename(backup)}/replaced-*/`,
+        )
       for (const name of [...board.convert, ...board.ephemeral]) fs.rmSync(path.join(board.dir, name), { recursive: true, force: true })
     }
     fault('files')
@@ -468,7 +479,7 @@ export async function runMigration(config, plan, { now = new Date(), version = '
     } catch (restoreError) {
       // The journal stays: the next migrate points at --rollback.
       throw new MigrateError(
-        `The migration failed (${error.message}) and putting the folder back failed too (${restoreError.message}). The folder as it was before the run is in ${rel(config, backup)}; run shapewall migrate --rollback to try again.`,
+        `The migration failed (${error.message}) and putting the folder back failed too (${restoreError.message}). The folder as it was before the run is in ${rel(config, backup)}; run shapewall migrate --rollback to try again. Until then ${rel(config, path.join(outputDir, JOURNAL))} stays; delete it only to give up on that run.`,
       )
     }
     clearJournal(outputDir)
@@ -505,9 +516,24 @@ export function rollback(config) {
     restoreBackup(outputDir, run.dir, { engineDir: engineDir(outputDir), marker: MARKER })
     restored.push({ backup: run.name, boards: run.record.boards })
   }
+  // The journal of a run stopped midway goes once there is nothing left to
+  // put back for it: its backup was restored now or before, or the run
+  // stopped while writing the backup (rows and files come after the backup,
+  // so nothing was changed).
   const journal = readJournal(outputDir)
-  if (journal && restored.some((run) => run.backup === journal.backup)) clearJournal(outputDir)
-  return { restored, ignored }
+  let cleared = null
+  if (journal) {
+    const item = listBackups(outputDir).find((backup) => backup.name === journal.backup)
+    const unchanged = !item || !item.record
+    if (restored.some((run) => run.backup === journal.backup) || item?.restored || unchanged) {
+      clearJournal(outputDir)
+      if (!restored.some((run) => run.backup === journal.backup))
+        cleared = unchanged
+          ? `The run that was stopped midway (${journal.backup}) stopped while writing its backup, before it changed anything; nothing needs restoring and ${JOURNAL} was removed.`
+          : `The run that was stopped midway (${journal.backup}) was already put back; ${JOURNAL} was removed.`
+    }
+  }
+  return { restored, ignored, cleared }
 }
 
 function withMigrateLock(config, work) {
@@ -587,10 +613,11 @@ export async function migrateCommand(config, flags, out, { env = process.env, ve
         else busy.forEach((line) => out(`Cannot roll back: ${line}`))
         return 1
       }
-      const { restored, ignored } = rollback(config)
-      if (json) out(JSON.stringify({ ok: true, restored, ignored }))
+      const { restored, ignored, cleared } = rollback(config)
+      if (json) out(JSON.stringify({ ok: true, restored, ignored, cleared }))
       else {
-        if (!restored.length) out('Nothing to roll back.')
+        if (cleared) out(cleared)
+        else if (!restored.length) out('Nothing to roll back.')
         for (const item of restored)
           out(`Put back ${item.boards.join(', ') || 'the engine folder'} from ${item.backup} (checked byte for byte).`)
         ignoredLines(ignored).forEach((line) => out(line))

@@ -25,6 +25,14 @@ import { createHash } from 'node:crypto'
 import { ID_RE } from '../config.js'
 import { readLock } from '../lock.js'
 
+function isLink(file) {
+  try {
+    return fs.lstatSync(file).isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
 // The engine's folder inside the output directory (S5 named it `server`).
 export const ENGINE_DIR = 'server'
 export const ENGINE_DB = 'shapewall.db'
@@ -87,6 +95,36 @@ export function classifyBoard(dir) {
   return out
 }
 
+// Every symbolic link under `root` (relative paths), the root itself included.
+export function linksIn(root) {
+  const out = []
+  const walk = (full, relPath) => {
+    const stat = fs.lstatSync(full)
+    if (stat.isSymbolicLink()) out.push(relPath || '.')
+    else if (stat.isDirectory())
+      for (const name of fs.readdirSync(full).sort()) walk(path.join(full, name), relPath ? `${relPath}/${name}` : name)
+  }
+  if (fs.existsSync(root) || isLink(root)) walk(root, '')
+  return out
+}
+
+// Before a backup is read for a restore: no entry anywhere in it may be a
+// link, and every entry's real path must be inside the real path of the
+// output directory. A backup folder someone planted can then only hold
+// files that were already inside the project.
+export function assertBackupContained(outputDir, dir) {
+  const root = fs.realpathSync(outputDir)
+  const links = linksIn(dir)
+  if (links.length) throw new Error(`${path.basename(dir)} holds a symbolic link (${links[0]}); it is not used`)
+  const walk = (full) => {
+    const real = fs.realpathSync(full)
+    if (real !== root && !real.startsWith(root + path.sep))
+      throw new Error(`${path.basename(dir)} reaches outside ${outputDir}; it is not used`)
+    if (fs.lstatSync(full).isDirectory()) for (const name of fs.readdirSync(full)) walk(path.join(full, name))
+  }
+  walk(dir)
+}
+
 export function treeBytes(file) {
   const stat = fs.lstatSync(file)
   if (stat.isSymbolicLink()) return 0
@@ -115,15 +153,14 @@ export function treeDigest(root, { skip = [] } = {}) {
 }
 
 // A tree copied by hard links (or copies where links are not possible).
-// Symlinks are copied as links, never followed (the planner refuses a board
-// whose folder or moved entries are links, so none of those reach here).
+// A symbolic link anywhere, the top included, is refused: the migration
+// never copies, links or follows one (the planner refuses a board that has
+// any, so none reach here).
 // `mode`: { dir, file } to set on every copy instead of the source's.
 export function linkTree(from, to, { copy = false, mode = null } = {}) {
   const stat = fs.lstatSync(from)
-  if (stat.isSymbolicLink()) {
-    fs.symlinkSync(fs.readlinkSync(from), to)
-    return
-  }
+  if (stat.isSymbolicLink()) throw new Error(`${from} is a symbolic link; the migration never follows one`)
+  if (!stat.isDirectory() && !stat.isFile()) throw new Error(`${from} is not a file or a folder`)
   if (stat.isDirectory()) {
     fs.mkdirSync(to, { recursive: true, mode: mode?.dir ?? stat.mode & 0o777 })
     if (mode) fs.chmodSync(to, mode.dir)
@@ -222,14 +259,6 @@ function inside(outputDir, target) {
   return full
 }
 
-const isLink = (file) => {
-  try {
-    return fs.lstatSync(file).isSymbolicLink()
-  } catch {
-    return false
-  }
-}
-
 // Puts one run back as its backup holds it: each board folder, the engine
 // folder (or none, when there was none) and the marker. The backup stays
 // (offered again until the person deletes it), with a note that it was put
@@ -243,27 +272,46 @@ export function restoreBackup(outputDir, dir, { engineDir, marker }) {
   if (!record) throw new Error(`${path.basename(dir)} is not a finished migration backup`)
   inside(outputDir, dir)
   inside(outputDir, engineDir)
+  assertBackupContained(outputDir, dir)
+  // Each path is checked with lstat right before it is renamed or replaced:
+  // a link that appeared since is refused, never followed.
+  const plain = (file, what) => {
+    if (isLink(file)) throw new Error(`${what} is a symbolic link; the rollback stops and leaves it as it is`)
+  }
   const aside = path.join(dir, `replaced-${stampOf()}-${process.pid}`)
   const setAside = (from, name) => {
-    if (!fs.existsSync(from) && !isLink(from)) return
+    plain(from, from)
+    if (!fs.existsSync(from)) return
     fs.mkdirSync(path.dirname(path.join(aside, name)), { recursive: true, mode: 0o700 })
     moveEntry(from, path.join(aside, name))
   }
   for (const board of record.boards) {
     const target = inside(outputDir, path.join(outputDir, board))
     const source = path.join(dir, 'boards', board)
+    plain(path.join(dir, 'boards'), `${path.basename(dir)}/boards`)
+    plain(source, `${path.basename(dir)}/boards/${board}`)
     if (!fs.lstatSync(source).isDirectory()) throw new Error(`${path.basename(dir)}/boards/${board} is not a folder`)
     const staged = `${target}.restoring`
+    plain(staged, staged)
     fs.rmSync(staged, { recursive: true, force: true })
     linkTree(source, staged)
     setAside(target, `boards/${board}`)
+    plain(staged, staged)
+    plain(target, target)
     fs.renameSync(staged, target)
   }
   setAside(engineDir, 'engine')
-  if (record.engine) linkTree(path.join(dir, 'engine'), engineDir, { copy: true, mode: PRIVATE })
+  if (record.engine) {
+    plain(path.join(dir, 'engine'), `${path.basename(dir)}/engine`)
+    plain(engineDir, engineDir)
+    linkTree(path.join(dir, 'engine'), engineDir, { copy: true, mode: PRIVATE })
+  }
   const markerFile = path.join(outputDir, marker)
-  if (record.marker) fs.copyFileSync(path.join(dir, marker), markerFile)
-  else fs.rmSync(markerFile, { force: true })
+  plain(markerFile, markerFile)
+  if (record.marker) {
+    plain(path.join(dir, marker), `${path.basename(dir)}/${marker}`)
+    fs.copyFileSync(path.join(dir, marker), markerFile)
+  } else fs.rmSync(markerFile, { force: true })
   const now = digestOf(outputDir, record.boards)
   const changed = record.boards.filter((board) => JSON.stringify(now[board]) !== JSON.stringify(record.digest?.[board]))
   if (changed.length) throw new Error(`the restored ${changed.join(', ')} does not match the backup byte for byte`)
