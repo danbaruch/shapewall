@@ -39,7 +39,7 @@ import { readSoloBinding } from './solo/binding.js'
 import { boardJobBusyMessage, readBoardJob } from '../board-job.js'
 import { CHECKS_BUNDLE_MAX, validateChecksBundle } from '../checks/transport.js'
 import { listReports } from '../checks/store.js'
-import { REPORTS_MAX, validateReport } from '../checks/schema.js'
+import { REPORT_ID_RE, REPORTS_MAX, validateReport } from '../checks/schema.js'
 import { cleanNetworkSummary } from '../capture/network-summary.js'
 
 export const PUSH_LIMITS = {
@@ -1124,8 +1124,9 @@ export function createPushStore(
         // and the swap. Their bytes count once, with the board's.
         const plan = existing ? planCarry(referencedVersions(t, projectId, board.id), target, staging, nextManifest) : []
         // Files the board keeps that no push sends (the solo engine's board
-        // journeys), read now, in the lock, and carried over whole.
-        const local = boardLocalFiles(target)
+        // journeys, the kept reports' search previews), read now, in the
+        // lock, and carried over whole.
+        const local = boardLocalFiles(target, [...keptIds])
         const bytes =
           push.bytes + checkBytes + plan.reduce((n, item) => n + item.bytes, 0) + local.reduce((n, item) => n + item.data.length, 0)
         checkQuota(projectId, board.id, bytes)
@@ -1141,6 +1142,7 @@ export function createPushStore(
         }
         for (const item of local) {
           const to = path.join(staging, item.name)
+          fs.mkdirSync(path.dirname(to), { recursive: true })
           const temp = `${to}${CARRYING}`
           fs.writeFileSync(temp, item.data, { flag: 'wx', mode: 0o600 })
           carried.push(temp)
@@ -1193,14 +1195,38 @@ const CARRYING = '.carrying'
 // (src/hosted/solo/journeys.js, src/journeys.js). A team server never writes
 // one, so there is nothing to carry there. A page push keeps them anyway
 // (it copies everything outside captures/).
+// checks/seo/<report>.json: a checks report's search preview, written only
+// by a checks run on the server (src/checks/seo-snapshot.js; no checks
+// bundle carries one). Carried for each report the push keeps, so a
+// dropped report's preview goes with it, as saveSnapshot keeps no more
+// previews than reports.
 export const BOARD_LOCAL_FILES = Object.freeze(['journeys.json'])
+export const SEO_PREVIEW_DIR = 'checks/seo'
 const BOARD_LOCAL_MAX = 4 * 1024 * 1024
 
-// -> [{ name, data }] of the board-local files in `dir`: regular files only,
-// opened without following a link, at most BOARD_LOCAL_MAX bytes each.
-function boardLocalFiles(dir) {
+// A folder under the board folder that is a real directory, not a link.
+function realDir(dir, rel) {
+  let at = dir
+  for (const part of rel.split('/')) {
+    at = path.join(at, part)
+    try {
+      if (!fs.lstatSync(at).isDirectory()) return false
+    } catch {
+      return false
+    }
+  }
+  return true
+}
+
+// -> [{ name, data }] of the board-local files in `dir` (and the search
+// previews of `reportIds`): regular files only, opened without following a
+// link, at most BOARD_LOCAL_MAX bytes each.
+function boardLocalFiles(dir, reportIds = []) {
   const found = []
-  for (const name of BOARD_LOCAL_FILES) {
+  const seo = realDir(dir, SEO_PREVIEW_DIR)
+    ? reportIds.filter((id) => REPORT_ID_RE.test(String(id))).map((id) => `${SEO_PREVIEW_DIR}/${id}.json`)
+    : []
+  for (const name of [...BOARD_LOCAL_FILES, ...seo]) {
     let fd
     try {
       fd = fs.openSync(path.join(dir, name), fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
