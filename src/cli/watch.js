@@ -2,11 +2,14 @@
 
 import fs from 'node:fs'
 import { findConfigFile, loadConfig } from '../config.js'
+import { assertMigrationAllows } from '../engine-folder.js'
 import { mentionFlag, startNotifier } from './notify.js'
 import { durationFlag } from './duration.js'
 
 export async function watch(flags, out, err) {
   const config = flags.remote === undefined ? loadConfig(flags.config) : null
+  // A local watch writes the local store: not during or after a migration of its boards to the solo engine.
+  if (config) assertMigrationAllows(config, { local: true, boardIds: typeof flags.board === 'string' ? [flags.board] : null })
   const { watchComments } = await import('../watch.js')
   const number = (name, fallback) => {
     if (flags[name] === undefined) return fallback

@@ -134,6 +134,7 @@ export const COMMAND_FLAGS = {
   // Every flag any `checks` action takes; SUBCOMMAND_FLAGS narrows it per action.
   checks: [...new Set([...CHECKS_FLAGS, ...LIGHTHOUSE_FLAGS])],
   serve: [
+    'engine',
     'buzz-bridge',
     'accounts',
     'accounts-origin',

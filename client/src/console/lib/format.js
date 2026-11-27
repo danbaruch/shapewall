@@ -188,7 +188,7 @@ export function describeAudit(entry) {
         : `let any agent take comment ${String(entry.target || '').replace(/^.*#/, '#')}${d.fromName ? ` (it was waiting for ${d.fromName})` : ''}`
     // Sign-in and passkeys (account events of the workspace's members).
     case 'signed_in':
-      return `signed in${d.via === 'recovery_code' ? ' with a recovery code' : d.via === 'tailnet' ? ` by tailnet identity${d.tailnet ? ` (${d.tailnet})` : ''}` : ''}${d.device ? ` on ${d.device}` : ''}${d.newDevice ? ' (a new device)' : ''}`
+      return `signed in${d.via === 'recovery_code' ? ' with a recovery code' : d.via === 'local' ? ' from the terminal' : d.via === 'tailnet' ? ` by tailnet identity${d.tailnet ? ` (${d.tailnet})` : ''}` : ''}${d.device ? ` on ${d.device}` : ''}${d.newDevice ? ' (a new device)' : ''}`
     case 'signed_out':
       return `signed out${d.device ? ` on ${d.device}` : ''}`
     case 'account_created':

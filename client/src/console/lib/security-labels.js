@@ -15,6 +15,7 @@ const SIGN_IN_LABEL = {
   tailnet: 'Signed in by tailnet',
   recovery_code: 'Signed in with a recovery code',
   rebind: 'Signed in after moving to a new address',
+  local: 'Signed in from the terminal',
 }
 // A new device is said only where the method allows it to be the headline;
 // a recovery-code sign-in keeps its own label (the warning icon says the rest).

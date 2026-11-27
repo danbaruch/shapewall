@@ -144,6 +144,28 @@ export function SignIn() {
     }
   }
 
+  // The solo engine (shapewall serve --engine hosted): its owner signs in from the terminal that runs it.
+  if (session?.soloSignIn || me?.soloSignIn)
+    return (
+      <AuthLayout>
+        <Card className="p-6 sm:p-8" data-sw-signin-solo>
+          <h1 className="text-xl font-semibold text-fg">Sign in</h1>
+          <p className="mt-1 text-sm text-muted">
+            This board runs on your machine. Sign in from the terminal that runs it: <code>shapewall serve --engine hosted --open</code>{' '}
+            opens it signed in. The link works once, for a minute, in a browser on this machine. There is no password and no passkey.
+          </p>
+          {me ? (
+            <Notice tone="info" className="mt-4">
+              You are signed in as @{me.user.handle}.{' '}
+              <Link to="/" className="font-medium text-accent underline-offset-2 hover:underline">
+                Go to your workspace
+              </Link>
+            </Notice>
+          ) : null}
+        </Card>
+      </AuthLayout>
+    )
+
   // Tailscale is the only sign-in on this server: no passkey is asked for or offered.
   if (session?.passkeysOff || me?.passkeysOff)
     return (

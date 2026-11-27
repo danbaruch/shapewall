@@ -8,6 +8,7 @@ import http from 'node:http'
 import https from 'node:https'
 import { lanAccess, tailscaleAccess } from '../server/tailscale.js'
 import { loadConfig } from '../config.js'
+import { assertMigrationAllows } from '../engine-folder.js'
 import { formatCommand } from '../agent/acp/command.js'
 import { detectAgents } from '../agent/acp/detect.js'
 import { agentSettings } from '../agent/config.js'
@@ -111,6 +112,8 @@ export const UPDATE_RESTART_EXIT = 75
 
 export async function serve(flags, out) {
   const config = loadConfig(flags.config)
+  // Not while shapewall migrate runs or after one stopped midway, nor for boards it moved to the solo engine.
+  assertMigrationAllows(config, { local: true })
   // Keys the config has but Shapewall does not use (a typo, most often).
   for (const line of keyWarningLines(config.warnings)) out(line)
   // The first serve in a project adds the Shapewall section to AGENTS.md, once (src/agent-docs.js).

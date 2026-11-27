@@ -75,6 +75,7 @@ import { mountTailnetAdmin } from './tailnet-routes.js'
 import { cspWithErrors, reportServerError } from '../error-tracking.js'
 import { mountSolo } from './solo/index.js'
 import { soloLocalGate } from './solo/signin.js'
+import { soloFlagGate } from './solo/flags.js'
 
 export { changeEventType, publicBoardView, TOKEN_SCOPES, INVITE_DAYS }
 
@@ -347,6 +348,9 @@ export function createHostedApp({
   app.use(passkeysGate)
   // The fixed core: what always asks for a fresh passkey check (one table, src/hosted/step-up.js).
   app.use(fixedCore)
+  // The solo engine's serve flags (--read-only, --no-chat: src/hosted/solo/flags.js), before every board route.
+  const soloFlags = solo ? soloFlagGate(solo) : null
+  if (soloFlags) app.use(soloFlags)
 
   const { publicUser, createWorkspace, acceptInvite, revokeGrantsOf, ownerCount } = createMembership({
     db,

@@ -109,7 +109,13 @@ export async function startHosted({
   env = process.env,
   out = console.log,
   exitOnStop = true,
+  // How stop() ends the process, and how long it waits before forcing that
+  // once nothing is left to wait for (tests pass their own).
+  exit = (code) => process.exit(code),
+  forceExitMs = 8000,
   // The solo profile, passed to createHostedApp (src/hosted/solo/index.js); null: a team server.
+  // Started here it is always the owner's engine: { signIn: 'local', configPath, config, ownerName, ... }
+  // (src/hosted/solo/serve.js), on loopback, with no proxy, tailnet or exposure of any kind.
   solo = null,
 }) {
   if (!nodeSupportsSqlite())
@@ -133,11 +139,38 @@ export async function startHosted({
   if (tailscale && host !== '127.0.0.1')
     throw new Error('--tailscale listens on 127.0.0.1 only (tailscale serve forwards to it); drop --host')
   if (tailscale && origin) throw new Error('--tailscale sets the origin itself (https://<machine>.<tailnet>.ts.net); drop --origin')
+  if (solo) {
+    if (solo.signIn !== 'local') throw new Error('solo: the engine started here signs its owner in locally (solo.signIn: local)')
+    const exposed = [
+      [!['127.0.0.1', '::1', 'localhost'].includes(String(host)), 'a non-loopback --host'],
+      [tailscale, '--tailscale'],
+      [tailnetSignIn, '--tailnet-sign-in'],
+      [trustProxy, '--trust-proxy'],
+      [signup !== 'invite', '--signup open'],
+      [previousOrigin, '--previous-origin'],
+    ].find(([on]) => on)
+    if (exposed) throw new Error(`The solo engine runs on this machine only: ${exposed[1]} is refused (sharing it comes later).`)
+  }
   if (tailnetSignIn && !tailscale)
     throw new TailnetSignInError(
       '--tailnet-sign-in goes with --tailscale: it signs people in by the identity that tailscale serve adds, and this server would not be behind it.',
     )
   const db = await openDatabase(path.join(dir, 'shapewall.db'))
+  // A solo engine's folder (migration 24's solo_binding has its row) is not a team server's, and the reverse
+  // is refused by the solo start itself (src/hosted/solo/signin.js ensureSoloOwner).
+  if (!solo) {
+    const { readSoloBinding } = await import('./solo/binding.js')
+    let bound = null
+    try {
+      bound = readSoloBinding(db)
+    } catch {
+      bound = true
+    }
+    if (bound) {
+      db.close()
+      throw new Error(`${dir} is a solo engine's folder (shapewall serve --engine hosted); a team server uses a folder of its own.`)
+    }
+  }
   const cleanup = []
   const stopAll = async () => {
     for (const step of cleanup.reverse()) await step()
@@ -175,7 +208,10 @@ export async function startHosted({
     const server = await listen(entry, port, host)
     cleanup.push(() => new Promise((resolve) => server.close(() => resolve())))
     const localPort = server.address().port
-    let publicOrigin = origin || `http://${host.includes(':') ? `[${host}]` : host}:${localPort}`
+    // An origin may name the port (a function of it): the solo engine's own host name with port 0.
+    let publicOrigin =
+      (typeof origin === 'function' ? origin(localPort) : origin) || `http://${host.includes(':') ? `[${host}]` : host}:${localPort}`
+    if (typeof usercontentOrigin === 'function') usercontentOrigin = usercontentOrigin(localPort)
     let shareOrigin = null
     let shareServer = null
     // Tailnet sign-in: refuse to start when this machine cannot prove that a
@@ -338,18 +374,24 @@ export async function startHosted({
     })
     cleanup.push(() => stopRetention())
 
-    out(`Shapewall hosted is listening on ${host}:${localPort} for ${publicOrigin} (sign-up: ${signup})`)
-    out(
-      !mailer.configured
-        ? 'Invite emails: off (set RESEND_API_KEY and SHAPEWALL_EMAIL_FROM to send them)'
-        : signup === 'open'
-          ? 'Invite emails: off (not with --signup open)'
-          : 'Invite emails: on (Resend)',
-    )
-    if (!legal.terms || !legal.privacy)
-      out('Legal links: not set (SHAPEWALL_HOSTED_TERMS_URL, SHAPEWALL_HOSTED_PRIVACY_URL); set them before inviting people.')
-    const setup = app.locals.setupLink()
-    if (setup) {
+    // The solo engine invites nobody: its own lines say what matters (src/hosted/solo/serve.js).
+    if (solo) out(`Listening on ${host}:${localPort} for ${publicOrigin}`)
+    else {
+      out(`Shapewall hosted is listening on ${host}:${localPort} for ${publicOrigin} (sign-up: ${signup})`)
+      out(
+        !mailer.configured
+          ? 'Invite emails: off (set RESEND_API_KEY and SHAPEWALL_EMAIL_FROM to send them)'
+          : signup === 'open'
+            ? 'Invite emails: off (not with --signup open)'
+            : 'Invite emails: on (Resend)',
+      )
+      if (!legal.terms || !legal.privacy)
+        out('Legal links: not set (SHAPEWALL_HOSTED_TERMS_URL, SHAPEWALL_HOSTED_PRIVACY_URL); set them before inviting people.')
+    }
+    const setup = solo ? null : app.locals.setupLink()
+    if (solo) {
+      // No setup link on the owner's engine: the owner exists, and signs in from the terminal.
+    } else if (setup) {
       writeSetupLink(dir, setup)
       out(`No accounts yet. The one-time setup link is in ${path.join(dir, 'setup-link')} (0600); read it privately on this machine.`)
     } else if (userCount(db) > 0) {
@@ -359,22 +401,36 @@ export async function startHosted({
       removeSetupLink(dir)
     }
     let stopping = null
-    const stop = () => {
+    // stop(code): the exit code (0; a managed restart after an update passes
+    // its own, src/hosted/solo/serve.js). An update apply in flight
+    // (app.locals.appUpdate, the solo engine's self-update) is never cut short:
+    // a half-applied install is worse than a slow stop, so no new one starts,
+    // a check stops, and the force exit is armed only once the apply settled.
+    const stop = (code = 0) => {
+      const exitCode = Number.isInteger(code) ? code : 0
       stopping ||= (async () => {
-        const force = setTimeout(() => exitOnStop && process.exit(0), 8000)
+        const update = app.locals.appUpdate
+        update?.stop?.()
+        if (update?.applying?.()) {
+          out('Waiting for the update in progress to finish before stopping.')
+          await update.settled?.()
+        }
+        const force = setTimeout(() => exitOnStop && exit(exitCode), forceExitMs)
         force.unref()
         server.closeAllConnections?.()
         shareServer?.closeAllConnections?.()
         await stopAll()
-        process.off('SIGINT', stop)
-        process.off('SIGTERM', stop)
+        process.off('SIGINT', onSignal)
+        process.off('SIGTERM', onSignal)
         db.close()
-        if (exitOnStop) process.exit(0)
+        clearTimeout(force)
+        if (exitOnStop) exit(exitCode)
       })()
       return stopping
     }
-    process.once('SIGINT', stop)
-    process.once('SIGTERM', stop)
+    const onSignal = () => stop(0)
+    process.once('SIGINT', onSignal)
+    process.once('SIGTERM', onSignal)
     return { server, shareServer, app, db, origin: publicOrigin, shareOrigin, stop, tailnet: gate, tailnetWatch }
   } catch (error) {
     await stopAll().catch(() => {})

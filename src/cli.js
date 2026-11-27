@@ -56,6 +56,12 @@ const COMMANDS = {
   },
   links: ({ flags, out }) => links(flags, out),
   serve: async ({ flags, out }) => {
+    // --engine hosted (experimental): the solo engine, in src/hosted (src/hosted/solo/serve.js).
+    if (flags.engine !== undefined) {
+      const { serveEngine } = await import('./hosted/ops-cli.js')
+      await serveEngine(flags, out)
+      return null
+    }
     await serve(flags, out)
     return null
   },
