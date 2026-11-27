@@ -752,6 +752,15 @@ shapewall serve --engine hosted --open
   is a pipe the engine holds, and it watches its parent). It gets only `agent.token`, never the command line's or watch's;
   what it runs is marked so that a `shapewall` command there gets no engine token, and no agent reads `.shapewall/`.
   `--no-chat` (or `--read-only`) runs the engine without it.
+- **Batch fixes.** With `agent.batchFixes` on (the config or the saved agent settings, as on a local board:
+  [Fix several comments at once](agents.md#fix-several-comments-at-once)), the owner picks open comments in the comments panel's
+  Select mode and the engine fixes them one after another, each an ordinary Fix with through the link to the connected agent
+  (the board's own agent, or one connected with `agent connect`). Each fix is its own turn with its own trust: a comment you
+  wrote runs as yours, and one someone else wrote (an imported comment, one made with a token) at the tier its author gets,
+  whoever started the batch. Each edit is a card you allow in the batch strip or the comment's thread (the card's hash, once,
+  as any card), and each fix ends on a branch of its own. Only the engine's owner, signed in from the terminal and on this
+  machine, may start, cancel or dismiss a batch; the batch checks that sign-in again before each fix and stops when it has
+  ended. A share link guest's comment is never in a batch. Team servers have no batch routes.
 - **Data** lives in `.shapewall/.engine/` (a name no board id can take): the database, the captures, the host name's random
   part, the sign-in keys. The folder is made private (0700) with a `.gitignore` of `*`. The engine refuses to start if git
   tracks anything in it, whichever repository could: the project's, a repository or submodule that `.shapewall` is itself,

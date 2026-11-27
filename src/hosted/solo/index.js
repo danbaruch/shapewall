@@ -34,12 +34,13 @@
 // notifications, G8), update.js (self-update, G10), capture.js (in-process
 // capture from the board and recapture_pages on /mcp, G3), journeys.js
 // (journey editing, G5), checks.js (checks run control and the SEO tab's
-// previews, G6). A surface the board turns on (client/src/board/solo.js)
-// sets its flag in `features`.
+// previews, G6), batch.js (batch fixes on the chat, G14a). A surface the
+// board turns on (client/src/board/solo.js) sets its flag in `features`.
 //
 // deps.engineJobs: the jobs that run a browser on this machine (capture,
 // checks) register here, and each refuses to start while another runs: one
 // job at a time on the engine, whatever board.
+import { mountSoloBatch } from './batch.js'
 import { mountSoloCapture } from './capture.js'
 import { mountSoloChecks } from './checks.js'
 import { createSoloBoards } from './config.js'
@@ -135,6 +136,9 @@ export function mountSolo(app, deps) {
   if (checks) closers.push(() => checks.close())
   // Journey editing on the board (G5): sets features.journeys.
   mountSoloJourneys(app, soloDeps, features)
+  // Batch fixes on the chat (G14a): sets features.batchFixes.
+  const batch = mountSoloBatch(soloDeps, features)
+  if (batch) closers.push(() => batch.close())
   const update = mountSoloUpdate(app, soloDeps)
   if (update) {
     features.appUpdates = true

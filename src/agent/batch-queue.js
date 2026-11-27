@@ -36,7 +36,8 @@ export class BatchError extends Error {
 }
 
 // `runItem(boardId, commentId, { onApproval })` starts one fix and returns
-// { done: Promise<{ fixed, message? }>, cancel() }. `onApproval(card|null)`:
+// { done: Promise<{ fixed, skipped?, stop?, message? }>, cancel() }; `stop`
+// (a reason) ends the batch after this item. `onApproval(card|null)`:
 // the running fix waits for (or no longer waits for) the person's OK.
 // `onChange(boardId)`: the batch's state changed (routes.js tells the
 // open views). `now`: the clock, for tests.
@@ -126,6 +127,8 @@ export function createBatchQueue({ runItem, onChange = () => {}, now = () => Dat
       changed(batch)
       if (item.state === 'failed') failures += 1
       else if (item.state === 'fixed') failures = 0
+      // A result may stop the batch with its own reason (the agent is gone, say).
+      if (result?.stop && !batch.cancelled && !closed) return finish(batch, 'stopped', String(result.stop))
       if (failures >= BATCH_FAILURES_STOP) return finish(batch, 'stopped', 'failures')
     }
     if (batch.cancelled || closed) return finish(batch, 'cancelled', 'cancelled')
