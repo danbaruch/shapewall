@@ -16,6 +16,8 @@
 //   DELETE agent/boards/:bid/threads/:thread
 //   POST   agent/boards/:bid/threads/:thread/permissions/:id   { optionId, hash }
 //   GET    agent/boards/:bid/permissions      the cards that wait for this person
+//   GET|POST|DELETE agent/boards/:bid/batch, POST .../batch/cancel
+//          batch fixes, on the solo engine only (see "Batch fixes" below)
 //
 // "Fix with <agent>" is POST .../threads/comment-<n>/messages { fix: true }:
 // the server takes the comment in the agent's name (the vouch, the claim and
@@ -1239,7 +1241,8 @@ export function mountChatRoutes(
   // Off on every server until batchFixes.enable(gate), which only
   // src/hosted/solo/batch.js calls: on a team server these routes do not
   // exist (the 404 below). `gate`: { owner(req): the solo owner in a local
-  // session on this machine, settings(): batchFixSettings of the project }.
+  // session on this machine, settings(): batchFixSettings of the project,
+  // refresh(userId, sessionKey): { user, session } as stored now, or null }.
   //
   //   GET    agent/boards/:bid/batch          { settings, batch }
   //   POST   agent/boards/:bid/batch          { commentIds }  -> { batch }
@@ -1267,11 +1270,10 @@ export function mountChatRoutes(
   // the person, the session, the role and the project read again now.
   // null when any of it no longer holds.
   function batchRequest(owner, commentId) {
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(owner.userId)
-    const session = db
-      .prepare('SELECT token_hash, user_id, via, expires_at FROM sessions WHERE token_hash = ? AND user_id = ?')
-      .get(owner.session, owner.userId)
-    if (!user || !session || session.via !== 'local' || session.expires_at <= now().toISOString()) return null
+    // The person and the session as the database has them now (the gate reads them: src/hosted/solo/batch.js).
+    const fresh = batchGate?.refresh(owner.userId, owner.session)
+    if (!fresh) return null
+    const { user, session } = fresh
     const project = owner.projects.get(owner.projectId)
     if (!project) return null
     const person = { ...owner.user, ...user }
@@ -1310,7 +1312,7 @@ export function mountChatRoutes(
         }
       }
       // Until the turn ends; the card it waits on goes to the batch's view.
-      const follow = ({ req, at, live }) =>
+      const untilEnd = ({ req, at, live }) =>
         new Promise((resolve) => {
           const cards = new Map()
           stop = () => {
@@ -1363,7 +1365,7 @@ export function mountChatRoutes(
             }
             return { fixed: false, skipped: BATCH_SKIP.has(result.error.code), message: result.error.message }
           }
-          await follow(result.started)
+          await untilEnd(result.started)
           let comment
           try {
             comment = result.started.at.ctx.comments.get(commentId)
@@ -1475,8 +1477,8 @@ export function mountChatRoutes(
   const batchFixes = {
     // The solo engine turns them on (src/hosted/solo/batch.js); nothing else does.
     enable(gate) {
-      if (typeof gate?.owner !== 'function' || typeof gate?.settings !== 'function')
-        throw new Error('batch fixes: enable({ owner, settings })')
+      if (['owner', 'settings', 'refresh'].some((name) => typeof gate?.[name] !== 'function'))
+        throw new Error('batch fixes: enable({ owner, settings, refresh })')
       batchGate = gate
     },
     enabled: () => Boolean(batchGate),

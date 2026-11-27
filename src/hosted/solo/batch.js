@@ -34,6 +34,16 @@ export function mountSoloBatch(deps, features) {
       return !deps.localGate || deps.localGate.admits(req)
     },
     settings: () => batchFixSettings(config, env),
+    // Before each fix: the person, and their local session if it is still there and not past its end.
+    refresh(userId, sessionKey) {
+      const user = deps.db.prepare('SELECT * FROM users WHERE id = ?').get(userId)
+      const session = deps.db
+        .prepare('SELECT token_hash, user_id, via, expires_at FROM sessions WHERE token_hash = ? AND user_id = ?')
+        .get(sessionKey, userId)
+      const now = (deps.now ? deps.now() : new Date()).toISOString()
+      if (!user || !session || session.via !== 'local' || session.expires_at <= now) return null
+      return { user, session }
+    },
   })
   features.batchFixes = true
   return { close: () => chatBatch.close() }

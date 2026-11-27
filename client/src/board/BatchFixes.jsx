@@ -30,7 +30,9 @@ export const batchRunning = (batch) => Boolean(batch && RUNNING.has(batch.state)
 export const batchable = (comment) =>
   comment.status === 'open' && !['queued', 'working', 'branch-ready'].includes(comment.agentStatus) && !comment.authorGuest
 
-export function useBatchFixes({ boardId, enabled, onProgress = null }) {
+// `hosted`: the solo engine's batch (src/hosted/chat-routes.js, G14a). It has
+// no local agent events stream: the slow poll while a batch runs follows it.
+export function useBatchFixes({ boardId, enabled, hosted = false, onProgress = null }) {
   // The server's setting and batch (lib/hooks.js useResource): a failed GET
   // keeps the last answer (so a running batch keeps polling), and an answer
   // that left before a start, cancel or dismiss landed is dropped (setData).
@@ -53,8 +55,8 @@ export function useBatchFixes({ boardId, enabled, onProgress = null }) {
     lastSeen.current = stamp
     if (hasBatch) progress.current?.()
   }, [stamp, hasBatch])
-  useBatchChanged(boardId, load, enabled)
-  useAgentsChanged(load, enabled)
+  useBatchChanged(boardId, load, enabled && !hosted)
+  useAgentsChanged(load, enabled && !hosted)
   const running = batchRunning(data?.batch)
   // Nothing polls otherwise: only while a batch runs, in case the events
   // stream is not there (a page opened without the owner link reconnecting).
@@ -290,7 +292,8 @@ export function BatchProgress({
     setAnswering(optionId ?? 'deny')
     setFailed(null)
     try {
-      await answerPermission(boardId, batch.waiting.threadId, batch.waiting.card.id, optionId)
+      // A hosted card (the solo engine, G14a) goes back with the hash of the card as shown.
+      await answerPermission(boardId, batch.waiting.threadId, batch.waiting.card.id, optionId, batch.waiting.card.hash || undefined)
     } catch (error) {
       setFailed(error.message)
     } finally {
