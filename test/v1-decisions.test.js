@@ -1,6 +1,7 @@
-// The pre-1.0 product decisions: renamed commands and config keys that keep
-// working with a warning, what the help marks experimental or leaves out, and
-// what stays but is experimental (the Buzz bridge).
+// The pre-1.0 product decisions: renamed commands and config keys (deprecated
+// through 1.x, removed in 2.0 with an error that names the replacement), what
+// the help marks experimental or leaves out, and what stays but is
+// experimental (the Buzz bridge).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -30,36 +31,43 @@ async function run(argv) {
   return { code, error, out: out.join('\n'), err: err.join('\n') }
 }
 
-test('audit is checks lighthouse: same flags, a deprecation warning, and its help is the checks help', async () => {
+test('audit was removed in 2.0: it names checks lighthouse, also with --help; checks lighthouse takes its flags', async () => {
   const dir = tempDir('v1-audit')
   const file = path.join(dir, 'shapewall.config.json')
   fs.writeFileSync(file, JSON.stringify({ baseUrl: 'http://127.0.0.1:9', pages: [{ id: 'home', path: '/' }] }))
-  // Strict parsing takes every Lighthouse flag on checks, and the old --production spelling.
-  const parsed = parseArgs(['checks', 'lighthouse', '--viewports', 'phone', '--samples', '2', '--production', 'development'], {
+  // Strict parsing takes every Lighthouse flag on checks.
+  const parsed = parseArgs(['checks', 'lighthouse', '--viewports', 'phone', '--samples', '2', '--build-mode', 'development'], {
     strict: true,
   })
   assert.deepEqual(parsed.positional, ['lighthouse'])
   assert.equal(parsed.flags['build-mode'], 'development')
-  assert.deepEqual(parsed.deprecations, [['production', 'build-mode']])
+  const result = await run(['checks', 'lighthouse', '--config', file, '--build-mode', 'unknown', '--json'])
+  // Lighthouse is an optional peer: either it is missing (an error that says how to add it) or the run reports.
+  if (result.error) assert.match(result.error.message, /lighthouse/i)
+  else assert.equal(typeof result.code, 'number')
+  assert.equal(result.err, '')
   for (const argv of [
     ['audit', '--config', file, '--build-mode', 'unknown', '--json'],
-    ['checks', 'lighthouse', '--config', file, '--build-mode', 'unknown', '--json'],
+    ['audit', '--help'],
+    ['help', 'audit'],
+    ['--config', file, 'audit'],
   ]) {
-    const result = await run(argv)
-    // Lighthouse is an optional peer: either it is missing (an error that says how to add it) or the run reports.
-    if (result.error) assert.match(result.error.message, /lighthouse/i)
-    else assert.equal(typeof result.code, 'number')
-    assert.equal(/audit is deprecated.*use checks lighthouse/.test(result.err), argv[0] === 'audit', argv.join(' '))
+    const gone = await run(argv)
+    assert.equal(gone.error?.code, 'removed', argv.join(' '))
+    assert.equal(gone.error.message, 'audit was removed in Shapewall 2.0; use checks lighthouse.')
   }
-  assert.match((await run(['audit', '--help'])).out, /checks lighthouse/)
-  assert.equal((await run(['help', 'audit'])).out, commandHelp('checks'))
+  // The board argument (audit BOARD) went too.
+  const board = await run(['checks', 'lighthouse', 'site', '--config', file])
+  assert.match(board.error.message, /^the board argument \("checks lighthouse BOARD"\) was removed in Shapewall 2\.0; use --board BOARD\.$/)
   setDeprecationSink(() => {})
 })
 
-test('agent sandbox run|watch|doctor|build-image, with the old spellings as warned aliases', async () => {
-  const old = await run(['agent', 'build-image', '--runtime', 'nope'])
-  assert.match(old.err, /agent build-image is deprecated.*use agent sandbox build-image/)
-  assert.match(old.error.message, /podman or docker/)
+test('agent sandbox run|watch|doctor|build-image; the old bare spellings were removed in 2.0 and name the new one', async () => {
+  for (const action of ['run', 'watch', 'doctor', 'build-image']) {
+    const old = await run(['agent', action])
+    assert.equal(old.error?.code, 'removed', action)
+    assert.equal(old.error.message, `agent ${action} was removed in Shapewall 2.0; use agent sandbox ${action}.`)
+  }
   const now = await run(['agent', 'sandbox', 'build-image', '--runtime', 'nope'])
   assert.equal(now.err, '')
   assert.match(now.error.message, /podman or docker/)
@@ -97,20 +105,23 @@ test('the help marks experimental commands and options with one suffix, and leav
   for (const gone of ['audit  ', 'agent run --comment']) assert.ok(!HELP.includes(gone), gone)
 })
 
-test('keepVersions is the config key; versions is still read, with a warning, and is not an unknown key', () => {
+test('keepVersions is the config key; versions was removed in 2.0: the config refuses it by name, not as an unknown key', () => {
   const lines = []
   setDeprecationSink((line) => lines.push(line))
   const dir = tempDir('v1-keep-versions')
   const file = path.join(dir, 'shapewall.config.json')
   assert.equal(normalizeConfig({ ...structuredClone(SAMPLE), keepVersions: 2 }, { dir, file }).versions, 2)
   assert.equal(lines.length, 0)
-  assert.equal(normalizeConfig({ ...structuredClone(SAMPLE), versions: 3 }, { dir, file }).versions, 3)
-  assert.match(lines[0], /the config key "versions" is deprecated.*rename it to "keepVersions"/)
-  assert.equal(normalizeConfig({ ...structuredClone(SAMPLE), versions: 3, keepVersions: 1 }, { dir, file }).versions, 1, 'the new key wins')
+  for (const raw of [{ versions: 3 }, { versions: 3, keepVersions: 1 }])
+    assert.throws(
+      () => normalizeConfig({ ...structuredClone(SAMPLE), ...raw }, { dir, file }),
+      (error) => error.problems.includes('the config key "versions" was removed in Shapewall 2.0; rename it to "keepVersions".'),
+    )
   assert.throws(
-    () => normalizeConfig({ ...structuredClone(SAMPLE), versions: 99 }, { dir, file }),
-    (error) => error.problems.some((problem) => problem.startsWith('versions:')),
+    () => normalizeConfig({ ...structuredClone(SAMPLE), keepVersions: 99 }, { dir, file }),
+    (error) => error.problems.some((problem) => problem.startsWith('keepVersions:')),
   )
+  assert.equal(lines.length, 0)
   assert.deepEqual(configKeyWarnings({ ...structuredClone(SAMPLE), versions: 3 }), [])
   assert.deepEqual(
     configKeyWarnings({ ...structuredClone(SAMPLE), keepVersion: 3 }).map((warning) => warning.suggestion),
@@ -157,7 +168,7 @@ test('the stability guide is published with the docs and states the promise', ()
   assert.ok(!text.includes('—'), 'no em dashes')
 })
 
-test('checks takes the Lighthouse flags only for checks lighthouse (and audit), and its own flags only for its other actions', async () => {
+test('checks takes the Lighthouse flags only for checks lighthouse, and its own flags only for its other actions', async () => {
   const strict = (argv) => parseArgs(argv, { strict: true })
   for (const argv of [
     ['checks', 'run', '--samples', '3'],
@@ -181,8 +192,10 @@ test('checks takes the Lighthouse flags only for checks lighthouse (and audit), 
     json: true,
   })
   assert.equal(strict(['checks', '--samples', '2', 'lighthouse']).flags.samples, '2')
-  const audit = await run(['audit', '--flow-file', 'flow.json'])
-  assert.match(audit.error.message, /unknown option --flow-file for "checks lighthouse"/)
+  assert.throws(
+    () => strict(['checks', 'lighthouse', '--production', 'x']),
+    /checks lighthouse --production was removed in Shapewall 2\.0; use --build-mode/,
+  )
   setDeprecationSink(() => {})
 })
 

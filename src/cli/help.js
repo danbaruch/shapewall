@@ -78,14 +78,15 @@ export const SECTIONS = {
       --host ADDR           default 127.0.0.1 (see https://shapewall.com/docs/self-hosting before changing)
       --tailscale[=print]    private HTTPS over Tailscale; =print changes nothing
       --no-identity         pair even devices signed in as the Tailscale owner
-      --lan[=IP|INTERFACE]   pair devices on your network (HTTP cookies can be sniffed)
+      --lan[=IP|INTERFACE]   pair devices on your network (HTTP cookies can be sniffed; deprecated: use --tailscale)
       --tls-cert FILE       with --lan: HTTPS certificate (also --tls-key FILE)
       --no-remote-chat      paired devices cannot use the agent
       --approve-on-host     paired devices cannot approve agent commands
       --open                also open the board in your browser, with agent settings
       --print-owner-link    print the private owner link in full (also $SHAPEWALL_PRINT_OWNER_LINK=1)
       --read-only           no comments or captures from the UI
-      --accounts            require local passkey accounts after owner setup (Node 22.19+)
+      --accounts            require local passkey accounts after owner setup (Node 22.19+; deprecated: the solo
+                            engine signs its owner in by itself)
       --accounts-origin URL fixed HTTPS origin (default: loopback URL or --tailscale URL)
       --no-capture          comments allowed, captures only from the CLI
       --buzz-bridge FILE    owner-only existing Buzz conversation (private operator map; https://shapewall.com/docs/buzz)${EXPERIMENTAL}
@@ -101,6 +102,7 @@ export const SECTIONS = {
                             comments, watch and mcp in this folder go to it, and it runs this project's
                             agent (a coding agent or a model endpoint) on the link; --no-chat without one${EXPERIMENTAL}`,
   devices: `  devices list              paired devices and pending requests for this project [--json]
+                            (deprecated: use the tailnet instead, see shapewall serve --help)
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request
   devices revoke ID|--all   revoke a device or all devices immediately`,

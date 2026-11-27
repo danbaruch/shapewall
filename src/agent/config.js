@@ -17,6 +17,7 @@ import { KNOWN_AGENTS } from './acp/detect.js'
 import { validateBranchConfig } from './branch-mode.js'
 import { validateBatchConfig } from './batch-fixes.js'
 import { BROWSER_ALLOW_MAX, cleanOrigin } from './capabilities.js'
+import { removedLine } from '../deprecation.js'
 
 export const AGENT_BACKENDS = ['openai-compatible', 'acp']
 // A config is usually committed. A command in it would run on the machine of
@@ -154,7 +155,7 @@ export function validateAgent(raw, problems) {
 // default) or "checkout" (a local board's owner only: solo turns edit this
 // checkout in place).
 export const FIX_IN = ['copy', 'checkout']
-export const LOCAL_SESSIONS = ['restricted', 'own']
+export const LOCAL_SESSIONS = ['restricted']
 function validateCapabilityConfig(raw, problems) {
   const out = {}
   if (raw.browser !== undefined) {
@@ -177,14 +178,20 @@ function validateCapabilityConfig(raw, problems) {
     if (!FIX_IN.includes(raw.fixIn)) problems.push('agent.fixIn: "copy" (a fix copy of its own) or "checkout" (this checkout, solo only)')
     else out.fixIn = raw.fixIn
   }
-  // `agent.localSession`: "restricted" (the default since 1.4.0: a local
-  // board's Claude Code session gets read and edit tools and Shapewall's
-  // own tools, never its own shell or ~/.claude settings) or "own" (the
-  // 1.2.0 session with the agent's own full tool set; deprecated, kept for
-  // one minor).
+  // `agent.localSession`: "restricted", the only session since 2.0 (a local
+  // board's Claude Code session gets read and edit tools and Shapewall's own
+  // tools, never its own shell or ~/.claude settings). "own" (the 1.2.0
+  // session with the agent's own full tool set) was removed in 2.0.
   if (raw.localSession !== undefined) {
-    if (!LOCAL_SESSIONS.includes(raw.localSession))
-      problems.push('agent.localSession: "restricted" (the default) or "own" (the 1.2.0 session, deprecated)')
+    if (raw.localSession === 'own')
+      problems.push(
+        removedLine(
+          'agent.localSession "own"',
+          'leave it out: a local board\u2019s agent gets read and edit tools and Shapewall\u2019s own tools for commands and the browser',
+        ),
+      )
+    else if (!LOCAL_SESSIONS.includes(raw.localSession))
+      problems.push('agent.localSession: "restricted" (the only session; you can leave it out)')
     else out.localSession = raw.localSession
   }
   return out

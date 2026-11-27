@@ -30,7 +30,7 @@ import {
   verifyTarget,
 } from './lighthouse-auth.js'
 import { finiteMetric, lighthouseFindings, lighthouseMetrics } from './lighthouse-findings.js'
-import { deprecated } from '../deprecation.js'
+import { removed } from '../deprecation.js'
 
 export const LIGHTHOUSE_VERSION = '13.6.0'
 export const AUDIT_LIMITS = Object.freeze({ pages: 20, runs: 40, samples: 10, timeoutMs: 120000 })
@@ -418,7 +418,7 @@ export async function runLighthouseAudits({ config, log = () => {}, ...options }
 // still written), 1 an error that stopped the audit.
 export async function auditCommand(config, positional = [], flags = {}, out = console.log, err = console.error) {
   if (positional.length > 1) throw new Error('checks lighthouse takes no arguments; pick the board with --board ID.')
-  if (positional[0] !== undefined) deprecated('the board argument of audit ("audit BOARD")', 'use --board BOARD')
+  if (positional[0] !== undefined) throw removed('the board argument ("checks lighthouse BOARD")', 'use --board BOARD')
   const missing = lighthouseMissing()
   if (missing) throw new Error(missing)
   const result = await runLighthouseAudits({

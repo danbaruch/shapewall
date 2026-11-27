@@ -358,9 +358,6 @@ test('Q7 round 3 item 3: an ACP agent editing in the checkout gets no terminal; 
   assert.match(refused.done.text, /^Run refused: .*Work on a branch/)
   assert.equal(asked, false, 'no card')
   assert.equal(fs.existsSync(marker), false)
-  // agent.localSession "own" (the 1.2.0 session) is no different.
-  const own = await board('acp-terminal-own', { config: projectConfig('acp-terminal-own', { localSession: 'own' }) })
-  assert.equal(JSON.parse((await send(own, 'board', 'caps')).done.text).terminal, false)
   // Work on a branch: offered (still card-gated, see "terminal: every command needs approval").
   const branch = await board('acp-terminal-branch', { branch: true })
   assert.equal(JSON.parse((await send(branch, 'board', 'caps')).done.text).terminal, true)

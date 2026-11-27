@@ -19,8 +19,10 @@ New commands, flags, config keys, JSON fields and event types can arrive in any 
 fields you do not know.
 
 Before something stable is removed, it is deprecated for at least one minor release: it keeps working and prints a one-line
-warning on stderr when it is used (`Warning: ... is deprecated and will be removed in Shapewall 2.0; ...`), and it is removed only
-in the next major. The [CLI reference](https://shapewall.com/docs/cli#deprecated-spellings) lists the spellings deprecated so far.
+warning on stderr when it is used (`Warning: ... is deprecated and will be removed in Shapewall 3.0; ...`), and it is removed only
+in the next major. Once removed, using it stops with a one-line error that names the replacement (`... was removed in Shapewall
+2.0; ...`). The [CLI reference](https://shapewall.com/docs/cli#deprecated-spellings) lists the spellings deprecated now and the
+ones 2.0 removed.
 
 Shapewall supports the Node.js versions in active or maintenance LTS from 22.19 on. Dropping one is announced a minor release
 ahead.
@@ -34,7 +36,7 @@ The core of Shapewall:
   (except the link policy flags below), `agent status` (its human-readable output is not covered, see Internal), and `hosted`
   (its server flags, `backup` and `restore`);
 - the core config keys, including `commands`, `agent.browser.allow`, `agent.fixIn` and `agent.localSession` (1.4.0; its value
-  `"own"` is deprecated and goes in 2.0), the comment item JSON, the MCP tools, `/api/v1` (except `/api/v1/agent/*`), `/mcp`, the webhook payload and
+  `"own"` was removed in 2.0), the comment item JSON, the MCP tools, `/api/v1` (except `/api/v1/agent/*`), `/mcp`, the webhook payload and
   its signature, `events.jsonl`, the environment variables that are not listed as experimental below, the exit codes, and the
   `shapewall` bin name.
 

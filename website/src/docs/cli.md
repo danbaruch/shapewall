@@ -665,11 +665,19 @@ Every command exits with one of these. A command that has its own meaning for on
 
 ## Deprecated spellings
 
-These 0.x spellings still work through 1.x, each with a one-line warning on stderr, and go away in 2.0: `hosted --setup` (use
-`hosted setup`), `variant rm` (`variant remove`), `export --noindex` (`--no-index`), `audit` (`checks lighthouse`), `audit
---production` (`--build-mode`), `audit BOARD` (`--board BOARD`), `agent run|watch|doctor|build-image` (`agent sandbox run|watch|doctor|build-image`),
-`capture --yes` (capture never prompts; leave it out), `versions`, `notifications.boardUrl` and `github.boardUrl` in the config
-(`keepVersions` and the top-level `boardUrl`), and `SHAPEWALL_USERCONTENT_ORIGIN` (`SHAPEWALL_HOSTED_USERCONTENT_ORIGIN`).
+These still work through 2.x, each with a one-line warning on stderr, and go away in 3.0: `serve --lan` and `serve --accounts`
+(also `SHAPEWALL_ACCOUNTS=1`), the `devices` command (pair through the tailnet with `serve --tailscale`), and
+`starterAgent.testCommand` in the config (set `commands.test`).
+
+## Removed in 2.0
+
+These 0.x and 1.x spellings were deprecated through 1.x and are gone in 2.0. Using one stops with a one-line error that names
+the replacement: `hosted --setup` (use `hosted setup`), `variant rm` (`variant remove`), `export --noindex` (`--no-index`), `audit`
+(`checks lighthouse`), `--production` (`--build-mode`), the board argument of `checks lighthouse BOARD` (`--board BOARD`),
+`agent run|watch|doctor|build-image` (`agent sandbox run|watch|doctor|build-image`), `capture --yes` (capture never prompts; leave
+it out), `versions`, `notifications.boardUrl` and `github.boardUrl` in the config (`keepVersions` and the top-level `boardUrl`),
+`agent.localSession: "own"` (leave it out: the restricted session is the only one), and `SHAPEWALL_USERCONTENT_ORIGIN`
+(`SHAPEWALL_HOSTED_USERCONTENT_ORIGIN`).
 
 Commands and options marked `(experimental)` in the help, and the pages of these docs marked experimental, are outside the
 [stability promise](/docs/stability).
@@ -749,14 +757,15 @@ Commands
       --host ADDR           default 127.0.0.1 (see https://shapewall.com/docs/self-hosting before changing)
       --tailscale[=print]    private HTTPS over Tailscale; =print changes nothing
       --no-identity         pair even devices signed in as the Tailscale owner
-      --lan[=IP|INTERFACE]   pair devices on your network (HTTP cookies can be sniffed)
+      --lan[=IP|INTERFACE]   pair devices on your network (HTTP cookies can be sniffed; deprecated: use --tailscale)
       --tls-cert FILE       with --lan: HTTPS certificate (also --tls-key FILE)
       --no-remote-chat      paired devices cannot use the agent
       --approve-on-host     paired devices cannot approve agent commands
       --open                also open the board in your browser, with agent settings
       --print-owner-link    print the private owner link in full (also $SHAPEWALL_PRINT_OWNER_LINK=1)
       --read-only           no comments or captures from the UI
-      --accounts            require local passkey accounts after owner setup (Node 22.19+)
+      --accounts            require local passkey accounts after owner setup (Node 22.19+; deprecated: the solo
+                            engine signs its owner in by itself)
       --accounts-origin URL fixed HTTPS origin (default: loopback URL or --tailscale URL)
       --no-capture          comments allowed, captures only from the CLI
       --buzz-bridge FILE    owner-only existing Buzz conversation (private operator map; https://shapewall.com/docs/buzz) (experimental)
@@ -772,6 +781,7 @@ Commands
                             comments, watch and mcp in this folder go to it, and it runs this project's
                             agent (a coding agent or a model endpoint) on the link; --no-chat without one (experimental)
   devices list              paired devices and pending requests for this project [--json]
+                            (deprecated: use the tailnet instead, see shapewall serve --help)
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request
   devices revoke ID|--all   revoke a device or all devices immediately

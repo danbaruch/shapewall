@@ -87,8 +87,8 @@ Two rules sit on top of the table:
 | `watch --exec`                       | `SHAPEWALL_CAPABILITIES_FILE`, a `0600` JSON file with the comment's capabilities. Not enforced: your command's own sandbox is the boundary ([agent workflow](agent-workflow.md#shapewall-watch-the-loop-closes-by-itself)) |
 | The starter agent                    | Team or open from the trigger gate; named commands and the browser inside its container ([starter agent](starter-agent.md))                                                                                                 |
 
-`agent.localSession: "own"` in the config keeps a local board's 1.2.0 Claude Code session (its own full tool set) until 2.0, with a
-deprecation warning.
+`agent.localSession: "own"` (a local board's 1.2.0 Claude Code session, with its own full tool set) was removed in 2.0: the config
+refuses it with a one-line error. Leave the key out.
 
 ## A local board and a connected agent
 
@@ -219,8 +219,7 @@ folder and not writable by other users; Shapewall never creates it. Shapewall re
 
 Settings, hooks, commands, agents, `bin/`, output styles and installed plugins are skipped (copy a plugin's skill into
 `DIR/skills` to use it, its MCP server into `.claude.json`), and `agent connect` lists what it skipped. The folder's settings
-(allow rules, hooks, default mode) never apply. Only Claude Code's restricted session takes extensions: another agent, or
-`agent.localSession: "own"`, shows the line off.
+(allow rules, hooks, default mode) never apply. Only Claude Code's restricted session takes extensions: another agent shows the line off.
 
 Extensions are used only on turns above the open tier where every author is in the machine's extension set (`extensions-for`,
 `owner` by default), and only in a clean thread: everyone who ever wrote in it is in that set too, and it never carried text

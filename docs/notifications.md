@@ -72,12 +72,12 @@ Slack or Discord `url` (the URL is the secret), are refused with a pointer to th
 }
 ```
 
-| Key        | Type        | Default              | Notes                                                                                                                                                                                                                                                          |
-| ---------- | ----------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `boardUrl` | http(s) URL | the `serve` address  | Deprecated (it still works, with a warning): set the top-level `boardUrl`. Where people open the board, for links in messages. Else the top-level `boardUrl`, the address of a running `shapewall serve`, then port 4600. `$SHAPEWALL_BOARD_URL` overrides it. |
-| `people`   | object      | none                 | Mention handle to `{ email, slack, discord, telegram }` (any of them). Slack member ids look like `U012AB3CD`; Discord and Telegram user ids are digits.                                                                                                       |
-| `retries`  | 0-10        | `3`                  | Retries after a failed send.                                                                                                                                                                                                                                   |
-| `channels` | Channel[]   | from the environment | Up to 20. Without this key, channels come from environment variables alone (below).                                                                                                                                                                            |
+| Key        | Type        | Default              | Notes                                                                                                                                                                                                                                           |
+| ---------- | ----------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `boardUrl` | http(s) URL | the `serve` address  | Removed in 2.0 (the config refuses it): set the top-level `boardUrl`, which is where people open the board, for links in messages. Without it: the address of a running `shapewall serve`, then port 4600. `$SHAPEWALL_BOARD_URL` overrides it. |
+| `people`   | object      | none                 | Mention handle to `{ email, slack, discord, telegram }` (any of them). Slack member ids look like `U012AB3CD`; Discord and Telegram user ids are digits.                                                                                        |
+| `retries`  | 0-10        | `3`                  | Retries after a failed send.                                                                                                                                                                                                                    |
+| `channels` | Channel[]   | from the environment | Up to 20. Without this key, channels come from environment variables alone (below).                                                                                                                                                             |
 
 ### Channel
 

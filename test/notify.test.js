@@ -44,9 +44,12 @@ async function stub(responses = []) {
   return { base, requests, close: () => new Promise((resolve) => server.close(resolve)) }
 }
 
-function makeConfig(name, notifications, env = {}) {
+// `boardUrl` in the object given goes to the top level (notifications.boardUrl was removed in 2.0).
+function makeConfig(name, given, env = {}) {
   const dir = tempDir(name)
-  return normalizeConfig({ ...structuredClone(SAMPLE), notifications }, { dir, file: path.join(dir, 'shapewall.config.json'), env })
+  const { boardUrl, ...notifications } = given || {}
+  const raw = { ...structuredClone(SAMPLE), ...(boardUrl ? { boardUrl } : {}), notifications: given ? notifications : given }
+  return normalizeConfig(raw, { dir, file: path.join(dir, 'shapewall.config.json'), env })
 }
 
 const until = async (check, ms = 3000) => {
@@ -148,7 +151,16 @@ test('config: channels, defaults, people and env-only channels; secrets only by 
     ],
   })
   const [hooks, slack, mail] = config.notifications.channels
-  assert.equal(config.notifications.boardUrl, 'https://shapewall.example.com/')
+  assert.equal(config.notifications.boardUrl, null)
+  assert.equal(config.boardUrl, 'https://shapewall.example.com/')
+  // notifications.boardUrl was removed in 2.0: the config names the top-level key.
+  assert.throws(
+    () => normalizeConfig({ ...structuredClone(SAMPLE), notifications: { boardUrl: 'https://x.example.com/' } }),
+    (error) =>
+      error.problems.includes(
+        'notifications.boardUrl was removed in Shapewall 2.0; move it to the top-level "boardUrl" (or set SHAPEWALL_BOARD_URL).',
+      ),
+  )
   assert.equal(config.notifications.retries, 2)
   assert.deepEqual(config.notifications.people.sam, { email: 'sam@example.com', slack: 'U012AB3CD', discord: '123456789012' })
   assert.deepEqual(hooks.events, ['comment.created', 'comment.resolved'])

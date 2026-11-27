@@ -41,15 +41,21 @@ test('a flag the command does not take is an error with the closest real one', a
   await assert.rejects(run(['init', '--only', 'x']), /unknown option --only for "init"/)
   // Existing flags, aliases and = forms keep working.
   assert.equal(parseArgs(['comments', '-y', '--page=home', '--config', 'x.json'], { strict: true }).flags.yes, true)
-  // An old spelling is read as the new one, with a deprecation for the warning; capture's --yes did nothing.
-  const old = parseArgs(['export', '--noindex', '--config', 'x.json'], { strict: true })
-  assert.equal(old.flags['no-index'], true)
-  assert.equal(old.flags.noindex, undefined)
-  assert.deepEqual(old.deprecations, [['noindex', 'no-index']])
-  const yes = parseArgs(['capture', '-y', '--only=home'], { strict: true })
-  assert.equal(yes.flags.yes, undefined)
-  assert.deepEqual(yes.deprecations, [['yes', null]])
-  assert.equal(parseArgs(['checks', 'lighthouse', '--production', 'development'], { strict: true }).flags['build-mode'], 'development')
+  // A spelling removed in 2.0 is a one-line error that names the replacement, not "unknown option".
+  const gone = (argv, pattern) =>
+    assert.throws(
+      () => parseArgs(argv, { strict: true }),
+      (error) => error.code === 'removed' && pattern.test(error.message) && !/unknown option/.test(error.message),
+      argv.join(' '),
+    )
+  gone(['export', '--noindex', '--config', 'x.json'], /^export --noindex was removed in Shapewall 2\.0; use --no-index\.$/)
+  gone(['capture', '-y', '--only=home'], /^capture --yes was removed in Shapewall 2\.0; leave it out: capture never prompts\.$/)
+  gone(['checks', 'lighthouse', '--production', 'development'], /^checks lighthouse --production was removed.*use --build-mode/)
+  gone(['--production', 'x', 'checks', 'lighthouse'], /--production was removed.*use --build-mode/)
+  assert.equal(parseArgs(['export', '--no-index'], { strict: true }).flags['no-index'], true)
+  assert.equal(parseArgs(['checks', 'lighthouse', '--build-mode', 'development'], { strict: true }).flags['build-mode'], 'development')
+  // The help parse (not strict) never throws on them.
+  assert.equal(parseArgs(['export', '--noindex', '--help']).flags.help, true)
   assert.equal(parseArgs(['serve', '--no-chat', '--allowed-host', 'a,b'], { strict: true }).flags['no-chat'], true)
   assert.equal(suggestFlag('prot', ['port', 'host']), 'port')
   assert.equal(suggestFlag('xyzzy', ['port', 'host']), null)

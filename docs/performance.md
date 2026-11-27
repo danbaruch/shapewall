@@ -1,6 +1,6 @@
 # Local Lighthouse navigation audits
 
-**Experimental.** `shapewall checks lighthouse` (before 1.0: `shapewall audit`, which still works with a deprecation warning), its
+**Experimental.** `shapewall checks lighthouse` (before 1.0: `shapewall audit`, removed in 2.0), its
 reports and the `checks` config are outside the [stability promise](stability.md) and can change in a minor release.
 
 Shapewall's Lighthouse runner audits the original application URL. It does not

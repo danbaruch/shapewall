@@ -179,7 +179,7 @@ const raw = {
   title: 'Brackwell (demo)',
   id: 'demo',
   concurrency: 4,
-  versions: 5,
+  keepVersions: 5,
   viewports: {
     desktop: { width: 1440, height: 960 },
     phone: { width: 390, height: 844 },

@@ -12,7 +12,7 @@
 // from the environment too, never written in the config.
 
 import { COMMENT_EVENTS, EVENT_ALIASES } from '../events.js'
-import { deprecated } from '../deprecation.js'
+import { removedLine } from '../deprecation.js'
 import { MENTION_HANDLE_RE } from '../mentions.js'
 
 export const CHANNEL_TYPES = ['webhook', 'slack', 'discord', 'telegram', 'email']
@@ -73,14 +73,6 @@ const SECRET_KEYS = {
 }
 
 const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-
-function isHttpUrl(value) {
-  try {
-    return ['http:', 'https:'].includes(new URL(value).protocol)
-  } catch {
-    return false
-  }
-}
 
 // A name from before 1.0 ("status_changed") still works, with one warning
 // per process on stderr (`write` is swapped in tests).
@@ -307,15 +299,9 @@ export function normalizeNotifications(raw, { boardIds = [], env = process.env }
     return out
   }
   const value = raw || {}
-  // Deprecated: the top-level boardUrl (or SHAPEWALL_BOARD_URL) is the one
-  // board URL; this one still wins over it through 1.x, as it did.
-  if (value.boardUrl !== undefined && value.boardUrl !== null) {
-    if (!isHttpUrl(value.boardUrl)) problems.push('notifications.boardUrl: the http(s) URL people open the board at')
-    else {
-      out.boardUrl = value.boardUrl
-      deprecated('notifications.boardUrl', 'move it to the top-level "boardUrl" (or set SHAPEWALL_BOARD_URL)')
-    }
-  }
+  // Removed in 2.0: the top-level boardUrl (or SHAPEWALL_BOARD_URL) is the one board URL.
+  if (value.boardUrl !== undefined && value.boardUrl !== null)
+    problems.push(removedLine('notifications.boardUrl', 'move it to the top-level "boardUrl" (or set SHAPEWALL_BOARD_URL)'))
   if (value.retries !== undefined) {
     if (!Number.isInteger(value.retries) || value.retries < 0 || value.retries > RETRIES_MAX) {
       problems.push(`notifications.retries: a whole number from 0 to ${RETRIES_MAX}`)

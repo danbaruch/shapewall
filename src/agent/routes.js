@@ -82,7 +82,6 @@ import { finishFix, projectChanged, projectSnapshot, stopReason } from './feedba
 import { ownerMcpServers } from './owner-mcp.js'
 import { localAgentOf, localOwnerOnly, startLocalTools } from './local-tools.js'
 import { createThreadRelay } from './exec-mcp.js'
-import { deprecated } from '../deprecation.js'
 import { agentHandles, respondLine, shouldRespond } from './triggers.js'
 import { RUN_MS_MAX, commentIdOf, quotesOutside, runTurn } from './run.js'
 import { readThreadTrust } from './thread-trust.js'
@@ -357,13 +356,8 @@ export function agentRouter({
   const fingerprintOf = (current) => JSON.stringify({ ...current, label: null, icon: null, tint: null })
   // A local board's Claude Code session (1.4.0): restricted, with
   // Shapewall's tool server for commands, the shell and the browser.
-  // `agent.localSession: "own"` keeps the 1.2.0 session for one minor.
-  const localSession = config.agent?.localSession === 'own' ? 'own' : 'restricted'
-  if (localSession === 'own')
-    deprecated(
-      'agent.localSession "own"',
-      'leave it out: a local board\u2019s agent gets read and edit tools and Shapewall\u2019s own tools for commands and the browser',
-    )
+  // (`agent.localSession: "own"`, the 1.2.0 session, was removed in 2.0.)
+  const localSession = 'restricted'
   // One exec relay per chat thread (exec-mcp.js createThreadRelay): its ACP
   // session keeps the relay, each turn puts its own tool host behind it.
   const relays = new Map()
