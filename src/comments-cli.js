@@ -329,6 +329,24 @@ export function selectorPin({ selector: raw, map, mapFile = null, html, pageId, 
   return { anchor: { selector, text: found || '', dx: 0.5, dy: 0.5, ...(none ? { unmatched: true } : {}) }, pin: DEFAULT_PIN }
 }
 
+// The pin of `--selector` on a page's latest capture in this config's board
+// folder: { anchor, pin }. `comments add` here, and on the solo engine with
+// the engine's own board folder (src/remote/cli.js).
+export function selectorPinOnBoard(config, board, { pageId, viewport, selector, err = () => {} }) {
+  const page = board.pages.find((item) => item.id === pageId)
+  const mapped = page ? latestElementMap(config, board, page.id, viewport) : null
+  const live = page ? resolveFile(config, board.id, 'captures', `${page.id}.${viewport}.html`) : null
+  return selectorPin({
+    selector,
+    map: mapped?.map || null,
+    mapFile: mapped ? path.relative(process.cwd(), mapped.file) || mapped.file : null,
+    html: () => (live ? fs.readFileSync(live, 'utf8') : null),
+    pageId,
+    viewport,
+    err,
+  })
+}
+
 // `comments add --page ID --body TEXT [--viewport NAME] [--selector CSS] [--author NAME]`
 // `agent`: the MCP add_comment tool is calling (the comment is an agent's).
 export async function addComment(config, board, flags, out, err = () => {}, { agent = false } = {}) {
@@ -344,19 +362,8 @@ export async function addComment(config, board, flags, out, err = () => {}, { ag
     typeof flags.viewport === 'string' ? flags.viewport : page ? page.viewports[0] : Object.keys(boardViewports(config, board))[0]
   let anchor
   let pin = DEFAULT_PIN
-  if (flags.selector !== undefined) {
-    const mapped = page ? latestElementMap(config, board, page.id, viewport) : null
-    const live = page ? resolveFile(config, board.id, 'captures', `${page.id}.${viewport}.html`) : null
-    ;({ anchor, pin } = selectorPin({
-      selector: flags.selector,
-      map: mapped?.map || null,
-      mapFile: mapped ? path.relative(process.cwd(), mapped.file) || mapped.file : null,
-      html: () => (live ? fs.readFileSync(live, 'utf8') : null),
-      pageId,
-      viewport,
-      err,
-    }))
-  }
+  if (flags.selector !== undefined)
+    ({ anchor, pin } = selectorPinOnBoard(config, board, { pageId, viewport, selector: flags.selector, err }))
   let comment
   try {
     comment = await createComment(

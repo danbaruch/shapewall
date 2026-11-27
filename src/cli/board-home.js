@@ -18,6 +18,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { loadConfig } from '../config.js'
 import { engineDir } from '../engine-folder.js'
 import { ID_PATTERNS } from '../remote/ids.js'
 import { ENGINE_VAR } from './engine-choice.js'
@@ -41,4 +42,21 @@ export async function boardHome(config, { env = process.env } = {}) {
   if (!ID_PATTERNS.workspace.test(ids.workspaceId) || !ID_PATTERNS.project.test(ids.projectId))
     throw new BoardHomeError("The solo engine's database names a project this build cannot read.")
   return { config: { ...config, outputDir: path.join(engineDir(config.outputDir), 'files', ids.workspaceId, ids.projectId) }, engine: true }
+}
+
+// The config of `--config` (or the one found here), with outputDir on the
+// engine's folders when the engine holds the project: for the commands that
+// read or write captures, variants, journeys and check reports in place.
+export async function projectConfig(flags = {}, { env = process.env } = {}) {
+  return (await boardHome(loadConfig(flags.config), { env })).config
+}
+
+// For a command that works on the 1.x comment files and has no engine path
+// yet: refuses once the engine holds the project, instead of reading (or
+// writing) comments that are not the board's.
+export async function assertNotEngineBoard(config, what, instead, { env = process.env } = {}) {
+  if ((await boardHome(config, { env })).engine)
+    throw new BoardHomeError(
+      `${what} works on the 1.x board files, and the solo engine holds this project's board now (${config.outputDir}/.engine/). ${instead}`,
+    )
 }

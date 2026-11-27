@@ -207,15 +207,19 @@ test('the machine tokens rotate at each start, stop working at stop, and are ref
   }
 })
 
-test('no engine running: the JSON files, a note when the engine has data, a refusal for a migrated board', async () => {
+test('no engine running: the JSON files, a refusal once the engine holds the project or a board was migrated', async () => {
   const config = project('engine-target-rest')
   const errs = []
   assert.equal(await engineMode('comments', { config: config.file }, { env: {}, err: (line) => errs.push(line) }), null)
   assert.deepEqual(errs, [])
   const handle = await serveEngine({ engine: 'hosted', config: config.file, port: 0 }, () => {}, { env: ENV, start: noExit })
   await handle.stop()
-  await engineMode('comments', { config: config.file }, { env: {}, err: (line) => errs.push(line) })
-  assert.match(errs.join('\n'), /also has a solo engine \(not running\)/)
+  await assert.rejects(engineMode('comments', { config: config.file }, { env: {} }), /holds this project's board, and it is not running/)
+  assert.equal(
+    await engineMode('comments', { config: config.file }, { env: { SHAPEWALL_ENGINE: 'legacy' } }),
+    null,
+    'legacy: the 1.x files',
+  )
   fs.writeFileSync(path.join(config.outputDir, MIGRATED), JSON.stringify({ version: 1, runs: [{ boards: { sample: {} } }] }))
   await assert.rejects(engineMode('comments', { config: config.file }, { env: {} }), /Board sample was migrated to the solo engine/)
   await assert.rejects(engineMode('mcp', { config: config.file }, { env: {} }), /migrated to the solo engine/)

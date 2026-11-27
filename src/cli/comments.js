@@ -21,7 +21,7 @@ import { runByAgent } from '../agent-run.js'
 export async function comments(positional, flags, out, err) {
   if (flags.remote !== undefined) {
     const { remoteComments } = await import('../remote/cli.js')
-    return remoteComments(positional, flags, out)
+    return remoteComments(positional, flags, out, err)
   }
   const config = loadConfig(flags.config)
   if (['list', 'get', 'show', 'selectors'].includes(positional[0] || 'list')) return commentAction(config, positional, flags, out, err)

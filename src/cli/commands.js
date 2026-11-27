@@ -7,6 +7,7 @@ import { findConfigFile, getBoard, loadConfig } from '../config.js'
 import { formatJourneys, listJourneys } from '../journeys.js'
 import { openBrowser } from './open.js'
 import { withNotifications } from './notify.js'
+import { boardHome, projectConfig } from './board-home.js'
 import { agentRunEnv } from '../agent-run.js'
 
 export async function buzzBridge(flags, out) {
@@ -61,10 +62,11 @@ export async function settings(flags, out, err) {
   return null
 }
 
-export function journeys(positional, flags, out) {
+export async function journeys(positional, flags, out) {
   const action = positional[0] || 'list'
   if (action !== 'list') throw new Error(`unknown journeys action "${action}" (list)`)
-  const config = loadConfig(flags.config)
+  // The board's own journeys (journeys.json) live in the engine's folder once it holds the project.
+  const config = await projectConfig(flags)
   const board = getBoard(config, flags.board)
   const journeys = listJourneys(config, board)
   out(flags.json ? JSON.stringify({ board: board.id, journeys }, null, 2) : formatJourneys(board, journeys))
@@ -104,7 +106,8 @@ export async function mcp(flags, err) {
       readOnly,
       board,
       allowCapture,
-      config: allowCapture ? remoteMcpConfig(flags, err) : null,
+      // recapture_pages writes captures: into the engine's folders once it holds the project (board-home.js).
+      config: allowCapture ? await homeOf(remoteMcpConfig(flags, err)) : null,
       localAuthor: settings.source === 'engine',
     })
     return 0
@@ -135,8 +138,11 @@ export function remoteMcpConfig(flags, err = () => {}, { env = process.env, cwd 
   }
 }
 
+const homeOf = async (config) => (config ? (await boardHome(config)).config : null)
+
 export async function exportCommand(flags, out) {
-  const config = loadConfig(flags.config)
+  // With --no-comments (engine-mode.js refuses the rest once the engine holds the project): the engine's captures.
+  const config = await projectConfig(flags)
   const { exportStatic } = await import('../export.js')
   const result = await exportStatic(config, {
     out: flags.out || 'shapewall-export',

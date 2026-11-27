@@ -732,10 +732,11 @@ existing project's `.shapewall/` moves into it with [`shapewall migrate`](#movin
   `watch --exec` command, a local agent session set to `"own"`, the unsandboxed shell a solo owner can turn on), they run
   as you, can read `.shapewall/.engine/` themselves, and the mark is only advisory.
   Agents never read `.shapewall/.engine/`: Shapewall's own file reads refuse it, and a Claude Code agent gets a deny rule for
-  it in its session settings. `comments selectors` and `comments delete` are not on the engine yet; `comments add` takes `--page`,
-  `--body` and `--viewport`. `shapewall export` reads the 1.x files, so while the engine runs it is refused unless
-  `--no-comments`. With the engine stopped, these commands read the 1.x files as before, say so on stderr when the engine
-  has kept comments for the project, and refuse a board `shapewall migrate` moved. An explicit `--remote` (or
+  it in its session settings. `comments delete` is not on the engine yet; `comments add` takes `--page`, `--body`,
+  `--viewport`, `--author` and `--selector` (pinned from the engine's latest capture), and `comments selectors` reads the
+  engine's captures. `shapewall export` reads the 1.x comment files, so once the engine holds the project it is refused unless
+  `--no-comments`. With the engine stopped, these commands refuse and say to start `shapewall serve` once the engine holds
+  the project (`SHAPEWALL_ENGINE=legacy` reads the 1.x files), and refuse a board `shapewall migrate` moved. An explicit `--remote` (or
   `SHAPEWALL_REMOTE`) always wins. `shapewall events` reads `.shapewall/events.jsonl`, which the engine writes, and `ci` does
   not read comments, so neither changes.
 - **The board's own agent.** The engine runs this project's agent the way any machine runs one for a team server: a child

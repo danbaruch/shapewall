@@ -9,13 +9,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 - `shapewall capture` and `links` write and read the solo engine's board folders (`.shapewall/.engine/files/`) once the
   engine holds the project, so a capture from the terminal (every environment) shows on the engine's board, with or without
-  the engine running. `push` sends from there too.
+  the engine running. `push` sends from there too, and `journeys`, `variant`, `checks`, `export --no-comments` and the
+  `recapture_pages` tool of `shapewall mcp` work there as well.
+- `comments add --selector` and `comments selectors` on the solo engine, from the engine's latest captures.
 - On the solo engine, the `author` of the MCP tools `reply_to_comment` and `add_comment`, and `comments reply --author` and
   `comments add --author`, label the agent's text as they do on a 1.x board (it stays marked as an agent's). The engine's
   comment JSON says `byOwner` for comments its owner wrote, as a 1.x board does.
 
 ### Changed
 
+- Once the solo engine holds the project and it is stopped, `comments`, `watch` and `mcp` stop and say to start
+  `shapewall serve`, instead of reading the 1.x comment files (which are not the board) with a note. `export` is refused
+  without `--no-comments`, and `shapewall github` is refused, running or not. `SHAPEWALL_ENGINE=legacy` keeps the 1.x files.
 - **`shapewall serve` runs the solo engine by default** (2.0.0): the hosted engine for this project, one owner, on this
   machine only, data in `.shapewall/.engine/`. `npx shapewall init && npx shapewall serve` is still a board in seconds with no
   account. The first start in a project with 1.x board data says which boards move, runs `shapewall migrate` (a backup in
