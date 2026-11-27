@@ -294,8 +294,13 @@ export function mountTokenApi({
   const MARKUP_FILE_RE = /^markup-([1-9][0-9]{0,15})(?:-r([1-9][0-9]{0,5}))?\.png$/
   // Guest comments (from share links) are untrusted: a token sees them only
   // when it asks (`guests=1`), so an agent never picks one up by default.
-  function remoteReport(req, ctx, { status = 'open', pageId = null, mention = null, guests = false } = {}) {
+  // `environment`: only comments on that environment of the board (a comment
+  // whose environment the board no longer has is on its first one, as the
+  // board draws it, client/src/board/commentSide.js).
+  function remoteReport(req, ctx, { status = 'open', pageId = null, mention = null, guests = false, environment = null } = {}) {
     const context = contextFor(ctx)
+    const envIds = ctx.board.environments.map((env) => env.id)
+    const onEnvironment = (comment) => (envIds.includes(comment.environment) ? comment.environment : envIds[0]) === environment
     const claim = req.token.scopes.includes('claim')
     let guestsHidden = 0
     // A claim token reads only the comments its agent may take: the rest are
@@ -309,6 +314,7 @@ export function mountTokenApi({
       .list({ status: status === 'all' ? null : status, mention })
       .map((comment) => dispatchView(req.t, req.project.id, ctx.board.id, comment))
       .filter((comment) => !pageId || comment.pageId === pageId || context.variants.get(comment.pageId)?.pageId === pageId)
+      .filter((comment) => !environment || (!String(comment.pageId).startsWith('variant:') && onEnvironment(comment)))
       .filter((comment) => {
         if (!claim || (comment.dispatchable && mine(req, comment[COMMENT_ROUTING]))) return true
         routedElsewhere += 1
@@ -330,6 +336,7 @@ export function mountTokenApi({
         url: hostedBoardBase(publicOrigin, req.t.workspaceId, req.project.id),
       },
       status,
+      ...(environment ? { environment } : {}),
       guestsHidden,
       routedElsewhere,
       count: comments.length,
@@ -463,6 +470,7 @@ export function mountTokenApi({
         manifest: req.body?.manifest,
         variants: req.body?.variants,
         checks: req.body?.checks,
+        environments: req.body?.environments,
         now: now(),
         credential: { id: req.token.id, hash: req.authTokenHash, now },
       })
@@ -608,7 +616,16 @@ export function mountTokenApi({
       const pageId =
         typeof req.query.page === 'string' && ctx.board.pages.some((page) => page.id === req.query.page) ? req.query.page : null
       if (req.query.page && !pageId) return fail(res, 404, 'unknown_page', 'That page is not on this board.')
-      res.json(remoteReport(req, ctx, { status, pageId, mention, guests: req.query.guests === '1' }))
+      // ?environment=<id>: one of the board's (a team board has one, `default`).
+      const environment = typeof req.query.environment === 'string' && req.query.environment ? req.query.environment : null
+      if (environment && !ctx.board.environments.some((env) => env.id === environment))
+        return fail(
+          res,
+          404,
+          'unknown_environment',
+          `No environment "${environment.slice(0, 64)}" on this board (have: ${ctx.board.environments.map((env) => env.id).join(', ')}).`,
+        )
+      res.json(remoteReport(req, ctx, { status, pageId, mention, guests: req.query.guests === '1', environment }))
     }),
   )
   v1.get(
@@ -620,6 +637,22 @@ export function mountTokenApi({
         board: boardRef(ctx.board),
         comment: remoteItem(req, ctx, contextFor(ctx), dispatchView(req.t, req.project.id, ctx.board.id, rowToComment(row))),
       })
+    }),
+  )
+  // Another environment's capture (a comment left there in compare mode):
+  // the URL feedback.js fileKind gives it, `files/envs/<id>/<file>`. The
+  // screenshot and element map, never its live HTML (local parity: compare
+  // shows screenshots).
+  v1.get(
+    '/boards/:bid/files/envs/:env/:file',
+    scope('read'),
+    v1Board((req, res, ctx) => {
+      const name = req.params.file
+      if (!name.endsWith('.png') && !name.endsWith('.elements.json')) return fail(res, 404, 'not_found', 'No such file.')
+      const file = resolveFile(ctx.config, ctx.board.id, `env:${req.params.env}`, name)
+      if (!file) return fail(res, 404, 'not_found', 'No such file.')
+      if (name.endsWith('.png')) return sendPng(res, file, false)
+      res.type('json').sendFile(file, { dotfiles: 'allow' })
     }),
   )
   v1.get(

@@ -9,8 +9,10 @@
 //
 // What it reads: the config file the solo binding names (readSoloBinding:
 // its path and its board ids), loaded fresh for each capture, so pages,
-// auth, actions and setup are the file's as they are now. Only the default
-// environment for now (environments come with G4).
+// auth, actions and setup are the file's as they are now. Any environment
+// of the board (`env`, G4), as `shapewall capture --env`: another
+// environment's captures go to envs/<id>/captures/, and the browser may
+// reach that environment's origin only.
 //
 // Who may start one: the engine's owner on this machine (owner.js), from the
 // board (POST boards/:bid/capture) or with a token the owner made (the MCP
@@ -177,8 +179,9 @@ export function createSoloCapture({
   async function start(boardId, { pages = null, env = null } = {}) {
     if (current) throw new HttpError(409, 'capture_running', 'A capture is already running on this engine.')
     const { bound, board, config } = target(boardId)
-    if (env !== null && env !== undefined && env !== board.environments[0].id)
-      throw new HttpError(400, 'unknown_environment', 'The engine captures the default environment only for now.')
+    if (env !== null && env !== undefined && !board.environments.some((item) => item.id === env))
+      throw new HttpError(400, 'unknown_environment', 'No such environment on this board.')
+    const environment = env ? board.environments.find((item) => item.id === env) : board.environments[0]
     if (pages !== null) {
       const known = new Set(board.pages.map((page) => page.id))
       if (
@@ -202,7 +205,7 @@ export function createSoloCapture({
     current = slot
     let runner
     try {
-      const app = await pinAppOrigin(board.baseUrl, { engine: { origins: [publicOrigin], port: enginePort }, lookup, interfaces })
+      const app = await pinAppOrigin(environment.baseUrl, { engine: { origins: [publicOrigin], port: enginePort }, lookup, interfaces })
       runner = run || (await import('../../capture/capture.js')).runCapture
       slot.address = app.address
       slot.egress = await captureEgress(app, { real: chromium })
@@ -220,7 +223,7 @@ export function createSoloCapture({
       lines.push(String(line))
       if (lines.length > LOG_LINES) lines.shift()
     }
-    note(`Capturing from ${board.baseUrl} on the engine (only ${new URL(board.baseUrl).origin} is reachable).`)
+    note(`Capturing from ${environment.baseUrl} on the engine (only ${new URL(environment.baseUrl).origin} is reachable).`)
     slot.done = (async () => {
       try {
         // A backup pins board folders under the database write lock
@@ -230,6 +233,7 @@ export function createSoloCapture({
         const result = await runner({
           config,
           boardId: board.id,
+          envId: environment.id === board.environments[0].id ? null : environment.id,
           only,
           log: note,
           chromium: slot.egress.chromium,

@@ -100,7 +100,8 @@ export function mountBoardRoutes(
   boardApi.use(skipMedia(express.json({ limit: '64kb' })))
   // Per account: API calls in one bucket, a board's files in a larger one.
   const sessionLimits = { api: limit('session', (req) => req.user.id), files: limit('sessionFiles', (req) => req.user.id) }
-  const BOARD_FILE_RE = /^\/boards\/[^/]+\/(?:captures|variants|versions|live|variant-live|elements|variant-elements|comment-files)\//
+  const BOARD_FILE_RE =
+    /^\/boards\/[^/]+\/(?:captures|variants|versions|live|variant-live|elements|variant-elements|comment-files|envs|diffs|env-elements)\//
   boardApi.use(needSession, (req, res, next) =>
     (req.method === 'GET' && BOARD_FILE_RE.test(req.path) ? sessionLimits.files : sessionLimits.api)(req, res, next),
   )
@@ -697,7 +698,7 @@ export function mountBoardRoutes(
         res.json({ ok: true })
       }),
     )
-    mountCompareRoutes(router)
+    mountCompareRoutes(router, { withBoard })
     router.use((req, res) => fail(res, 404, 'not_found', 'No such API route.'))
   }
 

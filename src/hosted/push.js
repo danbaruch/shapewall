@@ -14,6 +14,11 @@
 // - the manifest and variants are rebuilt field by field.
 // Files land in a staging folder; the commit swaps it in whole, so a board
 // never shows half a push.
+//
+// Environments: a team server keeps one (`default`); on the solo engine a
+// push keeps the board's environments, and the other environments'
+// captures come as area `env:<id>` (envs/<id>/captures/ in the board
+// folder, as on a local board) with their manifests in the commit.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -30,6 +35,7 @@ import { commentFileBytes } from './comment-files.js'
 import { findApiToken, openPushIds, pushStatus, staleOpenPushes, tenant } from './tenancy.js'
 import { mergeCheckEnvironments, validateCheckEnvironments } from '../checks/environments.js'
 import { projectDir } from './projects.js'
+import { readSoloBinding } from './solo/binding.js'
 import { boardJobBusyMessage, readBoardJob } from '../board-job.js'
 import { CHECKS_BUNDLE_MAX, validateChecksBundle } from '../checks/transport.js'
 import { listReports } from '../checks/store.js'
@@ -73,12 +79,26 @@ const num = (value) => (typeof value === 'number' && Number.isFinite(value) ? va
 
 // Only the fields the board shows. normalizeConfig then validates them the
 // same way it validates a local config.
-export function cleanDefinition(raw) {
+//
+// Environments: a team server keeps one, `default` (the pushed board's
+// first environment, renamed), whatever the push sends. The solo engine
+// (`environments: true`, src/hosted/solo/config.js and a push to its bound
+// project) keeps the board's own list, as a local board has it: ids,
+// titles, base and public URLs (scrubbed of credentials by the CLI), so
+// compare works there (src/hosted/board-compare.js).
+export function cleanDefinition(raw, { environments = false } = {}) {
   if (!isObject(raw) || !isObject(raw.board)) throw new PushError(400, 'invalid_board', 'Send { title, viewports, board }.')
   const board = raw.board
   if (!Array.isArray(board.pages) || board.pages.length > PUSH_LIMITS.pages) {
     throw new PushError(400, 'invalid_board', `A pushed board has 1 to ${PUSH_LIMITS.pages} pages.`)
   }
+  // Only the fields an environment has; the first one is the board's base URL.
+  const ownEnvironments =
+    environments && Array.isArray(board.environments) && board.environments.length
+      ? board.environments.map((env) =>
+          isObject(env) ? { id: env.id, title: env.title, baseUrl: env.baseUrl, publicUrl: env.publicUrl ?? undefined } : env,
+        )
+      : null
   const picked = {
     title: raw.title,
     viewports: raw.viewports,
@@ -90,8 +110,7 @@ export function cleanDefinition(raw) {
       {
         id: board.id,
         title: board.title,
-        baseUrl: board.baseUrl,
-        publicUrl: board.publicUrl ?? undefined,
+        ...(ownEnvironments ? { environments: ownEnvironments } : { baseUrl: board.baseUrl, publicUrl: board.publicUrl ?? undefined }),
         groups: board.groups,
         pages: board.pages.map((page) =>
           isObject(page)
@@ -125,8 +144,8 @@ export function cleanDefinition(raw) {
     versions: config.versions,
     board: {
       ...normalized,
-      // One environment hosted (compare needs more than a push for now).
-      environments: [{ ...normalized.environments[0], id: 'default', title: 'Default' }],
+      // A team server: one environment, `default`. The solo engine: the board's own.
+      environments: ownEnvironments ? normalized.environments : [{ ...normalized.environments[0], id: 'default', title: 'Default' }],
       pages: normalized.pages.map((page) => ({ ...page, waitFor: null, actions: [] })),
     },
   }
@@ -225,13 +244,30 @@ function elementMapSize(definition, parsed, area) {
   return { width: size.width, height: [...heights][0], heights: [...heights] }
 }
 
+// Another environment's captures, as a push names them: `env:<id>` (the
+// same kind store.js resolveFile reads). Only on a board that keeps its
+// environments (the solo engine), and never its first one: the default
+// environment's captures are `captures`, as on a local board.
+const ENV_AREA_RE = /^env:([a-z0-9][a-z0-9-]{0,63})$/
+export function envArea(area, board) {
+  const match = ENV_AREA_RE.exec(String(area))
+  if (!match || !board?.environments?.slice(1).some((env) => env.id === match[1])) return null
+  return match[1]
+}
+// The staging (or board) folder of an upload area: envs/<id>/captures for another environment.
+function areaDir(root, area, board) {
+  const env = envArea(area, board)
+  return env ? path.join(root, 'envs', env, 'captures') : path.join(root, area)
+}
+
 function parseName(area, name, board, variantIds = null) {
-  if (area === 'captures' || area === 'variants') {
+  const env = envArea(area, board)
+  if (area === 'captures' || area === 'variants' || env) {
     const match = CAPTURE_FILE_RE.exec(name)
     if (!match) return null
     const owner = name.slice(0, name.indexOf('.'))
     const viewport = match[1]
-    if (area === 'captures') {
+    if (area !== 'variants') {
       const page = board.pages.find((item) => item.id === owner)
       if (!page || !page.viewports.includes(viewport)) return null
     } else if (!ID_RE.test(owner) || (variantIds && !variantIds.has(owner))) return null
@@ -247,7 +283,9 @@ function parseName(area, name, board, variantIds = null) {
   return null
 }
 
-function cleanManifest(raw, board, viewports, files) {
+// `area`: where the files of these captures are in `files` (`captures`, or
+// `env:<id>` for another environment's).
+function cleanManifest(raw, board, viewports, files, area = 'captures') {
   const manifest = {
     board: board.id,
     capturedAt:
@@ -262,7 +300,7 @@ function cleanManifest(raw, board, viewports, files) {
     for (const viewport of page.viewports) {
       const entry = raw?.pages?.[page.id]?.[viewport]
       if (!isObject(entry)) continue
-      const ok = entry.status === 'ok' && files.has(`captures/${page.id}.${viewport}.png`)
+      const ok = entry.status === 'ok' && files.has(`${area}/${page.id}.${viewport}.png`)
       const clean = { status: ok ? 'ok' : 'failed' }
       const networkSummary = cleanNetworkSummary(entry.networkSummary)
       if (networkSummary) clean.networkSummary = networkSummary
@@ -275,7 +313,7 @@ function cleanManifest(raw, board, viewports, files) {
       if (num(entry.bytes) !== undefined) clean.bytes = num(entry.bytes)
       if (ok && typeof entry.version === 'string' && VERSION_RE.test(entry.version)) clean.version = entry.version
       if (isObject(entry.html)) {
-        const html = { status: entry.html.status === 'ok' && files.has(`captures/${page.id}.${viewport}.html`) ? 'ok' : 'failed' }
+        const html = { status: entry.html.status === 'ok' && files.has(`${area}/${page.id}.${viewport}.html`) ? 'ok' : 'failed' }
         for (const key of ['bytes', 'images', 'imagesDropped', 'fonts', 'fontsDropped'])
           if (num(entry.html[key]) !== undefined) html[key] = num(entry.html[key])
         if (typeof entry.html.sha256 === 'string' && /^[a-f0-9]{64}$/.test(entry.html.sha256)) html.sha256 = entry.html.sha256
@@ -459,6 +497,17 @@ export function createPushStore(
       ? t.get('SELECT * FROM pushes WHERE workspace_id = :ws AND id = :id', { id: pushId }) || null
       : null
 
+  // Whether `projectId` is the solo engine's project (its binding names it):
+  // its boards keep their environments. A team server has no binding, so its
+  // pushes always collapse to `default`.
+  function soloProject(projectId) {
+    try {
+      return readSoloBinding(db)?.projectId === projectId
+    } catch {
+      return false
+    }
+  }
+
   function sweep(now) {
     const cutoff = new Date(now.getTime() - PUSH_LIMITS.openMs).toISOString()
     for (const row of t.all("SELECT id FROM pushes WHERE workspace_id = :ws AND status = 'open' AND created_at < :cutoff", { cutoff }))
@@ -467,7 +516,24 @@ export function createPushStore(
 
   function start({ projectId, tokenId, raw, now = new Date() }) {
     if (isObject(raw) && raw.mode === 'pages') return startPages({ projectId, tokenId, raw, now })
-    const definition = cleanDefinition(raw)
+    const solo = soloProject(projectId)
+    const definition = cleanDefinition(raw, { environments: solo })
+    // The solo engine, pushed by a CLI that did not send the environments
+    // (an older one, or an explicit --remote): the board keeps the ones it
+    // has (from the bound config file), its first at the pushed base URL.
+    const sent = Array.isArray(raw?.board?.environments) && raw.board.environments.length > 0
+    if (solo && !sent) {
+      const row = t.get('SELECT definition FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
+        project: projectId,
+        board: definition.board.id,
+      })
+      const kept = row ? JSON.parse(row.definition).board?.environments : null
+      if (Array.isArray(kept) && kept.length > 1)
+        definition.board.environments = [
+          { ...kept[0], baseUrl: definition.board.baseUrl, publicUrl: definition.board.publicUrl ?? null },
+          ...kept.slice(1),
+        ]
+    }
     sweep(now)
     refuseBoardJob(projectId, definition.board.id)
     const boards = t.all('SELECT board_id FROM boards WHERE workspace_id = :ws AND project_id = :project', { project: projectId })
@@ -491,6 +557,12 @@ export function createPushStore(
     return {
       id,
       board: definition.board.id,
+      // The other environments whose captures this push takes (area
+      // env:<id>, manifests in the commit's `environments`): the solo engine
+      // only. A team server never lists any, so a CLI sends only the default.
+      ...(solo && definition.board.environments.length > 1
+        ? { environments: definition.board.environments.slice(1).map((env) => env.id) }
+        : {}),
       limits: {
         checks: PUSH_LIMITS.checks,
         png: PUSH_LIMITS.png,
@@ -566,7 +638,7 @@ export function createPushStore(
             ? cleanHtml(body, board)
             : cleanPng(body)
     const push = openPush(pushId, projectId, now())
-    const dir = path.join(stagingDir(push.id), area)
+    const dir = areaDir(stagingDir(push.id), area, board)
     const file = path.join(dir, name)
     if (path.dirname(file) !== dir) throw new PushError(400, 'invalid_file', 'Bad file name.')
     const previous = fs.existsSync(file) ? fs.statSync(file).size : null
@@ -910,7 +982,9 @@ export function createPushStore(
 
   // Writes the cleaned manifest and variants, swaps the staging folder in
   // and records the board definition.
-  function commit({ pushId, projectId, manifest, variants, checks, now = new Date(), credential }) {
+  // `environments`: { <env id>: manifest } of the other environments' captures
+  // this push sent (start() lists which it takes; ignored on a team server).
+  function commit({ pushId, projectId, manifest, variants, checks, environments = null, now = new Date(), credential }) {
     const push = openPush(pushId, projectId, now)
     if (push.definition.mode === 'pages') return commitPages({ push, projectId, manifest, credential, now })
     const { board, viewports } = push.definition
@@ -1009,6 +1083,19 @@ export function createPushStore(
     fs.mkdirSync(path.join(staging, 'captures'), { recursive: true })
     const nextManifest = cleanManifest(manifest, board, viewports, files)
     fs.writeFileSync(path.join(staging, 'captures', 'manifest.json'), JSON.stringify(nextManifest))
+    // The other environments' captures (the solo engine only: a team
+    // board has one environment, so no env: area was ever taken), each with
+    // its own manifest, in envs/<id>/captures as on a local board.
+    for (const env of board.environments.slice(1)) {
+      const area = `env:${env.id}`
+      const dir = areaDir(staging, area, board)
+      const names = fs.existsSync(dir) ? fs.readdirSync(dir) : []
+      for (const name of names) files.add(`${area}/${name}`)
+      const raw = isObject(environments) ? environments[env.id] : undefined
+      if (!names.length && !isObject(raw)) continue
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(cleanManifest(raw, board, viewports, files, area)))
+    }
     fs.writeFileSync(path.join(staging, 'variants.json'), JSON.stringify({ variants: cleanList }))
     const target = boardFolder(projectId, board.id)
     // History the board's comments point at, copied over from the board
@@ -1099,7 +1186,8 @@ const swapsDir = (dataDir) => path.join(dataDir, 'swaps')
 const CARRYING = '.carrying'
 
 // Files in a board's folder that belong to the board, not to a push: no push
-// uploads them (only captures/, variants/, versions/ and checks/), so a whole
+// uploads them (only captures/, variants/, versions/, checks/ and, on the
+// solo engine, envs/<id>/captures/), so a whole
 // push carries them over from the folder it replaces, or they would be lost.
 // journeys.json: the journeys made on the board on the solo engine
 // (src/hosted/solo/journeys.js, src/journeys.js). A team server never writes

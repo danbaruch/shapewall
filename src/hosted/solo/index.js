@@ -33,7 +33,10 @@
 // `soloFeatures` on the board's /info, G16), events.js (events.jsonl and
 // notifications, G8), update.js (self-update, G10), capture.js (in-process
 // capture from the board and recapture_pages on /mcp, G3), journeys.js
-// (journey editing, G5). A surface the board turns on (client/src/board/solo.js)
+// (journey editing, G5). Compare (G4) needs no surface of its own: the board
+// routes serve it for every board with more than one environment
+// (src/hosted/board-compare.js), and only the engine keeps more than one, so
+// it only sets its flag. A surface the board turns on (client/src/board/solo.js)
 // sets its flag in `features`.
 import { mountSoloCapture } from './capture.js'
 import { createSoloBoards } from './config.js'
@@ -101,6 +104,8 @@ export function mountSolo(app, deps) {
   const features = {}
   const soloDeps = deps.solo?.signIn === 'local' ? mountOwner(app, deps, closers) : deps
   mountSoloInfo(soloDeps, features)
+  // Environments and compare (G4): the board's environments as the config has them.
+  features.compare = true
   const events = mountSoloEvents(app, soloDeps)
   if (events) closers.push(() => events.close())
   // In-process capture and recapture_pages on /mcp (G3): sets features.capture.
