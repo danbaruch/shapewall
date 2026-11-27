@@ -235,7 +235,7 @@ test('env: only what a CLI needs; secrets stay out unless named, and some never 
     assert.equal(passed[name], undefined, name)
 })
 
-test('sandbox: inside the project only, symlinks resolved, .git and the store read-only', () => {
+test('sandbox: inside the project only, symlinks resolved, .git read-only, the store neither read nor written', () => {
   const root = tempDir('acp-sandbox')
   const outside = tempDir('acp-outside')
   fs.writeFileSync(path.join(root, 'notes.txt'), 'one\ntwo\nthree\n')
@@ -263,7 +263,11 @@ test('sandbox: inside the project only, symlinks resolved, .git and the store re
   assert.equal(fs.existsSync(path.join(outside, 'new.txt')), false)
   assert.throws(() => sandbox.read({ path: 'notes.txt' }), /absolute/)
   assert.throws(() => sandbox.write({ path: path.join(root, '.git', 'config'), content: 'x' }), /may not write/)
-  assert.throws(() => sandbox.write({ path: path.join(root, '.shapewall', 'sample', 'comments.json'), content: '[]' }), /may not write/)
+  // The store holds accounts, sessions and tokens: an agent gets comments and captures through the tools, never as files.
+  assert.throws(() => sandbox.write({ path: path.join(root, '.shapewall', 'sample', 'comments.json'), content: '[]' }), /agents may not/)
+  fs.mkdirSync(path.join(root, '.shapewall', 'sample'))
+  fs.writeFileSync(path.join(root, '.shapewall', 'sample', 'comments.json'), '[]')
+  assert.throws(() => sandbox.read({ path: path.join(root, '.shapewall', 'sample', 'comments.json') }), /agents may not read/)
   sandbox.write({ path: path.join(root, 'src', 'new', 'file.css'), content: 'a {}' })
   assert.equal(fs.readFileSync(path.join(root, 'src', 'new', 'file.css'), 'utf8'), 'a {}')
   assert.equal(fs.readFileSync(path.join(outside, 'secret.txt'), 'utf8'), 'secret')

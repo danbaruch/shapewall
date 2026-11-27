@@ -69,7 +69,7 @@ import { batchFixSettings, createBatchQueue } from './batch-fixes.js'
 import { FIX_PROMPT as BATCH_FIX_PROMPT } from './fix-prompt.js'
 import { cleanChoices } from './backends/acp.js'
 import { createOptionsCache, withChoices } from './options-cache.js'
-import { authFiles } from '../config.js'
+import { authFiles, storageStateFiles } from '../config.js'
 import { agentSettings, publicAgentInfo } from './config.js'
 import { AgentError } from './errors.js'
 import { createAgentHealth } from './agent-health.js'
@@ -391,6 +391,7 @@ export function agentRouter({
         protect: [config.outputDir],
         // Files capture runs or logs in with: a write needs an approval card.
         sensitivePaths: () => authFiles(config),
+        denyRead: storageStateFiles(config),
         mcpServersFor: ownerWrites
           ? (thread, { sessionKey = null } = {}) =>
               ownerMcpServers(config, thread.split('/')[0], {

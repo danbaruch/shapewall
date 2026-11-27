@@ -6,6 +6,7 @@ import { loadConfig } from './config.js'
 import { HELP, SECTIONS, SHORT_HELP, VERSION, commandHelp } from './cli/help.js'
 import { parseArgs } from './cli/args.js'
 import { pinSoloLoopback, soloHttpRemote } from './remote/loopback-pin.js'
+import { ENGINE_COMMANDS, engineMode } from './cli/engine-mode.js'
 import { deprecated, setDeprecationSink } from './deprecation.js'
 import { init, initCi, sitemap } from './cli/init.js'
 import { serve } from './cli/serve.js'
@@ -178,6 +179,8 @@ export async function main(
     return command || flags.help ? 0 : 1
   }
   if (!Object.hasOwn(COMMANDS, command)) throw new Error(`unknown command "${command}" (try shapewall --help)`)
+  // In a project folder whose solo engine runs, comments, watch and mcp go to it (G15, src/cli/engine-mode.js).
+  if (ENGINE_COMMANDS.includes(command)) await engineMode(command, flags, { err })
   // http to the solo engine's own name: every connection of this process to it goes to 127.0.0.1 (src/remote/loopback-pin.js).
   const remote = typeof flags.remote === 'string' ? flags.remote : process.env.SHAPEWALL_REMOTE
   if (remote && soloHttpRemote(remote)) await pinSoloLoopback()

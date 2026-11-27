@@ -97,7 +97,8 @@ export const SECTIONS = {
       --engine hosted       run the hosted engine for this project, on this machine only: one owner, signed in by a
                             one-time page (--open), data in .shapewall/.engine/; takes --port, --open,
                             --print-owner-link, --read-only, --no-chat, --no-capture, --skip-git-check
-                            (start even when git cannot say whether it tracks .engine/)${EXPERIMENTAL}`,
+                            (start even when git cannot say whether it tracks .engine/); while it runs,
+                            comments, watch and mcp in this folder go to it${EXPERIMENTAL}`,
   devices: `  devices list              paired devices and pending requests for this project [--json]
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request

@@ -24,7 +24,7 @@ import { inside } from '../agent/acp/sandbox.js'
 import { agentSettings } from '../agent/config.js'
 import { agentConfigDir, createInstructionsNote, instructionsLines, instructionsSummary, loadInstructions } from '../agent/instructions.js'
 import { REMOTE_FIX_PREAMBLE, remotePreamble } from '../agent/context.js'
-import { DEFAULT_OUTPUT_DIR, authFiles, findConfigFile, loadConfig } from '../config.js'
+import { DEFAULT_OUTPUT_DIR, authFiles, findConfigFile, loadConfig, storageStateFiles } from '../config.js'
 import { closeSandbox } from '../agent/sandbox-exec.js'
 import { AGENT_SLUG_RE, forgetAgentCredential, pinAgentOwner, readAgentCredential, saveAgentCredential } from './credentials.js'
 import { fixRoot, sweepFixes } from './agent-fix.js'
@@ -46,6 +46,7 @@ import {
   saveMachinePolicy,
 } from './agent-policy-file.js'
 import { createRemote, remoteOrigin } from './remote.js'
+import { NO_ENGINE_VAR } from '../engine-target.js'
 import { safeOut, terminalSafe } from './terminal.js'
 import { hostPlatform, machineView, markBrowserProfile } from '../agent/capabilities.js'
 import { policyExtensions } from '../agent/agent-config-folder.js'
@@ -447,6 +448,9 @@ export async function agentConnect(
   if (!TOKEN_RE.test(token))
     throw new Error('That is not a project token (swp_...). Run "shapewall agent connect" without it to get one approved.')
 
+  // What the agent runs never reaches the solo engine with this machine's tokens (engine-mode.js, rev57 R57-4).
+  const agentEnv = { ...env, [NO_ENGINE_VAR]: '1' }
+
   // ---- This machine's own rules ----
   const saved = Object.keys(changes).length ? saveMachinePolicy(origin, slug, changes, env) : policyNow
   // Commands in the file (written by hand, or for another agent) are not in effect for an agent they were not proven with.
@@ -500,7 +504,7 @@ export async function agentConnect(
   // session, or that this release was not tested with, is said here and not
   // at somebody's first question.
   const opens = async (what, how) => {
-    const result = await acpHandshake({ ...settings, ...how }, { env, root: config.dir, timeoutMs: ACP_DEFAULTS.startMs })
+    const result = await acpHandshake({ ...settings, ...how }, { env: agentEnv, root: config.dir, timeoutMs: ACP_DEFAULTS.startMs })
     if (result.ok) return result
     const said = adapterName(result.agentInfo)
     if (result.stderr) log(`${label} last output: ${terminalSafe(result.stderr)}`)
@@ -532,10 +536,11 @@ export async function agentConnect(
       instructions: { ...instructions, onLoad: (read) => instructionsNote.update(instructionsSummary(read)) },
     },
     {
-      env,
+      env: agentEnv,
       root: config.dir,
       protect: [config.outputDir],
       sensitivePaths: () => authFiles(config),
+      denyRead: storageStateFiles(config),
       limits: { processesMax: Math.max(concurrency, 2) },
       log: (line) => log(line),
     },
@@ -556,11 +561,12 @@ export async function agentConnect(
           instructions,
         },
         {
-          env,
+          env: agentEnv,
           // Each fix gives its own folder (a worktree) as the turn's workdir; this root is never written.
           root: config.dir,
           protect: [config.outputDir],
           sensitivePaths: () => authFiles(config),
+          denyRead: storageStateFiles(config),
           limits: { processesMax: Math.max(concurrency, 2) },
           log: (line) => log(line),
         },

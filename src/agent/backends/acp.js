@@ -28,6 +28,7 @@ import path from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { agentRunEnv } from '../../agent-run.js'
+import { NO_ENGINE_VAR } from '../../engine-target.js'
 import { Readable, Writable } from 'node:stream'
 import { PROTOCOL_VERSION, RequestError, client, ndJsonStream } from '@agentclientprotocol/sdk'
 import { TERMINAL_ENV_ALLOWED, acpAgentKind, agentEnv, formatCommand, loginHint, terminalEnvRefused } from '../acp/command.js'
@@ -175,7 +176,7 @@ const CLAUDE_ACTING_TOOLS = [
 // read-style commands and the browser a turn may get (hosted chat on a solo
 // turn, comment pickup): each of its tools checks, and asks where it must,
 // inside Shapewall, so it needs no permission request of its own.
-export function readOnlySession(kind, { exec = false } = {}) {
+export function readOnlySession(kind, { exec = false, denyRead = [] } = {}) {
   if (kind !== 'claude') return {}
   return {
     _meta: {
@@ -191,7 +192,7 @@ export function readOnlySession(kind, { exec = false } = {}) {
           disallowedTools: CLAUDE_ACTING_TOOLS,
           allowDangerouslySkipPermissions: false,
           // Claude Code's auto memory off (see connectedEnv).
-          settings: NO_AUTO_MEMORY,
+          settings: sessionSettings(denyRead),
         },
       },
     },
@@ -205,6 +206,20 @@ export function readOnlySession(kind, { exec = false } = {}) {
 // (`settings`, below; a top-level `autoMemoryEnabled` option is ignored by
 // the adapter) and the environment variable (connectedEnv).
 const NO_AUTO_MEMORY = Object.freeze({ autoMemoryEnabled: false })
+// The session's flag settings: auto memory off, and Read deny rules for the
+// folders the sandbox never reads (sandbox.js denyRead: the solo engine's
+// keys and tokens). Claude Code reads files itself (Read, Grep, Glob), not
+// only through Shapewall, so the rule has to be its own too. `//` starts an
+// absolute path in a Claude Code rule.
+export function sessionSettings(denyRead = []) {
+  const deny = denyRead
+    .filter((dir) => typeof dir === 'string' && path.isAbsolute(dir))
+    .flatMap((dir) => {
+      const rule = `/${dir.split(path.sep).join('/')}`
+      return [`Read(${rule})`, `Read(${rule}/**)`]
+    })
+  return deny.length ? { ...NO_AUTO_MEMORY, permissions: { deny } } : NO_AUTO_MEMORY
+}
 export function connectedEnv(kind) {
   if (kind === 'claude') return { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' }
   return {}
@@ -244,7 +259,7 @@ const CLAUDE_EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit']
 // `exec`: the turn has Shapewall's own tool server (exec-mcp.js): its tools
 // need no permission request of their own (each one checks, and asks on the
 // board where it must, inside Shapewall). The agent's own Bash stays off.
-export function remoteEditSession(kind, { exec = false } = {}) {
+export function remoteEditSession(kind, { exec = false, denyRead = [] } = {}) {
   if (kind !== 'claude') return {}
   const tools = [...CLAUDE_READ_TOOLS, ...CLAUDE_EDIT_TOOLS]
   return {
@@ -257,7 +272,7 @@ export function remoteEditSession(kind, { exec = false } = {}) {
           ...(exec ? { allowedTools: ['mcp__' + EXEC_MCP_NAME] } : {}),
           disallowedTools: CLAUDE_ACTING_TOOLS.filter((tool) => !tools.includes(tool)),
           allowDangerouslySkipPermissions: false,
-          settings: NO_AUTO_MEMORY,
+          settings: sessionSettings(denyRead),
         },
       },
     },
@@ -273,7 +288,7 @@ export function remoteEditSession(kind, { exec = false } = {}) {
 // "own"` in the config keeps the 1.2.0 session (the agent's own full tool
 // set) for one minor, with a deprecation line. Claude Code only: other
 // adapters take no such options (spike S1) and keep their own session.
-export function localRestrictedSession(kind, { exec = false } = {}) {
+export function localRestrictedSession(kind, { exec = false, denyRead = [] } = {}) {
   if (kind !== 'claude') return {}
   const tools = [...CLAUDE_READ_TOOLS, ...CLAUDE_EDIT_TOOLS]
   return {
@@ -286,7 +301,7 @@ export function localRestrictedSession(kind, { exec = false } = {}) {
           ...(exec ? { allowedTools: ['mcp__' + EXEC_MCP_NAME] } : {}),
           disallowedTools: CLAUDE_ACTING_TOOLS.filter((tool) => !tools.includes(tool)),
           allowDangerouslySkipPermissions: false,
-          settings: NO_AUTO_MEMORY,
+          settings: sessionSettings(denyRead),
         },
       },
     },
@@ -858,6 +873,9 @@ class AcpProcess {
       ...(readOnly || remoteEdit || this.restricted ? connectedEnv(acpAgentKind(argv)) : {}),
       // The agent and every command it runs are an agent's (src/agent-run.js).
       ...agentRunEnv(),
+      // agentEnv drops every SHAPEWALL_* name, so the mark that keeps the solo engine's tokens from a `shapewall`
+      // command the agent runs (engine-target.js, set by agent connect and watch --exec) is put back here (rev57 R57-4).
+      ...(env[NO_ENGINE_VAR] === '1' ? { [NO_ENGINE_VAR]: '1' } : {}),
     }
     this.root = sandbox.root
     this.state = 'starting'
@@ -979,11 +997,11 @@ class AcpProcess {
         // Read only: the agent's own controls are set so that it cannot act (readOnlySession).
         ...withExtensions(
           this.readOnly
-            ? readOnlySession(acpAgentKind(this.argv), { exec: this.hasExec })
+            ? readOnlySession(acpAgentKind(this.argv), { exec: this.hasExec, denyRead: this.sandbox?.denyRead || [] })
             : this.remoteEdit
-              ? remoteEditSession(acpAgentKind(this.argv), { exec: this.hasExec })
+              ? remoteEditSession(acpAgentKind(this.argv), { exec: this.hasExec, denyRead: this.sandbox?.denyRead || [] })
               : this.restricted
-                ? localRestrictedSession(acpAgentKind(this.argv), { exec: this.hasExec })
+                ? localRestrictedSession(acpAgentKind(this.argv), { exec: this.hasExec, denyRead: this.sandbox?.denyRead || [] })
                 : {},
           this.extensions,
         ),
@@ -2197,7 +2215,7 @@ function sandboxRefusal(error) {
 // What makes a turn's extra tool servers the same ones (a reused session keeps them).
 const serverKey = (list) => JSON.stringify((Array.isArray(list) ? list : []).map((item) => [item?.name, item?.command, item?.args]))
 
-// createAcpBackend(settings, { env, root, protect, limits, log })
+// createAcpBackend(settings, { env, root, protect, sensitivePaths, denyRead, limits, log })
 export function createAcpBackend(
   settings,
   {
@@ -2205,6 +2223,7 @@ export function createAcpBackend(
     root,
     protect = [],
     sensitivePaths = [],
+    denyRead = [],
     limits = {},
     log = () => {},
     mcpServersFor = null,
@@ -2212,11 +2231,18 @@ export function createAcpBackend(
   } = {},
 ) {
   const limit = { ...ACP_DEFAULTS, ...limits }
-  const sandbox = createSandbox({ root, protect, sensitivePaths })
+  const sandbox = createSandbox({ root, protect, sensitivePaths, denyRead })
   // A turn with a working folder of its own (agent branch mode: a worktree)
   // gets a sandbox rooted there, made for that turn's process only.
   const sandboxFor = (workdir) =>
-    workdir ? createSandbox({ root: workdir.root, protect: workdir.protect || [], sensitivePaths: workdir.sensitivePaths || [] }) : sandbox
+    workdir
+      ? createSandbox({
+          root: workdir.root,
+          protect: workdir.protect || [],
+          sensitivePaths: workdir.sensitivePaths || [],
+          denyRead: workdir.denyRead || [],
+        })
+      : sandbox
   const rootOf = (workdir) => (workdir ? fs.realpathSync(workdir.root) : sandbox.root)
   const processes = new Map()
   // Agents still starting (initialize, session/new): counted and stopped too.

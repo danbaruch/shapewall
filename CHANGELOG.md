@@ -48,6 +48,19 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Solo engine (experimental): while `shapewall serve --engine hosted` runs, `shapewall comments`, `watch` and `mcp` in the
+  project folder go to the engine instead of the 1.x files in `.shapewall/<board>/`, which before showed comments that were
+  not the board's. The engine makes their project tokens at each start (owned by you, private files in `.shapewall/.engine/`,
+  a new secret each start, retired at stop); `serve.json` there names the address and the files, never a token. `watch` is
+  an agent of its own there, as `watch --remote` is. `comments get` and `comments add` work against a hosted board too.
+  `export` is refused while the engine runs unless `--no-comments`. With the engine stopped, the commands say on stderr when
+  the engine has kept comments, and refuse a board `shapewall migrate` moved. An explicit `--remote` wins.
+- Solo engine (experimental): the commands in the project folder ask the engine to prove it is this start's engine (a
+  challenge answered under a key in `serve.json`) before they send a token, and refuse when nothing proves it. A start rotates
+  the machine tokens without putting back a scope or an expiry removed in the console. On the engine the token API and `/mcp`
+  answer the engine's own name from this machine only (on Linux, your own OS user). A `shapewall` command an agent started
+  (`watch --exec` without `--pass-token`, a connected agent's own commands) gets no engine token. Agents never read
+  `.shapewall/.engine/`: the agent sandbox refuses it, and Claude Code gets a Read deny rule for it.
 - `shapewall serve` and `shapewall watch` do not start while `shapewall migrate` runs or after one stopped midway, and refuse
   the boards a migration moved to the solo engine.
 - `--remote` accepts plain `http` to the solo engine's own name (`<project>-<random>.shapewall.localhost`) as it does to
@@ -62,6 +75,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
   is on `default`), lets `sessions.via` be `local` (a rebuild of `sessions`, like migration 18) and adds the `solo_binding`
   table. Nothing changes on a team server. Stop `shapewall hosted admin` jobs before the first start. Rollback notes are in
   docs/hosted.md, "Migration 24 and rollback".
+
+### Security
+
+- Agents: an ACP agent's file reads (`fs/read_text_file`) no longer reach Shapewall's own store (`.shapewall/`: accounts,
+  sessions, notification settings, tokens), the recorded logins in `.shapewall-auth/` or the config's `auth.storageState`
+  files, through a link either; only writes were refused before. A Claude Code agent also gets `Read` deny rules for those
+  paths in its session settings, since it reads files itself. Comments and captures reach agents through Shapewall's tools as
+  before.
 
 ### Fixed
 

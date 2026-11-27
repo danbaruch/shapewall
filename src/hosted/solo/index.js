@@ -26,6 +26,9 @@
 // config file (G1, G2). The surfaces after it get the owner's workspace and
 // project (solo.workspaceId, solo.projectId, solo.boardUrl).
 //
+// machine-tokens.js makes the owner's command-line token at every start
+// (cli.token in the data folder; G15) and the board's own agent's (R2).
+//
 // Mounted so far: signin.js and config.js (G1, G2), info.js (`solo` and
 // `soloFeatures` on the board's /info, G16), events.js (events.jsonl and
 // notifications, G8), update.js (self-update, G10), capture.js (in-process
@@ -39,6 +42,8 @@ import { mountSoloInfo } from './info.js'
 import { mountSoloJourneys } from './journeys.js'
 import { ensureSoloOwner, mountSoloSignIn } from './signin.js'
 import { mountSoloUpdate } from './update.js'
+import { mintMachineToken, retireMachineTokens } from './machine-tokens.js'
+import { engineProof } from '../../engine-target.js'
 
 function mountOwner(app, deps, closers) {
   const solo = deps.solo
@@ -62,7 +67,23 @@ function mountOwner(app, deps, closers) {
     next()
   })
   const boardUrl = solo.boardUrl || `${deps.publicOrigin}/w/${owner.workspaceId}/p/${owner.projectId}/`
-  app.locals.solo = { owner, boardUrl, boards }
+  // The owner's command line in the project folder (G15): a token of its own, new each start, gone at stop.
+  // `watch` takes work, so it is an agent with a token of its own (machine-tokens.js).
+  const tokenFiles = {}
+  if (solo.machineTokens !== false) {
+    closers.push(() => retireMachineTokens(deps.db, { dataDir: deps.dataDir, owner }))
+    for (const which of ['cli', 'watch'])
+      tokenFiles[which] = mintMachineToken(deps.db, { dataDir: deps.dataDir, owner, which, now: deps.now }).file
+  }
+  // The proof a command line asks for before it sends a token (engine-target.js verifyEngine): an HMAC of its
+  // challenge under this start's key, which only serve.json (0600) and this process hold. No session, no token.
+  if (typeof solo.proofKey === 'string')
+    app.post('/solo/whoami', (req, res) => {
+      const challenge = String(req.headers['x-shapewall-challenge'] || '')
+      if (!/^[A-Za-z0-9_-]{16,64}$/.test(challenge)) return res.status(400).json({ error: { code: 'bad_challenge' } })
+      res.set('Cache-Control', 'no-store').json({ proof: engineProof(solo.proofKey, challenge) })
+    })
+  app.locals.solo = { owner, boardUrl, boards, tokenFiles }
   return { ...deps, solo: { ...solo, workspaceId: owner.workspaceId, projectId: owner.projectId, boardUrl } }
 }
 

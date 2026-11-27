@@ -440,7 +440,8 @@ test('the session gets the files as an appended system prompt when the agent tak
   assert.ok(appended.indexOf('PROJECT_RULE_SENTINEL') < appended.indexOf('OWNER_NOTE_SENTINEL'))
   assert.ok(appended.trimEnd().endsWith(REMOTE_DATA_RULES))
   assert.deepEqual(sent._meta.claudeCode.options.settingSources, [], 'settings files (and their hooks) stay out')
-  assert.deepEqual(sent._meta.claudeCode.options.settings, { autoMemoryEnabled: false })
+  assert.equal(sent._meta.claudeCode.options.settings.autoMemoryEnabled, false)
+  assert.ok(sent._meta.claudeCode.options.settings.permissions.deny.some((rule) => rule.endsWith('/.shapewall-auth/**)')))
   assert.deepEqual(
     seen.at(-1).map((item) => `${item.scope}:${item.path}`),
     ['project:CLAUDE.md', 'agent-config:CLAUDE.md'],
@@ -465,7 +466,8 @@ test('the session gets the files as an appended system prompt when the agent tak
     assert.ok(names.includes('SHAPEWALL_AGENT_RUN') && names.includes('SHAPEWALL_AGENT_HEADER'), JSON.stringify(settings))
   }
   const edit = await ask({ acp: { argv: [stubBin()] }, readOnly: false, remoteEdit: { commands: [], allowPaths: [] } }, 'newparams', root)
-  assert.deepEqual(JSON.parse(edit)._meta.claudeCode.options.settings, { autoMemoryEnabled: false })
+  assert.equal(JSON.parse(edit)._meta.claudeCode.options.settings.autoMemoryEnabled, false)
+  assert.ok(JSON.parse(edit)._meta.claudeCode.options.settings.permissions.deny.some((rule) => rule.endsWith('/.shapewall-auth/**)')))
 
   // A local board's session (not connected) is as before: no instructions, no memory switch, no _meta.
   const local = JSON.parse(await ask({ acp: { argv: [stubBin(['--system-prompt'])] }, instructions }, 'newparams', root))

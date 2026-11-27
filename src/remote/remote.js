@@ -14,6 +14,7 @@ import { isLoopback } from '../net.js'
 import { boardViewports } from '../config.js'
 import { boardDir } from '../store.js'
 import { readCredential } from './credentials.js'
+import { ENGINE_TOKEN } from '../engine-target.js'
 import { terminalSafe } from './terminal.js'
 
 export class RemoteError extends Error {
@@ -53,6 +54,10 @@ export function remoteOrigin(flags = {}, env = process.env) {
 // server.
 export function remoteSettings(flags = {}, env = process.env) {
   const origin = remoteOrigin(flags, env)
+  // The solo engine of this project folder (src/engine-target.js, set by main()): its own token for this command
+  // line, whatever SHAPEWALL_TOKEN holds (that one is for another server).
+  if (typeof flags[ENGINE_TOKEN] === 'string' && TOKEN_RE.test(flags[ENGINE_TOKEN]))
+    return { origin, token: flags[ENGINE_TOKEN], source: 'engine' }
   let token = env.SHAPEWALL_TOKEN || ''
   let source = token ? 'env' : null
   if (typeof flags['token-file'] === 'string') {
@@ -76,6 +81,8 @@ export function remoteSettings(flags = {}, env = process.env) {
 
 // What to tell someone whose token the server refused.
 export function badTokenMessage(origin, source) {
+  if (source === 'engine')
+    return 'The solo engine refused the token it made for this command line (it restarted, or the token was revoked in its console). Run the command again; if it keeps failing, restart shapewall serve --engine hosted.'
   const again = source === 'login' ? ` Or run "shapewall login --remote ${origin}" again.` : ` Or run "shapewall login --remote ${origin}".`
   return `This token was revoked, has expired or its maker is no longer an admin there (or it is wrong). Create a new one in the console: ${origin}/${again}`
 }
