@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import http from 'node:http'
@@ -64,12 +65,34 @@ test('management exposes only host-authorized settings and preserves server stat
   ])
     assert.equal((await b.call('GET', route)).status, 404, route)
   assert.equal((await b.call('POST', '/api/agent/boards/sample/threads/board/messages', { text: 'never dispatch' })).status, 404)
-  const nonce = b.app.locals.openLink()
-  const opened = await b.call('GET', nonce)
+  // --open: the browser is opened on a 0600 page that posts the nonce; the nonce is never in a URL.
+  const link = b.app.locals.openLink(b.origin)
+  assert.equal(new URL(link).protocol, 'file:')
+  const file = fileURLToPath(link)
+  assert.equal(path.dirname(file), b.config.outputDir)
+  if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600)
+  const html = fs.readFileSync(file, 'utf8')
+  const nonce = /name="nonce" value="([^"]+)"/.exec(html)[1]
+  assert.equal(/action="([^"]+)"/.exec(html)[1], `${b.origin}/open`)
+  assert.ok(!link.includes(nonce))
+  assert.equal((await b.call('GET', `/open/${nonce}`)).status, 404)
+  const post = () =>
+    request(b.port, 'POST', '/open', {
+      body: `nonce=${nonce}`,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'null' },
+    })
+  const opened = await post()
   assert.equal(opened.status, 303)
   assert.equal(opened.headers.location, `/#settings-token=${token}`)
-  assert.equal((await b.call('GET', nonce)).status, 404)
+  assert.equal(fs.existsSync(file), false, 'the page is removed once used')
+  assert.equal((await post()).status, 404)
+  // Only the newest page works, and stop removes it.
+  const older = fileURLToPath(b.app.locals.openLink(b.origin))
+  const newer = fileURLToPath(b.app.locals.openLink(b.origin))
+  assert.equal(fs.existsSync(older), false)
+  assert.equal(fs.existsSync(newer), true)
   b.app.locals.close()
+  assert.equal(fs.existsSync(newer), false, 'the page is removed at stop')
   assert.equal(fs.readFileSync(serveFile, 'utf8'), before)
   assert.equal(fs.readFileSync(projectsFile(b.env), 'utf8'), index)
 })
@@ -729,7 +752,7 @@ test(
     assert.equal(code, 0)
     assert.equal(signal, null)
     assert.equal(fs.existsSync(agentControlFile(b.config, b.env)), false)
-    assert.equal(b.app.locals.openLink().startsWith('/open/'), true)
+    assert.equal(b.app.locals.openLink(b.origin).startsWith('file:'), true)
   },
 )
 

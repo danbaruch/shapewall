@@ -342,11 +342,11 @@ export async function serve(flags, out) {
     tail?.stop().catch((error) => out(error.message))
     clearServeState(config)
   })
-  // With a token: a one-time link the server answers once with the settings
-  // link (src/server/app.js /open/<nonce>), so the token itself never goes on
-  // a command line. Without one: the plain address.
+  // With a token: a 0600 page that posts a one-time nonce the server answers
+  // once with the settings link (src/server/app.js POST /open), so neither the
+  // token nor the nonce goes on a command line. Without one: the plain address.
   if (flags.open) {
-    const link = !remoteAccountOrigin && app.locals.openLink ? app.locals.openLink() : null
+    const link = !remoteAccountOrigin && app.locals.openLink ? app.locals.openLink(url) : null
     // No browser here: the printed one-time link gets five minutes, time to copy it into a browser on this machine.
     const onCannotOpen = link
       ? () => {
@@ -354,7 +354,7 @@ export async function serve(flags, out) {
           return 'it opens the board as its owner, works once and expires in 5 minutes'
         }
       : null
-    openBrowser(link ? `${url}${link}` : url, out, { onCannotOpen })
+    openBrowser(link || url, out, { onCannotOpen })
   }
   let stopping = null
   shutdown = (code = 0) => {
