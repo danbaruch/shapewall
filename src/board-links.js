@@ -106,13 +106,12 @@ export function hostedBoardBase(origin, workspaceId, projectId) {
   return `${root}/w/${encodeURIComponent(text('workspace', workspaceId))}/p/${encodeURIComponent(text('project', projectId))}/`
 }
 
-// A local board's address: $SHAPEWALL_BOARD_URL, the config's boardUrl
-// (notifications.boardUrl first, deprecated), the caller's own server address
+// A local board's address: $SHAPEWALL_BOARD_URL, the config's boardUrl, the caller's own server address
 // (`boardUrl`, a running server's), a `shapewall serve` running for this
 // config (serve.json), and only then the default port.
 // `running`: whether a server is known to answer there (false for the default guess).
 export function localBoardBase(config, { boardUrl = null, env = process.env } = {}) {
-  const set = env.SHAPEWALL_BOARD_URL || config?.notifications?.boardUrl || config?.boardUrl || boardUrl
+  const set = env.SHAPEWALL_BOARD_URL || config?.boardUrl || boardUrl
   if (set) return { url: set, running: null, source: 'set' }
   const live = runningBoardUrl(config)
   if (live) return { url: live, running: true, source: 'serve' }

@@ -302,6 +302,9 @@ closes with Ctrl-C. Remote settings remain read-only; the account and device gat
 
 ### LAN pairing
 
+**Deprecated in 2.0.** `serve --lan` and the `shapewall devices` command still work through 2.x, each with a one-line warning,
+and go in 3.0. Reach the board from your other devices through the tailnet instead (`shapewall serve --tailscale`).
+
 ```sh
 shapewall serve --lan
 shapewall serve --lan=eth0

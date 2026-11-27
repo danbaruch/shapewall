@@ -28,6 +28,7 @@ const BOOLEAN_FLAGS = new Set([
   'json',
   'no-comments',
   'browser-comments',
+  'noindex',
   'no-index',
   'help',
   'version',
@@ -79,12 +80,12 @@ const BOOLEAN_FLAGS = new Set([
   'no-agent-docs',
   'rollback',
 ])
-// Flag spellings removed in 2.0 (deprecated through 1.x), per command: what
-// to use instead. A strict parse refuses one with a one-line error naming
+// Flag spellings removed in 2.0 (deprecated through 1.x), per command (or
+// command and action, as actionScope names it): what to use instead. A strict parse refuses one with a one-line error naming
 // the replacement, not "unknown option".
 export const REMOVED_FLAGS = {
   export: { noindex: 'use --no-index' },
-  checks: { production: 'use --build-mode' },
+  'checks lighthouse': { production: 'use --build-mode' },
   capture: { yes: 'leave it out: capture never prompts' },
 }
 
@@ -367,8 +368,8 @@ const takes = (command, key) => GLOBAL_FLAGS.includes(key) || COMMAND_FLAGS[comm
 
 // The error for a flag this command no longer takes: the removed-in-2.0
 // line when it is an old spelling (REMOVED_FLAGS), else "unknown option".
-function refusedFlag(key, scope, command) {
-  if (Object.hasOwn(REMOVED_FLAGS[command] || {}, key)) return removed(`${scope.name} --${key}`, REMOVED_FLAGS[command][key])
+function refusedFlag(key, scope) {
+  if (Object.hasOwn(REMOVED_FLAGS[scope.name] || {}, key)) return removed(`${scope.name} --${key}`, REMOVED_FLAGS[scope.name][key])
   return unknownFlag(key, scope.name, scope.flags)
 }
 
@@ -417,7 +418,7 @@ export function parseArgs(argv, { strict = false } = {}) {
     }
     const command = positional[0]
     if (strict && command && COMMAND_FLAGS[command] && !takes(command, key)) {
-      throw refusedFlag(key, actionScope(command, positional[1]), command)
+      throw refusedFlag(key, actionScope(command, positional[1]))
     }
     seen.push(key)
     const ownValue = Boolean(command && COMMAND_OPTIONAL_VALUE[command]?.has(key))
@@ -450,7 +451,7 @@ export function parseArgs(argv, { strict = false } = {}) {
   // Flags written before the command are checked once it is known.
   if (strict && command && COMMAND_FLAGS[command]) {
     const scope = actionScope(command, positional[1])
-    for (const key of seen) if (!takes(command, key)) throw refusedFlag(key, scope, command)
+    for (const key of seen) if (!takes(command, key)) throw refusedFlag(key, scope)
     // Each action takes only its own flags ("checks run --samples 3" is a mistake).
     if (SUBCOMMAND_FLAGS[command]) {
       for (const key of seen) {

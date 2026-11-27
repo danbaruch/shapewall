@@ -3,7 +3,7 @@
 **Experimental.** The sandboxed starter agent (`shapewall agent sandbox ...`, the `starterAgent` config key, `Dockerfile.agent`
 and its `SHAPEWALL_AGENT_*` and `SHAPEWALL_SANDBOX`/`SHAPEWALL_EGRESS_*` settings) is not covered by the
 [stability promise](stability.md): it can change in a minor release, with a note in the changelog. The older spellings
-`shapewall agent run|watch|doctor|build-image` still work and print a deprecation warning.
+`shapewall agent run|watch|doctor|build-image` were removed in 2.0; each stops with an error that names `agent sandbox ...`.
 
 A comment on the board is an instruction to an agent. `shapewall agent sandbox` takes one comment at a time and carries it out inside a
 container: it reads the request, edits files in a fresh
@@ -34,10 +34,10 @@ chat: `agent.baseUrl` and `agent.model`, or `SHAPEWALL_AGENT_BASE_URL` and `SHAP
 2. Say who may dispatch work, and how to test, in `shapewall.config.json`:
 
    ```json
+   "commands": { "test": "npm test" },
    "starterAgent": {
      "trusted": ["robin", "sam"],
-     "setupCommand": "npm ci",
-     "testCommand": "npm test"
+     "setupCommand": "npm ci"
    }
    ```
 
@@ -215,7 +215,7 @@ is logged.
 | --------------------- | -------------------------------------------------- | -------------------------------------------------------- |
 | `trusted`             | `[]`                                               | Who may dispatch work, on every board.                   |
 | `boards.<id>.trusted` |                                                    | Replaces `trusted` for one board.                        |
-| `testCommand`         | none                                               | One program and its arguments, no shell.                 |
+| `testCommand`         | none                                               | Deprecated (warns; goes in 3.0): set `commands.test`.    |
 | `setupCommand`        | none                                               | Runs once before the agent, with the registry reachable. |
 | `budget`              | `{ turns: 20, tokens: 200000, minutes: 15 }`       |                                                          |
 | `modelTimeoutSeconds` | 180 for the first call, then 60                    | Time for a model call to start answering, 1 to 900.      |

@@ -43,21 +43,23 @@ test('durations take s, m or h, and a bare number keeps the flag unit', () => {
   assert.equal(formatDuration(90 * 1000), '90s')
 })
 
-test('a deprecated spelling warns once, naming the 2.0 removal and the new spelling', () => {
+test('a deprecated spelling warns once, naming the next major (3.0) and the new spelling', () => {
   const lines = warnings()
   deprecated('variant rm', 'use variant remove')
   deprecated('variant rm', 'use variant remove')
   assert.equal(lines.length, 1)
-  assert.match(lines[0], /variant rm is deprecated and will be removed in Shapewall 2\.0; use variant remove\./)
+  assert.match(lines[0], /variant rm is deprecated and will be removed in Shapewall 3\.0; use variant remove\./)
   setDeprecationSink(() => {})
 })
 
-test('the usercontent origin reads the canonical name, and the old one with a warning', () => {
+test('the usercontent origin reads the canonical name; the old one (removed in 2.0) is an error that names it', () => {
   const lines = warnings()
   assert.equal(usercontentOriginFromEnv({ SHAPEWALL_HOSTED_USERCONTENT_ORIGIN: 'https://a.example.com' }), 'https://a.example.com')
   assert.equal(lines.length, 0)
-  assert.equal(usercontentOriginFromEnv({ SHAPEWALL_USERCONTENT_ORIGIN: 'https://b.example.com' }), 'https://b.example.com')
-  assert.match(lines[0], /SHAPEWALL_USERCONTENT_ORIGIN is deprecated.*SHAPEWALL_HOSTED_USERCONTENT_ORIGIN/)
+  assert.throws(
+    () => usercontentOriginFromEnv({ SHAPEWALL_USERCONTENT_ORIGIN: 'https://b.example.com' }),
+    /^Error: SHAPEWALL_USERCONTENT_ORIGIN was removed in Shapewall 2\.0; rename it to SHAPEWALL_HOSTED_USERCONTENT_ORIGIN\.$/,
+  )
   assert.equal(usercontentOriginFromEnv({}), null)
   const env = renderEnv({ domain: 'app.example.com', usercontentDomain: 'files.example.com', source: 'npm' })
   assert.match(env, /^SHAPEWALL_HOSTED_USERCONTENT_ORIGIN=https:\/\/files\.example\.com$/m)

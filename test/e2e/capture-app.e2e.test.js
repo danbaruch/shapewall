@@ -38,7 +38,7 @@ before(async () => {
     baseUrl: site.baseUrl,
     outputDir: path.join(dir, '.shapewall'),
     concurrency: 2,
-    versions: 0,
+    keepVersions: 0,
     capturePacing: { intervalMs: 0, rateLimitCooldownMs: 0 },
     viewports: { desktop: { width: 800, height: 600 }, phone: { width: 390, height: 700 } },
     timeouts: { page: 10000, settle: 500 },

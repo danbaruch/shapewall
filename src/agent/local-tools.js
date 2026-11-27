@@ -67,12 +67,12 @@ export const localExtensions = (config, env = process.env) =>
 
 // The ACP agent a local board's chat runs, as the resolver reads it
 // (capabilities.js `agent`): its kind (only Claude Code takes extensions)
-// and whether its session is the restricted one (agent.localSession, which
-// is the default; "own" keeps the agent's own full session). `settings`:
-// agentSettings() for the profile the chat uses.
+// and whether its session is the restricted one (always, since 2.0 removed
+// agent.localSession "own"). `settings`: agentSettings() for the profile
+// the chat uses.
 export const localAgentOf = (config, settings) => ({
   kind: settings?.backend === 'acp' ? acpAgentKind(settings.acp?.argv || []) : null,
-  hardened: config.agent?.localSession !== 'own',
+  hardened: true,
 })
 // The same for the board's default agent: what its card and `agent status` show.
 export function localAgent(config, env = process.env, { acp = null } = {}) {

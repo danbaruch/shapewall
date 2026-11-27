@@ -240,5 +240,5 @@ test('QuickConnect: the settings view says which session Claude Code gets on thi
     return got.json.effective.localSession
   }
   assert.equal(await read({}), 'restricted')
-  assert.equal(await read({ localSession: 'own' }), 'own')
+  assert.equal(await read({ localSession: 'restricted' }), 'restricted')
 })

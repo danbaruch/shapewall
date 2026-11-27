@@ -1,5 +1,8 @@
 # Local accounts and profile images
 
+**Deprecated in 2.0.** `serve --accounts` (and `SHAPEWALL_ACCOUNTS=1`) still works through 2.x with a one-line warning and goes
+in 3.0: the solo engine signs its owner in on this machine by itself, and `serve --tailscale` signs in people on your tailnet.
+
 Local accounts are opt-in. Ordinary `shapewall serve` keeps its existing access model and does not create an account database.
 Use Node 22.19 or newer and start with `shapewall serve --accounts`. On a loopback listener its fixed origin uses `localhost` and
 the serving port. Passkeys require a hostname; IP origins are rejected. Existing IP bookmarks redirect to the configured account
