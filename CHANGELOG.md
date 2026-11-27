@@ -5,6 +5,36 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 1.4.1 - 2026-11-27
+
+Security fixes for the local board and for agents' file reads.
+
+Upgrading from 1.4.0: with `serve --accounts`, a link to the board from another site or app now lands on Sign in first (the
+account cookie is `SameSite=Strict`), and `GET /open/<nonce>` links no longer open the board; use `serve --open` or
+`settings --open`.
+
+### Security
+
+- `shapewall serve --open` and `shapewall settings --open` no longer put the one-time open link's nonce on the browser
+  opener's command line (`xdg-open`, `open`, `explorer.exe`), where another user of the machine could read it and open the
+  board as its owner first. The browser is opened on a page in the project's `.shapewall/` folder, readable only by you, that
+  posts the nonce to `POST /open`; the page is removed once used, when it expires and when the server stops. With no browser,
+  the page's path is printed instead of the link. `GET /open/<nonce>` no longer opens anything.
+- `POST /open` no longer redirects to `#settings-token=...`: it answers with a page that puts the settings token in the tab's
+  session storage and opens the board, so the token never lands in browser history. Open pages a stopped server left behind are
+  removed when the next server for the project starts.
+- `serve --accounts`: the account session cookie is `SameSite=Strict` on every issue (was `Lax`), so a link or form on another
+  site, to any port of the board's host name, never carries it. On a loopback account origin on Linux, a request that carries
+  it counts only from a socket of the OS user running `serve`.
+- Agents: an ACP agent's file reads (`fs/read_text_file`) no longer reach Shapewall's own store (`.shapewall/`: accounts,
+  sessions, notification settings, tokens), the recorded logins in `.shapewall-auth/` or the config's `auth.storageState`
+  files, through a link either; only writes were refused before. A Claude Code agent also gets `Read` deny rules for those
+  paths in its session settings, since it reads files itself (checked against a real Claude Code on Linux: Read, Grep,
+  Glob and links into the store are refused). Comments and captures reach agents through Shapewall's tools as before.
+  Codex, goose and Gemini CLI read files with their own tools, which take no per-path deny, so on a local board they can
+  still read these paths; for a board where people you do not trust write comments, use Claude Code, or a connected agent
+  (`shapewall agent connect`), whose commands run in the OS sandbox.
+
 ## 1.4.0 - 2026-11-26
 
 One capability model for every agent path: who wrote a turn decides its tier (solo, team or open), the machine sets the
