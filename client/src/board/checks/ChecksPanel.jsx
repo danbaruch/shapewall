@@ -146,7 +146,10 @@ export default function ChecksPanel({
   const notice = data?.demo
     ? 'Fictional demo reports; no live audit was run.'
     : data?.imported
-      ? 'Imported with the board; sign-in and page state can’t be verified here.'
+      ? // The solo engine's owner view mixes its own runs with reports a push brought.
+        data.views?.some((view) => view.report && view.imported === false)
+        ? 'Some reports were imported with the board; their sign-in and page state can’t be verified here.'
+        : 'Imported with the board; sign-in and page state can’t be verified here.'
       : null
   return (
     <section className="flex flex-col lg:min-h-0 lg:flex-1" data-sw-checks-panel="true">

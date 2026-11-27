@@ -132,6 +132,7 @@ async function checkPageInBrowser({
   runId = randomUUID(),
   sourceBuild = null,
   signal = null,
+  location = 'local',
 }) {
   const size = boardViewports(config, board)[viewport]
   const device = viewportDevice(viewport, size)
@@ -160,7 +161,7 @@ async function checkPageInBrowser({
       stateFingerprint: targetFingerprint(config, board, target, environment, viewport),
       seo,
       production: 'unknown',
-      location: 'local',
+      location,
       sampleCount: 1,
     },
     completeness: {
@@ -639,6 +640,13 @@ async function runChecksUnlocked({
   // neither launches a browser of its own nor puts a proxy of its own on the
   // page contexts (a context proxy would replace the browser's).
   egressPinned = false,
+  // 'engine' on the solo engine: its reports say they were run there, so the
+  // owner's view tells them from the reports a push brought (checksView ranHere).
+  location = 'local',
+  // Called right before each report or preview is written; throws when the
+  // run may no longer write (the solo engine closed it under a runner that
+  // did not give up in time, src/checks/run-control.js).
+  fence = null,
   sourceBuild = null,
   onProgress = () => {},
   // Aborting stops the run: the view in progress is abandoned, views not
@@ -715,6 +723,7 @@ async function runChecksUnlocked({
         runId,
         sourceBuild,
         signal,
+        location: location === 'engine' ? 'engine' : 'local',
       })
       // Stopped while this view was being checked: it was not checked.
       if (signal?.aborted) break
@@ -746,10 +755,11 @@ async function runChecksUnlocked({
       }
     const saved = []
     for (const { report, snapshot } of results) {
-      saved.push(await saveReport(config, report))
+      saved.push(await saveReport(config, report, { fence }))
       // A preview that fails validation is dropped; the report stands.
       if (snapshot)
         try {
+          fence?.()
           saveSnapshot(config, snapshot)
         } catch {
           /* no preview for this report */

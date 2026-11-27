@@ -16,7 +16,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
   live `shapewall.config.json`, and the SEO tab shows that run's search previews, as on a local board. Owner only, on this
   machine; the check browser reaches the app's origin only, like the capture browser. One job at a time on the engine
   (checks and captures wait for each other); `--read-only` and `--no-capture` turn runs off. Team servers never run checks.
-  See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
+  Reports a push brought read as imported, the engine's own runs as its own. A run that does not stop in time is closed
+  and ends as stopped, and writes nothing after; a capture that does not stop in time keeps its board, and removing that
+  board answers that the engine needs a restart. See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
 - Solo engine (experimental): the owner makes, edits and deletes the board's own journeys from the board, as on a local
   board, with the same validation against the config file's pages. They are stored in the board's `journeys.json` in the
   engine's folder; journeys from the config stay read only. Team servers keep journeys read only. See

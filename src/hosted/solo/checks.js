@@ -31,11 +31,13 @@
 // push of the board (push.js refuseBoardJob), a backup's pin (backup.js)
 // and the 1.x tools see it. Removing the board or its project cancels the
 // run first (console-routes.js, app.locals.soloChecks.cancel). Closing the
-// engine stops the run and waits for it.
+// engine stops the run and waits for it. A runner that does not give up
+// within the grace period is fenced (it writes nothing more), its browser
+// closes and the run ends as stopped (run-control.js).
 //
 // solo options read here: allowCapture (false: --no-capture or --read-only
 // keep the panel's Run off, as on a local board), readOnly, checks ({ run,
-// chromium, lookup, interfaces }: tests only).
+// chromium, lookup, interfaces, graceMs }: tests only).
 import { acquireBoardJob, boardJobBusyMessage, readBoardJob } from '../../board-job.js'
 import { launchBrowser } from '../../capture/capture.js'
 import { latestSeoReports } from '../../checks/seo-analysis.js'
@@ -83,6 +85,8 @@ export function createSoloChecks({
   chromium = null,
   lookup,
   interfaces,
+  // Tests only: the stop grace period (run-control.js STOP_GRACE_MS).
+  graceMs,
 }) {
   const enginePort = Number(new URL(publicOrigin).port) || (new URL(publicOrigin).protocol === 'https:' ? 443 : 80)
   let closed = false
@@ -140,13 +144,14 @@ export function createSoloChecks({
       throw error
     }
     projectOfRun = bound.projectId
-    return { config, options: { browser, egressPinned: true, jobHeld: true }, close }
+    return { config, options: { browser, egressPinned: true, jobHeld: true, location: 'engine' }, close }
   }
 
   const runs = createInProcessChecksRuns({
     prepare,
     runChecks: async (options) => (run || (await import('../../checks/runner.js')).runChecks)(options),
     log,
+    ...(graceMs ? { graceMs } : {}),
   })
 
   return {
@@ -163,6 +168,9 @@ export function createSoloChecks({
     },
   }
 }
+
+// A report the engine's own run wrote (runner.js location 'engine').
+const engineRun = (report) => report.profile.location === 'engine'
 
 export function mountSoloChecks(app, deps, features) {
   const solo = deps.solo || {}
@@ -198,9 +206,10 @@ export function mountSoloChecks(app, deps, features) {
   )
 
   // The owner's view of the board's checks, as a local board shows it: from
-  // the live config, so a report whose sign-in or page setup changed since
-  // reads as stale (the engine ran these checks; they were not imported).
-  // Anyone else gets the hosted answer from board-checks.js. -> { config,
+  // the live config, so a report the engine ran whose sign-in or page setup
+  // changed since reads as stale. Reports a push brought (no 'engine'
+  // marker, schema.js profile.location) read as imported, as on a hosted
+  // board. Anyone else gets the hosted answer from board-checks.js. -> { config,
   // board, view }, null to fall through, or false after answering 404.
   function ownerView(req, res) {
     if (!inBound(req) || !ownerHere(req)) return null
@@ -213,7 +222,11 @@ export function mountSoloChecks(app, deps, features) {
     const board = config.boards.find((item) => item.id === req.params.bid)
     if (!board) return null
     try {
-      return { config, board, view: checksView(config, board.id, typeof req.query.env === 'string' ? req.query.env : null) }
+      return {
+        config,
+        board,
+        view: checksView(config, board.id, typeof req.query.env === 'string' ? req.query.env : null, { ranHere: engineRun }),
+      }
     } catch {
       fail(res, 404, 'not_found', 'No checks for this environment.')
       return false

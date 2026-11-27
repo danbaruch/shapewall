@@ -9,7 +9,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import test, { after } from 'node:test'
 import { readBoardJob } from '../src/board-job.js'
-import { saveReport } from '../src/checks/store.js'
+import { checksView, saveReport } from '../src/checks/store.js'
+import { validateChecksBundle } from '../src/checks/transport.js'
 import { saveSnapshot } from '../src/checks/seo-snapshot.js'
 import { createInProcessChecksRuns } from '../src/checks/run-control.js'
 import { runChecks } from '../src/checks/runner.js'
@@ -72,7 +73,10 @@ function stubRun({ hold = false, seoSnapshot = false } = {}) {
         options.onProgress(`Checking ${page.id} ${viewport}`)
         const report = checkReport(options.config, { pageId: page.id, viewport, finding: false })
         report.profile.seo = seoSnapshot
-        saved.push(await saveReport(options.config, report))
+        // As runner.js: the engine's marker, and the write fence before each write.
+        report.profile.location = options.location === 'engine' ? 'engine' : 'local'
+        saved.push(await saveReport(options.config, report, { fence: options.fence }))
+        options.fence?.()
         if (seoSnapshot)
           saveSnapshot(options.config, {
             schemaVersion: 1,
@@ -167,6 +171,8 @@ test('the engine owner runs checks from the board: in process, the egress browse
   const [call] = stub.calls
   assert.equal(call.egressPinned, true, 'the runner neither launches a browser nor sets a context proxy')
   assert.equal(call.jobHeld, true)
+  assert.equal(call.location, 'engine', 'its reports say the engine ran them')
+  assert.equal(typeof call.fence, 'function')
   assert.ok(call.browser, 'the run got the egress browser')
   assert.equal(call.lock?.kind, 'checks', 'the board-job lock is held while the run runs')
   assert.equal(call.config.outputDir, engineFolder(hosted, owner))
@@ -405,4 +411,138 @@ test('runChecks with egressPinned never launches a browser of its own', async ()
     runChecks({ config, boardId: 'sample', egressPinned: true, jobHeld: true, limit: 5 }),
     /Page check browser unavailable/,
   )
+})
+
+test('rev63 C1: a runner that ignores the stop is fenced before its browser closes, and the run ends as stopped', async () => {
+  const board = sampleConfig('solo-checks-stuck').boards[0]
+  const events = []
+  let call = null
+  let wake = () => {}
+  const runs = createInProcessChecksRuns({
+    graceMs: 30,
+    prepare: async () => ({
+      config: { checks: {} },
+      options: {},
+      close: async () => {
+        try {
+          call.fence()
+          events.push('closed before the fence')
+        } catch {
+          events.push('closed after the fence')
+        }
+      },
+    }),
+    // Ignores the signal and the closed browser (a login script awaiting something else).
+    runChecks: (options) => {
+      call = options
+      return new Promise((resolve) => (wake = resolve))
+    },
+  })
+  await runs.start(board, {})
+  assert.equal(runs.running(), true)
+  assert.doesNotThrow(() => call.fence(), 'a running run may write')
+  // What removing the board and closing the engine wait for: it returns.
+  assert.equal(await runs.stopAndWait('sample'), true)
+  assert.equal(runs.running(), false)
+  const state = runs.state('sample')
+  assert.equal(state.state, 'stopped')
+  assert.match(state.message, /did not stop in time, so its browser was closed/)
+  assert.deepEqual(events, ['closed after the fence'])
+  assert.throws(() => call.fence(), /stopped/, 'nothing the runner does later is written')
+  // The runner wakes up and answers: ignored.
+  wake([{ state: 'complete' }])
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(runs.state('sample').state, 'stopped')
+  assert.deepEqual(events, ['closed after the fence'])
+  // The slot is free again.
+  const next = createInProcessChecksRuns({
+    prepare: async () => ({ config: { checks: {} }, options: {}, close: async () => {} }),
+    runChecks: async () => [],
+  })
+  await (
+    await next.start(board, {})
+  ).finished
+  assert.equal(next.state('sample').state, 'complete')
+})
+
+test('rev63 C1 on the engine: a stuck run does not hold up removing the board or stopping the engine, and writes nothing after', async () => {
+  const calls = []
+  const late = []
+  let wake = () => {}
+  const woken = new Promise((resolve) => (wake = resolve))
+  // Never gives up on the stop; when it wakes, it tries to save a report as runner.js would.
+  const run = async (options) => {
+    calls.push(options)
+    await woken
+    const report = checkReport(options.config, { pageId: 'home', viewport: 'desktop', finding: false })
+    report.profile.location = 'engine'
+    late.push(saveReport(options.config, report, { fence: options.fence }))
+    await late.at(-1)
+    return [report]
+  }
+  const { hosted, browser, base, owner } = await startSolo('solo-checks-stuck', {
+    solo: { checks: { run, chromium: stubChromium(), graceMs: 30 } },
+  })
+  assert.equal((await browser.post(`${base}/boards/sample/checks/run`, {})).status, 202)
+  for (let i = 0; i < 200 && !calls.length; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+  const gone = await browser.call('DELETE', `/api/workspaces/${owner.workspaceId}/projects/${owner.projectId}/boards/sample`)
+  assert.equal(gone.status, 200, gone.text)
+  const folder = path.join(engineFolder(hosted, owner), 'sample')
+  assert.equal(fs.existsSync(folder), false)
+  assert.equal(readBoardJob({ outputDir: engineFolder(hosted, owner) }, 'sample'), null)
+  wake()
+  await assert.rejects(
+    (async () => {
+      for (let i = 0; i < 200 && !late.length; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+      await late[0]
+    })(),
+    /stopped/,
+  )
+  assert.equal(fs.existsSync(folder), false, 'the late runner did not bring the folder back')
+
+  const stuck = () => new Promise(() => {})
+  const other = await startSolo('solo-checks-stuck-close', {
+    solo: { checks: { run: (options) => (calls.push(options), stuck()), chromium: stubChromium(), graceMs: 30 } },
+  })
+  const before = calls.length
+  assert.equal((await other.browser.post(`${other.base}/boards/sample/checks/run`, {})).status, 202)
+  for (let i = 0; i < 200 && calls.length === before; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+  servers.splice(servers.indexOf(other.hosted), 1)
+  await other.hosted.close()
+  assert.equal(readBoardJob({ outputDir: engineFolder(other.hosted, other.owner) }, 'sample'), null)
+})
+
+test('rev63 C2: the owner sees reports a push brought as imported, the engine’s own runs as its own', async () => {
+  const stub = stubRun()
+  const { browser, base } = await startSolo('solo-checks-source', { solo: { checks: { run: stub.run, chromium: stubChromium() } } })
+  assert.equal((await browser.post(`${base}/boards/sample/checks/run`, { seo: false })).status, 202)
+  await finished(browser, base)
+  const own = await browser.get(`${base}/boards/sample/checks`)
+  assert.equal(own.json.imported, false)
+  assert.ok(own.json.views.every((view) => view.imported === false))
+
+  // A push from another machine brings a newer report of home: its sign-in
+  // and page setup are that machine's, so it must not read as stale here.
+  const config = stub.calls[0].config
+  const pushed = checkReport(config, { pageId: 'home', viewport: 'desktop', finding: false })
+  pushed.profile.stateFingerprint = 'a'.repeat(64)
+  await saveReport(config, pushed)
+  const mixed = await browser.get(`${base}/boards/sample/checks`)
+  assert.equal(mixed.json.imported, true, 'the panel says some reports were imported')
+  const home = mixed.json.views.find((view) => view.pageId === 'home' && view.viewport === 'desktop')
+  assert.equal(home.report.id, pushed.id)
+  assert.equal(home.imported, true)
+  assert.equal(home.state, 'complete', 'not stale for this machine’s setup')
+  assert.ok(mixed.json.views.filter((view) => view !== home).every((view) => view.imported === false))
+
+  // Elsewhere nothing changes: a local board judges every report itself, a hosted one imports all.
+  assert.equal(checksView(config, 'sample').imported, false)
+  assert.equal(checksView(config, 'sample').views[0].imported, undefined)
+  assert.equal(checksView(config, 'sample', null, { imported: true }).imported, true)
+  // A carried bundle never brings a report that claims to be an engine run.
+  const board = config.boards[0]
+  const claimed = checkReport(config, { pageId: 'home', viewport: 'desktop', finding: false })
+  claimed.profile.location = 'engine'
+  assert.throws(() => validateChecksBundle({ schemaVersion: 1, reports: [claimed] }, board, config.viewports), /local run/)
+  assert.equal(validateChecksBundle({ schemaVersion: 1, reports: [pushed] }, board, config.viewports).reports.length, 1)
 })

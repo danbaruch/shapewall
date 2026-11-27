@@ -119,6 +119,7 @@ function settle(run, { finishedAt, minutes, reason }) {
     run.message =
       `Stopped after ${run.checked} of ${run.total} page views` +
       (run.stopReason === 'timeout' ? `: the run took longer than ${minutes} minute${minutes === 1 ? '' : 's'}.` : '.') +
+      (run.forced ? ' It did not stop in time, so its browser was closed.' : '') +
       ' Page views not checked keep their earlier results.'
   } else if (run.checked !== null) {
     run.done = run.checked
@@ -239,7 +240,14 @@ export function createChecksRuns({
 // after the run in every case. `runChecks` is src/checks/runner.js's (tests
 // pass a stand-in). start() is async: it answers once the run started, or
 // throws the refusal.
-export function createInProcessChecksRuns({ prepare, runChecks, log = () => {}, now = () => Date.now(), timeoutMs = defaultTimeout }) {
+export function createInProcessChecksRuns({
+  prepare,
+  runChecks,
+  log = () => {},
+  now = () => Date.now(),
+  timeoutMs = defaultTimeout,
+  graceMs = STOP_GRACE_MS,
+}) {
   let current = null
   const running = () => Boolean(current && current.state === 'running')
 
@@ -263,18 +271,48 @@ export function createInProcessChecksRuns({ prepare, runChecks, log = () => {}, 
     }
     const controller = new AbortController()
     let forced = null
+    // The write fence: once it is up, the runner writes nothing more (runner.js
+    // `fence`, checked right before each report and preview is written).
+    let fenced = false
+    const fence = () => {
+      if (fenced) throw new Error('The checks run was stopped.')
+    }
     const close = async () => {
       if (!prepared) return
       const held = prepared
       prepared = null
       await held.close().catch((error) => log(`checks of "${board.id}": could not close the run (${error.message}).`))
     }
+    const end = (reason) => {
+      if (run.state !== 'running') return
+      settle(run, { finishedAt: now(), minutes: minutesOf(timeoutMs, total), reason: reason || 'The checks run stopped.' })
+    }
+    let forcedEnd
+    const forcedDone = new Promise((resolve) => (forcedEnd = resolve))
+    // A runner that did not give up in the grace period (a login script
+    // awaiting something other than the browser): fence its writes first, so
+    // releasing the board-job lock below cannot let a push or a delete race a
+    // late write; then close its browser and proxy, and end the run as
+    // stopped. Whatever the runner does later is ignored.
+    const force = async () => {
+      if (run.state !== 'running') return forcedEnd()
+      fenced = true
+      let bound
+      await Promise.race([close(), new Promise((resolve) => (bound = setTimeout(resolve, graceMs)))])
+      clearTimeout(bound)
+      clearTimeout(timer)
+      if (run.state === 'running') {
+        run.forced = true
+        log(`checks of "${board.id}": the run did not stop in time; its browser was closed.`)
+        end(null)
+      }
+      forcedEnd()
+    }
     const stop = (reason) => {
       if (run.state !== 'running' || run.stopReason) return false
       run.stopReason = reason
       controller.abort()
-      // A view that does not give up in time: its browser closes under it.
-      forced = setTimeout(close, STOP_GRACE_MS)
+      forced = setTimeout(force, graceMs)
       forced.unref?.()
       return true
     }
@@ -283,7 +321,7 @@ export function createInProcessChecksRuns({ prepare, runChecks, log = () => {}, 
     run.stop = stop
     // A checks.seo page list stays in charge when SEO is included.
     const seoOption = !seo ? false : Array.isArray(prepared.config.checks?.seo) ? prepared.config.checks.seo : true
-    run.finished = (async () => {
+    const ran = (async () => {
       let reason = null
       try {
         const reports = await runChecks({
@@ -294,9 +332,11 @@ export function createInProcessChecksRuns({ prepare, runChecks, log = () => {}, 
           only: pages ? selected.map((p) => p.id) : null,
           seo: seoOption,
           limit: total,
-          onProgress: (line) => progress(run, String(line)),
+          onProgress: (line) => run.state === 'running' && progress(run, String(line)),
           signal: controller.signal,
+          fence,
         })
+        if (run.state !== 'running') return
         const failed = reports.filter((report) => report.state === 'failed').length
         if (reports.stopped) {
           run.stoppedAt = reports.stopped.checked
@@ -306,15 +346,20 @@ export function createInProcessChecksRuns({ prepare, runChecks, log = () => {}, 
           run.failed = failed
         }
       } catch (error) {
+        if (run.state !== 'running') return
         reason = reasonLine(error?.message) || 'The checks run stopped.'
         log(`checks of "${board.id}" failed: ${reason}`)
       } finally {
-        clearTimeout(timer)
-        clearTimeout(forced)
-        await close()
+        if (run.state === 'running') {
+          clearTimeout(timer)
+          clearTimeout(forced)
+          await close()
+        }
       }
-      settle(run, { finishedAt: now(), minutes: minutesOf(timeoutMs, total), reason: reason || 'The checks run stopped.' })
+      end(reason)
     })()
+    // Ends with the runner, or with the forced close when the runner does not.
+    run.finished = Promise.race([ran, forcedDone])
     return run
   }
 

@@ -19,6 +19,8 @@ export function validateChecksBundle(value, board, viewports) {
   const ids = new Set()
   const reports = value.reports.map((item) => {
     const report = validateReport(item)
+    // Only the solo engine marks its own runs; a report that is carried is never one.
+    if (report.profile.location !== 'local') throw new Error('A carried check report must be a local run.')
     const page = board.pages.find((p) => p.id === report.pageId)
     const size = viewports[report.viewport.name]
     if (

@@ -488,3 +488,31 @@ test('rev58 G3-7: an open push with no upload for a few minutes does not hold Ca
   assert.equal(fs.existsSync(staging), false)
   await settled(browser, base)
 })
+
+test('rev63 C1: a capture that does not end refuses the removal (409) instead of hanging, keeps the board busy, and the engine still stops', async () => {
+  let started = false
+  // Holds its board-job lock and never ends (a login script awaiting something other than the browser).
+  const run = async (options) => {
+    acquireBoardJob(options.config, options.boardId, 'capture')
+    started = true
+    await new Promise(() => {})
+  }
+  const { hosted, browser, base, owner } = await startSolo('solo-capture-stuck', {
+    solo: { capture: { run, stopWaitMs: 30 } },
+  })
+  assert.equal((await browser.post(`${base}/boards/sample/capture`, {})).status, 202)
+  for (let i = 0; i < 200 && !started; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+  const gone = await browser.call('DELETE', `/api/workspaces/${owner.workspaceId}/projects/${owner.projectId}/boards/sample`)
+  assert.equal(gone.status, 409, gone.text)
+  assert.equal(gone.json.error.code, 'capture_stuck')
+  const folder = path.join(projectDir(hosted.dataDir, owner.workspaceId, owner.projectId), 'sample')
+  assert.equal(fs.existsSync(folder), true, 'the board stays while its run might still write')
+  // Still busy: no push swaps the folder under the run, and no other job starts.
+  const push = await browser.post('/api/v1/pushes', {})
+  assert.equal(push.status, 409)
+  assert.equal(push.json.error.code, 'capture_running')
+  const again = await browser.post(`${base}/boards/sample/capture`, {})
+  assert.equal(again.status, 409)
+  servers.splice(servers.indexOf(hosted), 1)
+  await hosted.close()
+})
