@@ -34,8 +34,11 @@
 // notifications, G8), update.js (self-update, G10), capture.js (in-process
 // capture from the board and recapture_pages on /mcp, G3), journeys.js
 // (journey editing, G5), checks.js (checks run control and the SEO tab's
-// previews, G6), batch.js (batch fixes on the chat, G14a). A surface the
-// board turns on (client/src/board/solo.js) sets its flag in `features`.
+// previews, G6), batch.js (batch fixes on the chat, G14a). Compare (G4)
+// needs no surface of its own: the board routes serve it for every board
+// with more than one environment (src/hosted/board-compare.js), and only the
+// engine keeps more than one, so it only sets its flag. A surface the board
+// turns on (client/src/board/solo.js) sets its flag in `features`.
 //
 // deps.engineJobs: the jobs that run a browser on this machine (capture,
 // checks) register here, and each refuses to start while another runs: one
@@ -126,6 +129,8 @@ export function mountSolo(app, deps) {
   const owned = deps.solo?.signIn === 'local' ? mountOwner(app, deps, closers) : deps
   const soloDeps = { ...owned, engineJobs: createEngineJobs() }
   mountSoloInfo(soloDeps, features)
+  // Environments and compare (G4): the board's environments as the config has them.
+  features.compare = true
   const events = mountSoloEvents(app, soloDeps)
   if (events) closers.push(() => events.close())
   // In-process capture and recapture_pages on /mcp (G3): sets features.capture.

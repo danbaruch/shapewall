@@ -777,7 +777,8 @@ shapewall serve --engine hosted --open
   comments), `--no-capture` (no captures from the board or from agents).
 - **Capturing.** "Capture now" on the board, and `recapture_pages` for an agent on the engine's `/mcp`, capture the pages
   in the engine itself from the board's `baseUrl` in `shapewall.config.json` (pages, auth, actions and setup as the file
-  says now), straight into the board: no `shapewall push`. The default environment only, for now. Only the owner starts one:
+  says now), straight into the board: no `shapewall push`. Any of the board's environments (`{ "env": "<id>" }`, as
+  `shapewall capture --env`), from that environment's `baseUrl`. Only the owner starts one:
   from the board in a signed-in browser on this machine, or with a project token the owner made that has the `push` scope,
   used on this machine on the engine's name. One capture runs at a time, and a push of the board waits until it ends. The
   capture browser reaches the app's origin (scheme, host and port of `baseUrl`) and nothing else, through a proxy that also
@@ -789,6 +790,15 @@ shapewall serve --engine hosted --open
   counts toward it. Removing the board while it captures stops the capture first. `shapewall hosted backup` waits while a
   capture runs. A team server never captures.
   comments), `--no-capture`.
+- **Environments and compare.** The engine's boards keep the `environments` of `shapewall.config.json`, and the board
+  compares them as a local board does (Compare in the view menu, `?cmp=<a>_<b>`, the diff masks, "Changed pages only"). A
+  `shapewall push` to the engine (`SHAPEWALL_REMOTE` set to its address) sends every environment's latest captures, and the engine keeps them all (a push
+  without them, from an older CLI or another `--remote`, keeps the environments the board has and replaces its captures, so
+  the other environments' captures go until they are pushed or captured again). A comment placed on one side of a compare
+  card is stored on that environment (and a comment made outside compare on the first), only the first environment keeps
+  old captures (versions), and "Send to agent" covers the environment too. `GET /api/v1/boards/:board/comments?environment=<id>`
+  and the hosted MCP `list_comments` (`environment`) list only the comments on that environment. A team server keeps one
+  environment per board (`default`) whatever a push sends, so it never compares.
 - **Checks.** **Run checks** in the board's Checks panel runs `shapewall checks run` in the engine itself, from the live
   `shapewall.config.json` (pages, auth, actions and setup as the file says now, `checks.seo` included), and the reports go
   straight into the board, with no push. The SEO tab shows the search previews of the engine's own runs, as on a local
@@ -1131,7 +1141,8 @@ The server treats every upload as untrusted, even from our CLI:
 `/w/<workspace>/p/<project>/` serves the same board client as `shapewall serve`, on an API with the same shape, for members of the
 workspace. Comments are signed with the account's name and handle (the server sets them; the board shows the handle beside the name).
 A token's replies are signed with the token's name and marked as an agent, with its agent's icon beside them; the API ignores any `author` it sends. Captures from the board and editing journeys are off on a
-hosted board (push again instead). Compare between environments is not hosted yet.
+hosted board (push again instead). A team server keeps one environment per board (`default`), so it has no compare; the solo
+engine keeps a board's environments and compares them ([the solo engine](#the-solo-engine-experimental)).
 
 Live HTML is served from `/uc/...` through HMAC-signed URLs that expire after 2 minutes. The board API gives each new frame load a
 fresh redirect. Guest URLs are bound to their share link and checked again on every load: revoking the link stops new loads immediately
@@ -1227,8 +1238,8 @@ API, `more` counts the rest; a current capture's URL answers `409 capture_moved`
 with `read` can list and fetch every kept version of every page: old captures are as readable as the current ones, so give a
 read token only to someone who may see the board's history. A claim token (a connected agent's) is the exception: it lists and
 fetches only the current captures and the versions the comments dispatched to it were made on,
-`GET /api/v1/boards/:board/comments?status=open|resolved|all&page=&mention=&guests=1`, `GET /api/v1/boards/:board/comments/:id`,
-`GET /api/v1/boards/:board/files/:kind/:file`, `POST /api/v1/boards/:board/comments` (scope `reply`: `{ page, body, viewport?, x?, y?,
+`GET /api/v1/boards/:board/comments?status=open|resolved|all&page=&mention=&environment=&guests=1`, `GET /api/v1/boards/:board/comments/:id`,
+`GET /api/v1/boards/:board/files/:kind/:file` (and `files/envs/:env/:file` for another environment's screenshot or element map), `POST /api/v1/boards/:board/comments` (scope `reply`: `{ page, body, viewport?, x?, y?,
 anchor? }`, the pin in percent of the page, near the top-left corner by default; no images, drawing or author name; audited as
 `token_commented`), `POST .../comments/:id/replies`, `POST .../comments/:id/agent-status`
 (`{ agentStatus, onlyFrom }`), `POST .../comments/:id/resolve` (`{ note, fixRef, agentStatus }`), `POST .../comments/:id/reopen`,
