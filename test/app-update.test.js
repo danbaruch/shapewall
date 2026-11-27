@@ -188,6 +188,41 @@ test('helper errors, invalid protocol, output floods and timeouts are bounded an
   }
 })
 
+// Review rev53 (EPIPE): an apply's answer goes to a private file, never a
+// pipe to this server, so a server that goes away mid-apply cannot kill the
+// helper through its own output. A check stays on a pipe.
+test('an apply helper writes to a file, not a pipe, and its answer is still read and bounded', async () => {
+  const trace = path.join(tempDir('app-update-stdout'), 'kinds')
+  const file = helper(`
+    import fs from 'node:fs'
+    const stat = fs.fstatSync(1)
+    fs.appendFileSync(${JSON.stringify(trace)}, process.argv[2] + ' ' + (stat.isFile() ? 'file' : 'stream') + '\\n')
+    console.log(${JSON.stringify(answer)})
+  `)
+  const instance = await fixture({ appUpdate: { helper: file } })
+  assert.equal((await instance.post('check')).status, 202)
+  assert.equal((await completed(instance)).job.state, 'succeeded')
+  assert.equal((await instance.post('apply')).status, 202)
+  const applied = await completed(instance)
+  assert.equal(applied.job.state, 'succeeded')
+  assert.equal(applied.latest.version, '0.2.0')
+  assert.deepEqual(fs.readFileSync(trace, 'utf8').trim().split('\n'), ['check stream', 'apply file'])
+
+  // An apply that floods its output fails with the same bounded message (checked after it exits; it is never killed).
+  const flood = helper(`
+    if (process.argv[2] === 'check') console.log(${JSON.stringify(answer)})
+    else process.stdout.write("secret".repeat(20000))
+  `)
+  const flooded = await fixture({ appUpdate: { helper: flood } })
+  await flooded.post('check')
+  await completed(flooded)
+  assert.equal((await flooded.post('apply')).status, 202)
+  const failed = await completed(flooded)
+  assert.equal(failed.job.state, 'failed')
+  assert.match(failed.job.error, /too much output/)
+  assert.ok(!JSON.stringify(failed).includes('secret'))
+})
+
 test('a failed newer check invalidates an earlier positive check', async () => {
   const marker = path.join(tempDir('app-update-marker'), 'called')
   const file = helper(`
