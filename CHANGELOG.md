@@ -18,6 +18,19 @@ and the project uses [Semantic Versioning](https://semver.org/).
   or a `push` token the owner made, used on this machine); the capture browser reaches the app's origin only, never the
   engine, its live HTML origin or this machine's LAN and tailnet addresses. `--no-capture` and `--read-only` turn it off.
   Team servers never capture. See docs/hosted.md, "The solo engine (experimental)".
+- Solo engine (experimental): **Run checks** in the board's Checks panel runs the page checks in the engine itself, from the
+  live `shapewall.config.json`, and the SEO tab shows that run's search previews, as on a local board. Owner only, on this
+  machine; the check browser reaches the app's origin only, like the capture browser. One job at a time on the engine
+  (checks and captures wait for each other); `--read-only` and `--no-capture` turn runs off. Team servers never run checks.
+  Reports a push brought read as imported, the engine's own runs as its own. A run that does not stop in time is closed
+  and ends as stopped, and writes nothing after; a capture that does not stop in time keeps its board, and removing that
+  board answers that the engine needs a restart. See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
+- Solo engine (experimental): batch fixes on the board's chat, as on a local board: the owner picks open comments
+  (Select in the comments panel), and the engine fixes them one after another through the link to the connected agent.
+  Each fix is its own turn with its own trust (a comment by someone else never runs solo-tier), its own approval cards and
+  its own branch. The engine's owner only, signed in from the terminal on this machine, checked again before each fix.
+  Off until `agent.batchFixes` turns it on; team servers have no batch routes. See
+  [the solo engine](docs/hosted.md#the-solo-engine-experimental).
 - Solo engine (experimental): the owner makes, edits and deletes the board's own journeys from the board, as on a local
   board, with the same validation against the config file's pages. They are stored in the board's `journeys.json` in the
   engine's folder; journeys from the config stay read only. Team servers keep journeys read only. See
@@ -38,8 +51,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   notifications as `serve` does, so `shapewall events`, bots and notification channels keep working. See
   [the event log](docs/notifications.md#the-event-log).
 - Solo engine (experimental): the board's `/info` says `solo: true` and lists the local-only features the engine serves
-  (`soloFeatures`). The board turns those on for the engine's owner only (journey editing, checks runs, batch fixes, the old
-  captures' DOM fallback, the capture hint in the empty state), each once the engine serves it. Team servers never send
+  (`soloFeatures`). The board turns those on for the engine's owner only (journey editing, checks runs, batch fixes, the capture
+  hint in the empty state), each once the engine serves it. Team servers never send
   `solo` and keep their behaviour.
 - Solo engine (experimental): About and updates can check for and apply an installation update, as on a local board: the
   installer's fixed helper only, for the engine's owner on this machine. See [Installation updates](docs/updates.md#on-the-solo-engine-experimental).

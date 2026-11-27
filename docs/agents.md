@@ -404,8 +404,9 @@ At the end the card shows a summary until you dismiss it. Each page is recapture
 the next comment's agent sees the page as it is now; captures are not saved up for the end.
 
 **Who may run one:** the same people as a single fix (the project owner on the computer running Shapewall, from the board's own
-page). One batch runs per board at a time; starting a second one is refused with a message. The hosted server (`shapewall hosted`)
-does not offer batch fixes. The demo runs batches with its scripted agent.
+page). One batch runs per board at a time; starting a second one is refused with a message. A team server (`shapewall hosted`)
+does not offer batch fixes; the [solo engine](hosted.md#the-solo-engine-experimental) does, for its owner. The demo runs batches
+with its scripted agent.
 
 ## Agent settings on the board
 

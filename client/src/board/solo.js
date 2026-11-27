@@ -15,7 +15,10 @@
 //   journeys    journey editing (the board's journeys.json in the engine folder)
 //   checksRun   starting a checks run from the board
 //   batchFixes  batch fixes with the agent
-//   domFallback reading old captures' DOM (needs a separate usercontent origin)
+//   domFallback reading old captures' DOM in a frame the board can read. The
+//               engine never lists it: its live HTML comes from a separate
+//               usercontent origin (uc.<name>), sandboxed, so the board pins
+//               from the capture's element map instead (G17).
 //   appUpdates  About and updates can check for and apply an update
 //   compare     comparing the board's environments (the engine keeps them all)
 // (In-process capture, G3, turns on with the owner's /info allowCapture: true;

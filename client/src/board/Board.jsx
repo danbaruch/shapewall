@@ -1311,16 +1311,19 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       }
     : null
   // Batch fixes: offered only when Fix with agent is, and turned on in Agents.
+  // On the solo engine (G14a) Fix goes to the connected agent over its link:
+  // offered to the owner while that agent takes fixes from them.
   const fixAvailable = Boolean(
     chatAvailable &&
     !data?.migratedTo?.readOnly &&
-    info?.agent?.fixWithAgent &&
+    (info?.agent?.fixWithAgent || (info?.hosted && info?.agent?.edits?.fix?.ok === true)) &&
     info?.agent?.configured &&
     (DEMO || hostedOrSolo(info, 'batchFixes')),
   )
   const batchFixes = useBatchFixes({
     boardId,
     enabled: fixAvailable,
+    hosted: Boolean(info?.hosted),
     // Each fix moves its comment and recaptures its page: both follow.
     onProgress: () => {
       commentsQuery.refetch()

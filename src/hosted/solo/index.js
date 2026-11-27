@@ -33,12 +33,19 @@
 // `soloFeatures` on the board's /info, G16), events.js (events.jsonl and
 // notifications, G8), update.js (self-update, G10), capture.js (in-process
 // capture from the board and recapture_pages on /mcp, G3), journeys.js
-// (journey editing, G5). Compare (G4) needs no surface of its own: the board
-// routes serve it for every board with more than one environment
-// (src/hosted/board-compare.js), and only the engine keeps more than one, so
-// it only sets its flag. A surface the board turns on (client/src/board/solo.js)
-// sets its flag in `features`.
+// (journey editing, G5), checks.js (checks run control and the SEO tab's
+// previews, G6), batch.js (batch fixes on the chat, G14a). Compare (G4)
+// needs no surface of its own: the board routes serve it for every board
+// with more than one environment (src/hosted/board-compare.js), and only the
+// engine keeps more than one, so it only sets its flag. A surface the board
+// turns on (client/src/board/solo.js) sets its flag in `features`.
+//
+// deps.engineJobs: the jobs that run a browser on this machine (capture,
+// checks) register here, and each refuses to start while another runs: one
+// job at a time on the engine, whatever board.
+import { mountSoloBatch } from './batch.js'
 import { mountSoloCapture } from './capture.js'
+import { mountSoloChecks } from './checks.js'
 import { createSoloBoards } from './config.js'
 import { mountSoloEvents } from './events.js'
 import { mountSoloInfo } from './info.js'
@@ -99,10 +106,28 @@ function mountOwner(app, deps, closers) {
   return { ...deps, solo: { ...solo, workspaceId: owner.workspaceId, projectId: owner.projectId, boardUrl } }
 }
 
+// name -> () => a message while that job runs, else null.
+function createEngineJobs() {
+  const jobs = new Map()
+  return {
+    set: (name, busy) => jobs.set(name, busy),
+    // What runs on the engine besides `except`, as a message; null when nothing does.
+    busy(except = null) {
+      for (const [name, busy] of jobs) {
+        if (name === except) continue
+        const message = busy()
+        if (message) return message
+      }
+      return null
+    },
+  }
+}
+
 export function mountSolo(app, deps) {
   const closers = []
   const features = {}
-  const soloDeps = deps.solo?.signIn === 'local' ? mountOwner(app, deps, closers) : deps
+  const owned = deps.solo?.signIn === 'local' ? mountOwner(app, deps, closers) : deps
+  const soloDeps = { ...owned, engineJobs: createEngineJobs() }
   mountSoloInfo(soloDeps, features)
   // Environments and compare (G4): the board's environments as the config has them.
   features.compare = true
@@ -111,8 +136,14 @@ export function mountSolo(app, deps) {
   // In-process capture and recapture_pages on /mcp (G3): sets features.capture.
   const capture = mountSoloCapture(app, soloDeps, features)
   if (capture) closers.push(() => capture.close())
+  // Checks run control and the SEO tab's previews (G6): sets features.checksRun.
+  const checks = mountSoloChecks(app, soloDeps, features)
+  if (checks) closers.push(() => checks.close())
   // Journey editing on the board (G5): sets features.journeys.
   mountSoloJourneys(app, soloDeps, features)
+  // Batch fixes on the chat (G14a): sets features.batchFixes.
+  const batch = mountSoloBatch(soloDeps, features)
+  if (batch) closers.push(() => batch.close())
   const update = mountSoloUpdate(app, soloDeps)
   if (update) {
     features.appUpdates = true

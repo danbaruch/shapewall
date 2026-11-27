@@ -48,7 +48,9 @@ export const reportSchema = z
         stateFingerprint: hash,
         seo: z.boolean(),
         production: z.enum(['production', 'development', 'unknown']),
-        location: z.literal('local'),
+        // 'engine': run by the solo engine on this machine (src/hosted/solo/checks.js);
+        // a pushed bundle never carries one (transport.js).
+        location: z.enum(['local', 'engine']),
         sampleCount: z.number().int().min(1).max(10),
         authStateHash: hash.optional(),
         sourceEnvironment: id.optional(),

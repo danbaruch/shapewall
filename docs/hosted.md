@@ -752,6 +752,15 @@ shapewall serve --engine hosted --open
   is a pipe the engine holds, and it watches its parent). It gets only `agent.token`, never the command line's or watch's;
   what it runs is marked so that a `shapewall` command there gets no engine token, and no agent reads `.shapewall/`.
   `--no-chat` (or `--read-only`) runs the engine without it.
+- **Batch fixes.** With `agent.batchFixes` on (the config or the saved agent settings, as on a local board:
+  [Fix several comments at once](agents.md#fix-several-comments-at-once)), the owner picks open comments in the comments panel's
+  Select mode and the engine fixes them one after another, each an ordinary Fix with through the link to the connected agent
+  (the board's own agent, or one connected with `agent connect`). Each fix is its own turn with its own trust: a comment you
+  wrote runs as yours, and one someone else wrote (an imported comment, one made with a token) at the tier its author gets,
+  whoever started the batch. Each edit is a card you allow in the batch strip or the comment's thread (the card's hash, once,
+  as any card), and each fix ends on a branch of its own. Only the engine's owner, signed in from the terminal and on this
+  machine, may start, cancel or dismiss a batch; the batch checks that sign-in again before each fix and stops when it has
+  ended. A share link guest's comment is never in a batch. Team servers have no batch routes.
 - **Data** lives in `.shapewall/.engine/` (a name no board id can take): the database, the captures, the host name's random
   part, the sign-in keys. The folder is made private (0700) with a `.gitignore` of `*`. The engine refuses to start if git
   tracks anything in it, whichever repository could: the project's, a repository or submodule that `.shapewall` is itself,
@@ -790,6 +799,15 @@ shapewall serve --engine hosted --open
   old captures (versions), and "Send to agent" covers the environment too. `GET /api/v1/boards/:board/comments?environment=<id>`
   and the hosted MCP `list_comments` (`environment`) list only the comments on that environment. A team server keeps one
   environment per board (`default`) whatever a push sends, so it never compares.
+- **Checks.** **Run checks** in the board's Checks panel runs `shapewall checks run` in the engine itself, from the live
+  `shapewall.config.json` (pages, auth, actions and setup as the file says now, `checks.seo` included), and the reports go
+  straight into the board, with no push. The SEO tab shows the search previews of the engine's own runs, as on a local
+  board. The default environment only, for now. Only you, signed in on this machine, start or stop a run (from the board's
+  own page); with `--read-only` or `--no-capture` the panel explains that runs are off. The check browser reaches the app's
+  origin only, exactly as the capture browser does (never the engine, its live HTML name, a debugging port, or this
+  machine's LAN or tailnet addresses; other origins the pages load from are refused). One job runs at a time on the
+  engine: checks wait for a capture and a capture waits for checks, a push of the board waits until the run ends, and
+  removing the board stops its run first. A team server never runs checks: it shows the reports a push brought.
 - **Journeys.** You make, edit and delete the board's own journeys from the board, as on a local board, with the same checks
   against the config file's pages: they go to the board's `journeys.json` in the engine's folder. Journeys from
   `shapewall.config.json` stay read only (change them in the file). Only you, signed in on this machine, edit them; with
