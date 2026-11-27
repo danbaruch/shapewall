@@ -261,7 +261,11 @@ export function batchHeadline(batch) {
   const parts = [`${fixed} fixed`, failed ? `${failed} failed` : null, skipped ? `${skipped} skipped` : null].filter(Boolean).join(', ')
   if (batch.state === 'cancelled') return `Cancelled: ${parts}`
   if (batch.state === 'stopped')
-    return batch.stopReason === 'failures' ? `Stopped after 2 failures in a row: ${parts}` : `Stopped: ${parts}`
+    return batch.stopReason === 'failures'
+      ? `Stopped after 2 failures in a row: ${parts}`
+      : batch.stopReason === 'agent_gone'
+        ? `Stopped, the agent disconnected: ${parts}`
+        : `Stopped: ${parts}`
   return `Done: ${parts}`
 }
 

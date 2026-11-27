@@ -159,6 +159,23 @@ test('queue: two failures in a row stop the batch; a fix in between resets the c
   assert.equal(throwing.state('b').items[2].state, 'skipped')
 })
 
+test('queue: a result with a stop reason ends the batch at once with that reason', async () => {
+  const runner = manualRunner()
+  const queue = createBatchQueue({ runItem: runner.runItem })
+  queue.start({ boardId: 'b', commentIds: [1, 2, 3], max: 5 })
+  await until(() => runner.pending[1])
+  runner.pending[1]({ fixed: false, stop: 'agent_gone', message: 'The agent disconnected.' })
+  await queue.settled('b')
+  const end = queue.state('b')
+  assert.equal(end.state, 'stopped')
+  assert.equal(end.stopReason, 'agent_gone')
+  assert.deepEqual(
+    end.items.map((item) => item.state),
+    ['failed', 'skipped', 'skipped'],
+  )
+  assert.deepEqual(runner.order, [1])
+})
+
 test('queue: an unanswered approval makes the batch wait, shown with its card', async () => {
   const runner = manualRunner()
   const queue = createBatchQueue({ runItem: runner.runItem })

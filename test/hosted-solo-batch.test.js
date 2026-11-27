@@ -13,6 +13,7 @@ import path from 'node:path'
 import test, { after } from 'node:test'
 import { tierOf } from '../src/agent/capabilities.js'
 import { loadConfig } from '../src/config.js'
+import { batchRequestBase } from '../src/hosted/chat-routes.js'
 import { quietSqliteWarning } from '../src/hosted/db.js'
 import { soloOrigin } from '../src/hosted/solo/signin.js'
 import { fixScript, gitRepo, startLink, until } from './hosted-chat-helpers.js'
@@ -294,4 +295,40 @@ test('solo: a batch stops when the owner session is gone before the next fix', a
     .all(solo.owner.workspaceId, solo.owner.projectId)
   assert.notEqual(rows.find((row) => row.number === second.id).agent_status, 'queued', 'the second fix never started')
   assert.ok(!['queued', 'working'].includes(rows.find((row) => row.number === second.id).agent_status))
+})
+
+test('solo: the batch keeps only the user-agent of the request that started it, never the Cookie', () => {
+  const base = batchRequestBase({
+    headers: { cookie: 'sw_session=secret-session-value', 'user-agent': 'Test browser', authorization: 'Bearer x', 'x-other': 'y' },
+    socket: { remoteAddress: '127.0.0.1' },
+    ip: '127.0.0.1',
+  })
+  assert.deepEqual(base.headers, { 'user-agent': 'Test browser' })
+  assert.ok(!JSON.stringify(base).includes('secret-session-value'))
+  assert.equal(base.ip, '127.0.0.1')
+  assert.equal(base.socket.remoteAddress, '127.0.0.1')
+  assert.deepEqual(batchRequestBase({ headers: {} }).headers, {})
+})
+
+test('solo: when the agent disconnects mid-batch, the batch stops with the reason agent_gone', async () => {
+  const solo = await startSolo('solo-batch-agent-gone')
+  const { link } = await connect(solo)
+  const first = await comment(solo, `First ${fixScript([['edit', 'index.html', 'Hello', 'One']])}`)
+  const second = await comment(solo, `Second ${fixScript([['edit', 'styles.css', 'blue', 'green']])}`)
+  const third = await comment(solo, `Third ${fixScript([['edit', 'styles.css', 'h1', 'h2']])}`)
+  assert.equal((await solo.browser.post(batchUrl(solo), { commentIds: [first.id, second.id, third.id] })).status, 200)
+  await until(async () => (await batchNow(solo))?.state === 'waiting', 'the first card')
+  // The agent goes away while the first fix waits on its card.
+  await link.stop()
+  const chatBatch = solo.hosted.app.locals.soloBoardApi.chatBatch
+  await chatBatch.settled(solo.owner.workspaceId, solo.owner.projectId, 'sample')
+  const ended = (await batchNow(solo)) || chatBatch.state(solo.owner.workspaceId, solo.owner.projectId, 'sample')
+  assert.equal(ended.state, 'stopped')
+  assert.equal(ended.stopReason, 'agent_gone')
+  assert.equal(ended.items[0].state, 'failed')
+  assert.match(ended.items[0].message, /agent disconnected/)
+  assert.deepEqual(
+    ended.items.slice(1).map((item) => item.state),
+    ['skipped', 'skipped'],
+  )
 })

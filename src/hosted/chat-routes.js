@@ -88,6 +88,21 @@ const cut = (value, max) => {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
+// What a batch keeps of the request that started it, for the audit log of
+// each fix (guards.js auditOf, clientIp): the peer address and the
+// user-agent. Never the Cookie or any other header: the session is read
+// again from the database before each fix.
+export function batchRequestBase(req) {
+  const agent = req.headers?.['user-agent']
+  return {
+    headers: agent ? { 'user-agent': String(agent) } : {},
+    socket: { remoteAddress: req.socket?.remoteAddress },
+    ip: req.ip,
+    token: null,
+    guest: null,
+  }
+}
+
 export function mountChatRoutes(
   boardApi,
   {
@@ -1261,6 +1276,16 @@ export function mountChatRoutes(
   const BATCH_BUSY = new Set(['agent_running', 'agent_busy', 'rate_limited'])
   const BATCH_SKIP = new Set(['comment_busy', 'comment_changed', 'unknown_thread', 'unknown_comment'])
   const OWNER_ONLY = 'Batch fixes are for the owner of this engine, on this machine.'
+  const AGENT_GONE = 'The agent disconnected, so the batch stopped.'
+  // Is an agent that can fix still connected to the board this fix ran on?
+  const agentStillThere = ({ req, at }) => {
+    try {
+      const agent = defaultOf(chatAgents(req, at.ctx.board.id))
+      return Boolean(agent && agent.edits.mode !== 'none' && agent.edits.fix.ok)
+    } catch {
+      return false
+    }
+  }
   const batchOwnerOnly = (req) => {
     if (!batchGate) throw new HttpError(404, 'not_found', 'Not on a hosted board.')
     if (!batchGate.owner(req, { request: true })) throw new HttpError(403, 'batch_owner', OWNER_ONLY)
@@ -1363,6 +1388,8 @@ export function mountChatRoutes(
               await new Promise((resolve) => setTimeout(resolve, 2000).unref?.())
               continue
             }
+            // The agent went away: the rest of the batch cannot run either.
+            if (result.error.code === 'no_agent') return { fixed: false, stop: 'agent_gone', message: AGENT_GONE }
             return { fixed: false, skipped: BATCH_SKIP.has(result.error.code), message: result.error.message }
           }
           await untilEnd(result.started)
@@ -1373,6 +1400,7 @@ export function mountChatRoutes(
             return { skipped: true, message: 'The comment was deleted.' }
           }
           const fixed = ['done', 'branch-ready'].includes(comment.agent_status)
+          if (!fixed && !cancelled && !agentStillThere(result.started)) return { fixed: false, stop: 'agent_gone', message: AGENT_GONE }
           return {
             fixed,
             message: fixed
@@ -1436,8 +1464,7 @@ export function mountChatRoutes(
         projects: req.projects,
         session,
         auth: { session: req.auth.session, user: req.user },
-        // What the audit log reads of a request (guards.js auditOf, clientIp).
-        base: { headers: { ...req.headers }, socket: { remoteAddress: req.socket?.remoteAddress }, ip: req.ip, token: null, guest: null },
+        base: batchRequestBase(req),
       }
       let batch
       try {
