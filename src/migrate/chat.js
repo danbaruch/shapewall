@@ -22,7 +22,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { chatDir, THREAD_RE, CHAT_RE, FILE_RE } from '../../agent/threads.js'
+import { chatDir, THREAD_RE, CHAT_RE, FILE_RE } from '../agent/threads.js'
 
 const VISITOR_PREFIX = 'From a visitor: '
 const TITLE_MAX = 120
@@ -41,6 +41,12 @@ function readThreadFile(file) {
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'))
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('not a thread file')
   return raw
+}
+
+// The title a thread gets: a visitor's chat is marked as theirs.
+function visitorTitle(kind, title) {
+  if (kind === 'visitor') return `${VISITOR_PREFIX}${title || 'chat'}`
+  return title || ''
 }
 
 export function planChat(config, board) {
@@ -74,7 +80,7 @@ export function planChat(config, board) {
     const where = `chat thread ${id}`
     const messages = Array.isArray(raw.messages) ? raw.messages : []
     if (!messages.length) {
-      notes.push(`${where} is empty and is not carried (an empty thread is not listed locally either)`)
+      drop(where, 'an empty thread (not listed locally either)')
       continue
     }
     const kind = CHAT_RE.test(id) ? ownerKind(raw.owner) : null
@@ -127,13 +133,15 @@ export function planChat(config, board) {
     }
     if (!planned.length) continue
     const title = typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : null
+    const fullTitle = visitorTitle(kind, title)
+    if (fullTitle.length > TITLE_MAX) drop(`${where}, title`, `longer than ${TITLE_MAX} characters; cut to ${TITLE_MAX}`)
     const visitor = kind === 'visitor'
     if (visitor) counts.visitorThreads += 1
     threads.push({
       id,
       ownerPrivate: Boolean(kind),
       archived: visitor || raw.archived === true,
-      title: visitor ? `${VISITOR_PREFIX}${title || 'chat'}`.slice(0, TITLE_MAX) : title ? title.slice(0, TITLE_MAX) : null,
+      title: fullTitle ? fullTitle.slice(0, TITLE_MAX) : null,
       titleSource: visitor ? 'user' : raw.titleSource === 'user' ? 'user' : title ? 'auto' : null,
       createdAt: iso(raw.createdAt, planned[0].createdAt),
       updatedAt: planned[planned.length - 1].createdAt,
@@ -143,7 +151,9 @@ export function planChat(config, board) {
     counts.messages += planned.length
   }
   const filesDir = path.join(dir, 'files')
-  const attachmentFiles = fs.existsSync(filesDir) ? fs.readdirSync(filesDir).filter((name) => FILE_RE.test(name)) : []
+  const inFiles = fs.existsSync(filesDir) ? fs.readdirSync(filesDir) : []
+  const attachmentFiles = inFiles.filter((name) => FILE_RE.test(name))
+  for (const name of inFiles) if (!FILE_RE.test(name)) drop(`chat/files/${name}`, 'not a chat attachment name; it stays in the backup')
   for (const name of attachmentFiles)
     if (!attached.has(name))
       notes.push(`chat/files/${name} belongs to no message (left over from a deleted thread); it moves with the files`)

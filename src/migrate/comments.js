@@ -6,24 +6,25 @@
 // and drawings all come along. Images move from comment-files/ into the
 // engine's comment_files table (their bytes, under the same file name).
 //
-// Authors: a local board's comments carry free names. The owner's own become
-// the owner's account (author_user_id): a comment stamped byOwner, or, for
-// comments from before the stamp, one signed with the owner's name (counted
-// in the report: anyone who could comment could type that name). Every other
-// name stays a plain label with no account, kind 'local' (or 'agent' and
-// 'guest' for an agent's and a share link guest's comment), so it can never
-// act as the owner. Reactions keep their names as labels; the owner's own
-// become the owner's.
+// Authors: a local board's comments carry free names. Only a comment the
+// board stamped byOwner: true becomes the owner's account (author_user_id),
+// the same rule the local agent uses (watch-capabilities.js ownersComment).
+// A comment signed with the owner's name but not stamped (made before the
+// stamp, or typed by anyone who could comment) is written the way an import
+// is: no account, imported by the owner, so it reads as outside text that
+// the owner can still vouch for. Replies never get an account (the local
+// board never stamped them). Every other name stays a plain label, kind
+// 'local' (or 'agent' and 'guest'). Reactions keep their names as labels.
 //
 // Pure: reads files, returns rows and the list of what does not come along.
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { boardDir, commentOnOtherEnvironment, commentsFile, VERSION_RE } from '../../store.js'
-import { CommentError, STORED_AGENT_STATUSES, cleanFixRef, validateAnchor } from '../../comment-fields.js'
-import { validateDrawing } from '../../comment-drawing.js'
-import { REACTIONS } from '../../reactions.js'
-import { sniffImage } from '../../image-sniff.js'
+import { boardDir, commentOnOtherEnvironment, commentsFile, VERSION_RE } from '../store.js'
+import { CommentError, STORED_AGENT_STATUSES, cleanFixRef, validateAnchor } from '../comment-fields.js'
+import { validateDrawing } from '../comment-drawing.js'
+import { REACTIONS } from '../reactions.js'
+import { sniffImage } from '../image-sniff.js'
 
 const ENV_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 
@@ -139,17 +140,24 @@ export function planComments(config, board, { owner }) {
   const used = new Set()
   const pages = new Set(board.pages.map((page) => page.id))
   const drop = (item, reason) => drops.push({ item, reason })
-  const isOwner = (item, { stamped }) => {
-    if (item.authorAgent === true || item.authorGuest === true || item.agent === true || item.guest === true) return false
-    if (stamped && typeof item.byOwner === 'boolean') {
-      if (item.byOwner) counts.ownerStamped += 1
-      return item.byOwner
+  // 'owner' (stamped by the board), 'name' (the owner's name, not stamped:
+  // written as an import) or null.
+  const ownerMark = (item) => {
+    if (item.authorAgent === true || item.authorGuest === true || item.agent === true || item.guest === true) return null
+    if (item.byOwner === true) {
+      counts.ownerStamped += 1
+      return 'owner'
     }
-    if (names.has(clean(item.author))) {
+    if (item.byOwner !== false && names.has(clean(item.author))) {
       counts.ownerByName += 1
-      return true
+      return 'name'
     }
-    return false
+    return null
+  }
+  const cut = (value, max, what) => {
+    const text = String(value)
+    if (text.length > max) drop(what, `longer than ${max} characters; cut to ${max}`)
+    return text.slice(0, max)
   }
 
   // The bytes of one image record, checked against what it says it is.
@@ -207,10 +215,9 @@ export function planComments(config, board, { owner }) {
         drop(`${where}, reaction`, 'not a reaction the board offers')
         continue
       }
-      const by = entry.by
-        .filter((who) => who && typeof who.name === 'string' && who.name.trim())
-        .slice(0, 200)
-        .map((who) => (names.has(clean(who.name)) ? { name: who.name.trim(), owner: true } : { name: who.name.trim() }))
+      const named = entry.by.filter((who) => who && typeof who.name === 'string' && who.name.trim())
+      if (named.length > 200) drop(`${where}, ${entry.emoji} reaction`, `the ${named.length - 200} name(s) past 200`)
+      const by = named.slice(0, 200).map((who) => ({ name: who.name.trim() }))
       if (by.length) {
         counts.reactions += by.length
         out.push({ emoji: entry.emoji, by })
@@ -277,13 +284,12 @@ export function planComments(config, board, { owner }) {
           files.push(found.file)
         }
       }
-      const owned = isOwner(reply, { stamped: false })
-      if (!owned) counts.labels += 1
+      counts.labels += 1
       const drawing = drawingOf(reply.drawing, at)
       const reactions = reactionsOf(reply.reactions, at)
       replies.push({
         id: replyId,
-        author: String(reply.author || 'anonymous').slice(0, 60),
+        author: cut(reply.author || 'anonymous', 60, `${at}, author name`),
         ...(reply.agent === true ? { agent: true } : {}),
         ...(reply.agent === true && reply.unvouched === true ? { unvouched: true } : {}),
         ...(reply.guest === true ? { guest: true } : {}),
@@ -293,13 +299,12 @@ export function planComments(config, board, { owner }) {
         ...(replyImages.length ? { images: replyImages } : {}),
         ...(drawing ? { drawing } : {}),
         ...(reactions.length ? { reactions } : {}),
-        ...(owned ? { by: 'owner' } : {}),
       })
     }
     counts.replies += replies.length
     counts.images += files.length
-    const owned = isOwner(comment, { stamped: true })
-    if (!owned) counts.labels += 1
+    const mark = ownerMark(comment)
+    if (!mark) counts.labels += 1
     const status = comment.status === 'resolved' ? 'resolved' : 'open'
     if (comment.status !== 'open' && comment.status !== 'resolved')
       drop(`${where}, status "${comment.status}"`, 'read as open, as the local board does')
@@ -319,8 +324,8 @@ export function planComments(config, board, { owner }) {
       x: comment.x,
       y: comment.y,
       body: String(comment.body || ''),
-      author: String(comment.author || 'anonymous').slice(0, 60),
-      by: owned ? 'owner' : 'label',
+      author: cut(comment.author || 'anonymous', 60, `${where}, author name`),
+      by: mark === 'owner' ? 'owner' : mark === 'name' ? 'name' : 'label',
       authorKind: comment.authorAgent === true ? 'agent' : comment.authorGuest === true ? 'guest' : 'local',
       anchor,
       captureVersion: VERSION_RE.test(String(comment.captureVersion || '')) ? comment.captureVersion : null,
@@ -353,7 +358,10 @@ export function planComments(config, board, { owner }) {
   if (fs.existsSync(filesDir)) {
     for (const name of fs.readdirSync(filesDir)) {
       if (named.has(name)) continue
-      if (/^markup-/.test(name)) continue
+      if (/^markup-/.test(name)) {
+        drop(`comment-files/${name}`, 'a rendered drawing; the engine draws it again from the comment')
+        continue
+      }
       drop(`comment-files/${name}`, 'no comment names it (left over from a deleted comment); it stays in the backup')
     }
   }

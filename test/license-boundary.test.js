@@ -21,8 +21,8 @@ test('core, browser and build sources do not import the hosted implementation', 
       const target = path.resolve(root, path.dirname(file), specifier)
       if (!target.startsWith(hosted)) continue
       if (file === 'src/cli.js' && kind.startsWith('import(') && specifier === './hosted/ops-cli.js') continue
-      // `shapewall migrate` writes the solo engine's database, so it lives with the engine (src/hosted/migrate).
-      if (file === 'src/cli.js' && kind.startsWith('import(') && specifier === './hosted/migrate/index.js') continue
+      // `shapewall migrate` (core) loads only the engine's database writer, lazily, to plan or run; --rollback never does.
+      if (file === 'src/migrate/index.js' && kind.startsWith('import(') && specifier === '../hosted/migrate/engine.js') continue
       violations.push(`${file} imports ${specifier}`)
     }
   }

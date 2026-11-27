@@ -12,7 +12,7 @@
 // sees that nothing about their agent is lost, and checks that it holds no
 // secret.
 
-import { userAgentEntry } from '../../agent/user-settings.js'
+import { userAgentEntry } from '../agent/user-settings.js'
 
 // Keys that would mean a secret was written into the file by hand. The
 // settings module refuses them on read too; this is the migration's own

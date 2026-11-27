@@ -13,9 +13,8 @@ import { main } from '../src/cli.js'
 import { openDatabase, quietSqliteWarning } from '../src/hosted/db.js'
 import { rowToComment } from '../src/hosted/comments.js'
 import { processStartTime } from '../src/lock.js'
-import { migrateCommand, MigrateError } from '../src/hosted/migrate/index.js'
-import { engineDbFile } from '../src/hosted/migrate/engine.js'
-import { MARKER, treeDigest } from '../src/hosted/migrate/files.js'
+import { migrateCommand, MigrateError } from '../src/migrate/index.js'
+import { MARKER, engineDbFile, treeDigest } from '../src/migrate/files.js'
 
 quietSqliteWarning()
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrate-fixtures')
@@ -70,6 +69,15 @@ async function withEnvironmentColumn(out) {
       updated_at TEXT NOT NULL
     )`)
   db.close()
+}
+
+// Marks comments as the board's owner wrote them (byOwner, 1.3.0 and later).
+function stampOwner(p, ids) {
+  const file = path.join(p.out, 'site', 'comments.json')
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'))
+  const list = Array.isArray(data) ? data : data.comments
+  for (const comment of list) if (ids.includes(comment.id)) comment.byOwner = true
+  fs.writeFileSync(file, JSON.stringify(data, null, 2))
 }
 
 async function run(p, flags = {}, options = {}) {
@@ -169,11 +177,15 @@ for (const version of VERSIONS) {
 test('v1.2.0: owners, labels, reactions, images, environments and chat map as the plan says', async () => {
   const p = project('v1.2.0')
   await withEnvironmentColumn(p.out)
+  // Comment 1 as a board that stamps the owner writes it; 3 and 4 carry the
+  // owner's name only (written before the stamp, or typed by anyone).
+  stampOwner(p, [1])
   assert.equal((await run(p)).code, 0)
   const rows = await engineRows(p.out)
   const by = Object.fromEntries(rows.comments.map(({ row, comment }) => [row.number, { row, comment }]))
-  // The owner's comments get the account; a visitor's name stays a label.
+  // Only the stamped comment gets the account; a visitor's name stays a label.
   assert.equal(by[1].row.author_user_id, OWNER_ID)
+  assert.equal(by[1].row.imported_by, null)
   assert.equal(by[2].row.author_user_id, null)
   assert.equal(by[2].comment.author, 'Visitor A')
   assert.equal(by[2].row.import_author_kind, 'local')
@@ -184,14 +196,28 @@ test('v1.2.0: owners, labels, reactions, images, environments and chat map as th
   assert.equal(by[2].comment.fixRef, 'abc1234')
   // Agent status stays live.
   assert.equal(by[1].comment.agentStatus, 'queued')
-  // Reactions keep names; the owner's own become the owner's.
+  // The owner's name without the stamp is outside text the owner brought in.
+  assert.equal(by[3].row.author_user_id, null)
+  assert.equal(by[3].row.imported_by, OWNER_ID)
+  assert.equal(by[3].row.imported, 1)
+  assert.equal(by[3].comment.imported, true)
+  // A reply signed "Owner" never gets the account (the local board never stamped replies).
+  const replies = JSON.parse(by[1].row.replies)
+  assert.deepEqual(
+    replies.map((reply) => [reply.author, reply.user ?? null]),
+    [
+      ['Visitor A', null],
+      ['Owner', null],
+    ],
+  )
+  // Reactions keep their names, with no account behind them.
   const thumbs = by[1].comment.reactions.find((item) => item.emoji === '👍')
   assert.equal(thumbs.count, 2)
   assert.deepEqual(
     thumbs.by.map((who) => who.name),
     ['Visitor A', 'Owner'],
   )
-  assert.equal(JSON.parse(by[1].row.reactions)[0].by[1].user, OWNER_ID)
+  assert.ok(JSON.parse(by[1].row.reactions)[0].by.every((who) => !who.user))
   // Images become comment_files rows with their bytes; the drawing stays on the row.
   assert.equal(rows.files.length, 2)
   const source = path.join(FIXTURES, 'v1.2.0', '.shapewall', 'site', 'comment-files')
@@ -231,6 +257,7 @@ test('v1.2.0: owners, labels, reactions, images, environments and chat map as th
 test('without a local account the owner is the name this machine signs with', async () => {
   const p = project('v1.2.0', { accounts: false })
   await withEnvironmentColumn(p.out)
+  stampOwner(p, [1])
   const dry = await run(p, { 'dry-run': true, json: true })
   assert.equal(dry.json.owner.from, 'machine')
   assert.equal(dry.json.owner.name, 'Owner')
@@ -416,4 +443,208 @@ test('--board migrates one board; the rest stay; rollback undoes runs newest fir
   assert.equal(rows.projects.length, 1, 'one project for both boards')
   assert.equal((await run(p, { rollback: true })).code, 0)
   assert.deepEqual(digest(p.out), before)
+})
+
+// Review rev49: each finding's regression test.
+
+test('F1: rollback uses only backups a run recorded, and never a path outside the project', async () => {
+  const p = project('v1.2.0')
+  const victim = path.join(p.dir, 'victim')
+  fs.mkdirSync(victim)
+  fs.writeFileSync(path.join(victim, 'id_ed25519'), 'PRIVATE KEY\n')
+  const planted = path.join(p.out, 'victim')
+  fs.mkdirSync(planted)
+  fs.writeFileSync(path.join(planted, 'authorized_keys'), 'ssh-ed25519 PLANTED\n')
+  const backup = path.join(p.out, 'backup-1x-20000101T000000Z')
+  fs.mkdirSync(backup)
+  fs.writeFileSync(
+    path.join(backup, 'backup.json'),
+    JSON.stringify({
+      version: 1,
+      stamp: 'x',
+      boards: ['../victim'],
+      engine: false,
+      marker: false,
+      digest: { '../victim': treeDigest(planted) },
+    }),
+  )
+  // A well-formed record that no run of this project wrote is not used either.
+  const other = path.join(p.out, 'backup-1x-20000102T000000Z')
+  fs.mkdirSync(path.join(other, 'boards', 'site'), { recursive: true })
+  fs.writeFileSync(
+    path.join(other, 'backup.json'),
+    JSON.stringify({ version: 1, stamp: 'y', boards: ['site'], engine: true, marker: false, digest: { site: {} } }),
+  )
+  const before = treeDigest(p.dir, { skip: ['.home'] })
+  const { readBackup } = await import('../src/migrate/files.js')
+  assert.equal(readBackup(backup), null, 'a record naming a path is no backup')
+  const back = await run(p, { rollback: true })
+  assert.equal(back.code, 0)
+  assert.match(back.text, /Nothing to roll back/)
+  assert.match(back.text, /Not used: .*backup-1x-20000102T000000Z/)
+  assert.deepEqual(fs.readdirSync(victim), ['id_ed25519'], 'the folder outside .shapewall is untouched')
+  assert.deepEqual(treeDigest(p.dir, { skip: ['.home'] }), before, 'nothing moved anywhere')
+})
+
+test('F3: a board folder, a moved entry or the engine folder that is a symbolic link is refused, nothing changes', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  const elsewhere = path.join(p.dir, 'elsewhere-site')
+  fs.renameSync(path.join(p.out, 'site'), elsewhere)
+  fs.symlinkSync(elsewhere, path.join(p.out, 'site'))
+  const before = treeDigest(p.dir, { skip: ['.home'] })
+  const dry = await run(p, { 'dry-run': true })
+  assert.equal(dry.code, 1)
+  assert.match(dry.text, /site is a symbolic link/)
+  assert.equal((await run(p)).code, 1)
+  assert.deepEqual(treeDigest(p.dir, { skip: ['.home'] }), before)
+  // A real folder with a linked chat folder inside.
+  fs.rmSync(path.join(p.out, 'site'))
+  fs.renameSync(elsewhere, path.join(p.out, 'site'))
+  fs.renameSync(path.join(p.out, 'site', 'chat'), path.join(p.dir, 'elsewhere-chat'))
+  fs.symlinkSync(path.join(p.dir, 'elsewhere-chat'), path.join(p.out, 'site', 'chat'))
+  const linked = await run(p)
+  assert.equal(linked.code, 1)
+  assert.match(linked.text, /chat is a symbolic link/)
+})
+
+test('F4: a comment written during the run waits for the migration and then fails loudly; nothing is lost', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  const { createComment } = await import('../src/store.js')
+  const board = p.config.boards[0]
+  const file = path.join(p.out, 'site', 'comments.json')
+  const first = JSON.parse(fs.readFileSync(file, 'utf8')).comments[0]
+  let refused = null
+  const code = await migrateCommand(p.config, {}, () => {}, {
+    env: p.env,
+    version: 'test',
+    fault: async (step) => {
+      if (step !== 'rows') return
+      // The same call an MCP add_comment or `comments add` makes.
+      refused = createComment(
+        p.config,
+        board,
+        { pageId: first.pageId, viewport: first.viewport, x: 1, y: 1, body: 'WRITTEN-MID-RUN', author: 'Agent' },
+        {},
+      ).then(
+        () => 'saved',
+        (error) => error.message,
+      )
+    },
+  })
+  assert.equal(code, 0)
+  assert.notEqual(await refused, 'saved', 'the writer was held off and failed with an error')
+  assert.equal(fs.existsSync(file), false, 'no comments.json came back on the local board')
+  const rows = await engineRows(p.out)
+  assert.ok(!rows.comments.some(({ row }) => row.body === 'WRITTEN-MID-RUN'))
+})
+
+test('F4: a write the locks cannot hold off (a raw file replace) stops the run and is kept', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  const file = path.join(p.out, 'site', 'comments.json')
+  const before = digest(p.out)
+  const fault = (step) => {
+    if (step !== 'rows') return
+    const store = JSON.parse(fs.readFileSync(file, 'utf8'))
+    store.comments.push({ ...store.comments[0], id: store.nextId, body: 'WRITTEN-MID-RUN', replies: [] })
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify(store))
+    fs.renameSync(`${file}.tmp`, file)
+  }
+  await assert.rejects(run(p, {}, { fault }), /changed during the migration/)
+  assert.deepEqual(digest(p.out), before, 'the folder as it was before the run')
+  const kept = fs
+    .readdirSync(p.out, { recursive: true })
+    .filter((name) => String(name).includes('replaced-') && String(name).endsWith('comments.json'))
+    .map((name) => fs.readFileSync(path.join(p.out, name), 'utf8'))
+  assert.ok(
+    kept.some((text) => text.includes('WRITTEN-MID-RUN')),
+    'the new comment is kept in the backup',
+  )
+})
+
+test('F5: a run stopped midway makes the next migrate point at --rollback, which puts it back', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  const before = digest(p.out)
+  const done = await run(p, { json: true })
+  assert.equal(done.code, 0)
+  // As if the process died after the rows and moves, before the marker.
+  const { JOURNAL } = await import('../src/migrate/files.js')
+  fs.writeFileSync(path.join(p.out, JOURNAL), JSON.stringify({ version: 1, backup: done.json.backup, pid: 1 }))
+  fs.rmSync(path.join(p.out, MARKER))
+  const again = await run(p)
+  assert.equal(again.code, 1)
+  assert.match(again.text, /stopped midway .*shapewall migrate --rollback/s)
+  const back = await run(p, { rollback: true })
+  assert.equal(back.code, 0, back.text)
+  assert.equal(fs.existsSync(path.join(p.out, JOURNAL)), false)
+  assert.deepEqual(digest(p.out), before)
+})
+
+test("F6: a board named like one of Shapewall's own folders is refused", async () => {
+  const p = project('v1.2.0')
+  const cfgFile = path.join(p.dir, 'shapewall.config.json')
+  const cfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8'))
+  fs.writeFileSync(cfgFile, JSON.stringify({ ...cfg, id: 'server' }))
+  fs.renameSync(path.join(p.out, 'site'), path.join(p.out, 'server'))
+  p.config = loadConfig(cfgFile)
+  const before = digest(p.out)
+  const dry = await run(p, { 'dry-run': true })
+  assert.equal(dry.code, 1)
+  assert.match(dry.text, /board server: the id is the name of one of Shapewall's own folders/)
+  assert.equal((await run(p)).code, 1)
+  assert.deepEqual(digest(p.out), before)
+})
+
+test('F7: the dry run lists what holds the project, as the real run does', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  fs.writeFileSync(path.join(p.out, 'site', 'watch.lock'), JSON.stringify({ pid: process.ppid, start: processStartTime(process.ppid) }))
+  const dry = await run(p, { 'dry-run': true })
+  assert.equal(dry.code, 1)
+  assert.match(dry.text, /shapewall watch is running/)
+})
+
+test('F8: the dry run lists everything a real run removes', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  const site = path.join(p.out, 'site')
+  fs.writeFileSync(path.join(site, 'comment-files', 'markup-3.png'), 'x')
+  fs.writeFileSync(path.join(site, 'chat', 'files', 'notes.txt'), 'x')
+  fs.writeFileSync(path.join(site, 'chat', 'chat-00000000000000aa.json'), JSON.stringify({ owner: 'owner', messages: [] }))
+  const file = path.join(site, 'comments.json')
+  const store = JSON.parse(fs.readFileSync(file, 'utf8'))
+  store.comments[1].author = 'V'.repeat(70)
+  fs.writeFileSync(file, JSON.stringify(store))
+  const dry = await run(p, { 'dry-run': true, json: true })
+  const items = dry.json.boards[0].dropped.map((drop) => drop.item)
+  assert.ok(items.includes('comment-files/markup-3.png'), items.join('; '))
+  assert.ok(items.includes('chat/files/notes.txt'))
+  assert.ok(items.includes('chat thread chat-00000000000000aa'))
+  assert.ok(items.some((item) => /comment #2, author name/.test(item)))
+})
+
+test('F9: the engine database, its folder and its copy in the backup are owner-only', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  const server = path.join(p.out, 'server')
+  fs.chmodSync(server, 0o755)
+  fs.chmodSync(engineDbFile(p.out), 0o644)
+  const done = await run(p, { json: true })
+  assert.equal(done.code, 0)
+  const mode = (file) => fs.statSync(file).mode & 0o777
+  assert.equal(mode(server), 0o700)
+  for (const suffix of ['', '-wal', '-shm'])
+    if (fs.existsSync(engineDbFile(p.out) + suffix)) assert.equal(mode(engineDbFile(p.out) + suffix), 0o600, suffix || 'db')
+  const copy = path.join(p.out, done.json.backup, 'engine')
+  assert.equal(mode(copy), 0o700)
+  for (const name of fs.readdirSync(copy)) assert.equal(mode(path.join(copy, name)), 0o600, name)
+  // A database made fresh is 0600 from the start.
+  const q = project('v1.1.0')
+  const { openEngine } = await import('../src/hosted/migrate/engine.js')
+  const db = await openEngine(q.out, { create: true })
+  db.close()
+  assert.equal(mode(engineDbFile(q.out)), 0o600)
 })

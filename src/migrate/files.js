@@ -6,7 +6,7 @@
 // so captures, versions, variants, environments, diffs, journeys and check
 // reports move as they are: by rename on the same filesystem, by copy then
 // delete across filesystems. Comments and chat become rows
-// (src/hosted/migrate/comments.js, chat.js); chat attachments move with the files.
+// (src/migrate/comments.js, chat.js); chat attachments move with the files.
 // Locks, capture status and the watcher's state are of a process that is no
 // longer running and are not carried.
 //
@@ -15,10 +15,22 @@
 // both names; nothing rewrites a capture in place, every writer replaces
 // it), by copy where it cannot; and a real copy of the engine folder as it
 // was (SQLite writes its file in place, so a link would change with it).
+//
+// This module is part of the core on purpose: the backup and the rollback
+// need nothing from the engine, so a project can always be put back.
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
+import { ID_RE } from '../config.js'
+import { readLock } from '../lock.js'
+
+// The engine's folder inside the output directory (S5 named it `server`).
+export const ENGINE_DIR = 'server'
+export const ENGINE_DB = 'shapewall.db'
+export const engineDir = (outputDir) => path.join(outputDir, ENGINE_DIR)
+export const engineDbFile = (outputDir) => path.join(engineDir(outputDir), ENGINE_DB)
+export const engineBoardDir = (outputDir, ids, boardId) => path.join(engineDir(outputDir), 'files', ids.workspaceId, ids.projectId, boardId)
 
 // Board folder entries and what the migration does with each.
 export const MOVE = ['captures', 'versions', 'variants', 'variants.json', 'envs', 'diffs', 'journeys.json', 'checks']
@@ -34,16 +46,38 @@ export const EPHEMERAL = {
 }
 export const BACKUP_PREFIX = 'backup-1x-'
 export const MARKER = 'MIGRATED-TO-2'
+// Written when a run starts, removed when it ends either way: one left
+// behind is a run that was interrupted.
+export const JOURNAL = 'MIGRATING-TO-2'
+
+// Folder names under the output directory that are not boards: a board with
+// one of these ids would be migrated into (or over) Shapewall's own folder.
+export const RESERVED = [ENGINE_DIR, 'agent', 'notifications', '.accounts']
+export const reservedBoardId = (id) => RESERVED.includes(id) || String(id).startsWith(BACKUP_PREFIX)
+
+// A board folder name a backup record may name: an id the config could have,
+// never a path and never one of Shapewall's own folders.
+export const validBoardName = (name) => typeof name === 'string' && ID_RE.test(name) && !reservedBoardId(name)
+
+// A lock file this process holds (the migration's own comment and chat
+// locks): never backed up, digested or carried.
+export function ownLock(file) {
+  if (!file.endsWith('.lock')) return false
+  return Number(readLock(file)?.pid) === process.pid
+}
 
 // What a board folder holds, sorted into the migration's classes.
-// { move: [name], convert: [name], ephemeral: [{name, reason}], unknown: [name], bytes }
+// { move: [name], convert: [name], ephemeral: [{name, reason}], unknown: [name], links: [name], bytes }
 export function classifyBoard(dir) {
-  const out = { move: [], convert: [], ephemeral: [], unknown: [], bytes: 0 }
+  const out = { move: [], convert: [], ephemeral: [], unknown: [], links: [], bytes: 0 }
   if (!fs.existsSync(dir)) return out
   for (const name of fs.readdirSync(dir).sort()) {
+    const full = path.join(dir, name)
+    if (ownLock(full)) continue
+    if ((MOVE.includes(name) || CONVERT[name]) && fs.lstatSync(full).isSymbolicLink()) out.links.push(name)
     if (MOVE.includes(name)) {
       out.move.push(name)
-      out.bytes += treeBytes(path.join(dir, name))
+      out.bytes += treeBytes(full)
     } else if (CONVERT[name]) out.convert.push(name)
     else if (EPHEMERAL[name]) out.ephemeral.push({ name, reason: EPHEMERAL[name] })
     else if (/\.lock$/.test(name) || /\.tmp$|\.new-\d+-[a-f0-9]+$/.test(name))
@@ -62,7 +96,7 @@ export function treeBytes(file) {
 
 // Every regular file under `root`, as relative path -> sha256, for the
 // round-trip check. Directories in `skip` (relative names at the top) are
-// left out.
+// left out, and so are the lock files this process holds.
 export function treeDigest(root, { skip = [] } = {}) {
   const out = {}
   const walk = (dir, rel) => {
@@ -72,7 +106,7 @@ export function treeDigest(root, { skip = [] } = {}) {
       const full = path.join(dir, name)
       const stat = fs.lstatSync(full)
       if (stat.isDirectory()) walk(full, relPath)
-      else if (stat.isFile()) out[relPath] = createHash('sha256').update(fs.readFileSync(full)).digest('hex')
+      else if (stat.isFile() && !ownLock(full)) out[relPath] = createHash('sha256').update(fs.readFileSync(full)).digest('hex')
       else if (stat.isSymbolicLink()) out[relPath] = `link:${fs.readlinkSync(full)}`
     }
   }
@@ -81,16 +115,22 @@ export function treeDigest(root, { skip = [] } = {}) {
 }
 
 // A tree copied by hard links (or copies where links are not possible).
-// Symlinks are copied as links, never followed.
-export function linkTree(from, to, { copy = false } = {}) {
+// Symlinks are copied as links, never followed (the planner refuses a board
+// whose folder or moved entries are links, so none of those reach here).
+// `mode`: { dir, file } to set on every copy instead of the source's.
+export function linkTree(from, to, { copy = false, mode = null } = {}) {
   const stat = fs.lstatSync(from)
   if (stat.isSymbolicLink()) {
     fs.symlinkSync(fs.readlinkSync(from), to)
     return
   }
   if (stat.isDirectory()) {
-    fs.mkdirSync(to, { recursive: true, mode: stat.mode & 0o777 })
-    for (const name of fs.readdirSync(from)) linkTree(path.join(from, name), path.join(to, name), { copy })
+    fs.mkdirSync(to, { recursive: true, mode: mode?.dir ?? stat.mode & 0o777 })
+    if (mode) fs.chmodSync(to, mode.dir)
+    for (const name of fs.readdirSync(from)) {
+      if (ownLock(path.join(from, name))) continue
+      linkTree(path.join(from, name), path.join(to, name), { copy, mode })
+    }
     return
   }
   if (!copy) {
@@ -102,7 +142,7 @@ export function linkTree(from, to, { copy = false } = {}) {
     }
   }
   fs.copyFileSync(from, to, fs.constants.COPYFILE_EXCL)
-  fs.chmodSync(to, stat.mode & 0o777)
+  fs.chmodSync(to, mode?.file ?? stat.mode & 0o777)
 }
 
 // Moves `from` to `to`: a rename, or a copy and delete across filesystems.
@@ -124,6 +164,10 @@ export const stampOf = (date = new Date()) =>
     .replace(/[-:]/g, '')
     .replace(/\.\d+Z$/, 'Z')
 
+// The engine's copy in a backup holds the owner's passkeys and recovery code
+// hashes: owner-only, whatever the source modes were.
+const PRIVATE = { dir: 0o700, file: 0o600 }
+
 // The backup of one run: `boards` (folder names under outputDir), the engine
 // folder as a copy (or a note that there was none) and the marker as it
 // was. Returns its folder. The record of what it holds (backup.json) is
@@ -134,13 +178,15 @@ export function writeBackup(outputDir, { stamp, boards, engineDir, marker, versi
   fs.mkdirSync(dir, { mode: 0o700 })
   const present = []
   for (const board of boards) {
+    if (!validBoardName(board)) throw new Error(`"${board}" is not a board folder name`)
     const from = path.join(outputDir, board)
     if (!fs.existsSync(from)) continue
+    fs.mkdirSync(path.join(dir, 'boards'), { recursive: true, mode: 0o700 })
     linkTree(from, path.join(dir, 'boards', board))
     present.push(board)
   }
   const engine = fs.existsSync(engineDir)
-  if (engine) linkTree(engineDir, path.join(dir, 'engine'), { copy: true })
+  if (engine) linkTree(engineDir, path.join(dir, 'engine'), { copy: true, mode: PRIVATE })
   const markerFile = path.join(outputDir, marker)
   const hadMarker = fs.existsSync(markerFile)
   if (hadMarker) fs.copyFileSync(markerFile, path.join(dir, marker))
@@ -151,12 +197,36 @@ export function writeBackup(outputDir, { stamp, boards, engineDir, marker, versi
 
 const digestOf = (outputDir, boards) => Object.fromEntries(boards.map((board) => [board, treeDigest(path.join(outputDir, board))]))
 
+// A backup's record, or null when it is not one this build can trust: the
+// folder must be a real folder (not a link), and every board it names a
+// plain board folder name, so a planted record can never point a restore
+// outside the project or at Shapewall's own folders.
 export function readBackup(dir) {
   try {
+    if (!fs.lstatSync(dir).isDirectory()) return null
     const record = JSON.parse(fs.readFileSync(path.join(dir, 'backup.json'), 'utf8'))
-    return record?.version === 1 && Array.isArray(record.boards) ? record : null
+    if (record?.version !== 1 || !Array.isArray(record.boards)) return null
+    if (!record.boards.every(validBoardName)) return null
+    if (new Set(record.boards).size !== record.boards.length) return null
+    return record
   } catch {
     return null
+  }
+}
+
+// `target` must be a direct child of `outputDir`.
+function inside(outputDir, target) {
+  const root = path.resolve(outputDir)
+  const full = path.resolve(target)
+  if (path.dirname(full) !== root) throw new Error(`${target} is not inside ${outputDir}`)
+  return full
+}
+
+const isLink = (file) => {
+  try {
+    return fs.lstatSync(file).isSymbolicLink()
+  } catch {
+    return false
   }
 }
 
@@ -171,22 +241,26 @@ export function readBackup(dir) {
 export function restoreBackup(outputDir, dir, { engineDir, marker }) {
   const record = readBackup(dir)
   if (!record) throw new Error(`${path.basename(dir)} is not a finished migration backup`)
+  inside(outputDir, dir)
+  inside(outputDir, engineDir)
   const aside = path.join(dir, `replaced-${stampOf()}-${process.pid}`)
   const setAside = (from, name) => {
-    if (!fs.existsSync(from)) return
-    fs.mkdirSync(aside, { recursive: true, mode: 0o700 })
+    if (!fs.existsSync(from) && !isLink(from)) return
+    fs.mkdirSync(path.dirname(path.join(aside, name)), { recursive: true, mode: 0o700 })
     moveEntry(from, path.join(aside, name))
   }
   for (const board of record.boards) {
-    const target = path.join(outputDir, board)
+    const target = inside(outputDir, path.join(outputDir, board))
+    const source = path.join(dir, 'boards', board)
+    if (!fs.lstatSync(source).isDirectory()) throw new Error(`${path.basename(dir)}/boards/${board} is not a folder`)
     const staged = `${target}.restoring`
     fs.rmSync(staged, { recursive: true, force: true })
-    linkTree(path.join(dir, 'boards', board), staged)
+    linkTree(source, staged)
     setAside(target, `boards/${board}`)
     fs.renameSync(staged, target)
   }
   setAside(engineDir, 'engine')
-  if (record.engine) linkTree(path.join(dir, 'engine'), engineDir, { copy: true })
+  if (record.engine) linkTree(path.join(dir, 'engine'), engineDir, { copy: true, mode: PRIVATE })
   const markerFile = path.join(outputDir, marker)
   if (record.marker) fs.copyFileSync(path.join(dir, marker), markerFile)
   else fs.rmSync(markerFile, { force: true })
@@ -209,4 +283,13 @@ export function listBackups(outputDir) {
       record: readBackup(path.join(outputDir, name)),
       restored: fs.existsSync(path.join(outputDir, name, 'RESTORED')),
     }))
+}
+
+export function readJournal(outputDir) {
+  try {
+    const journal = JSON.parse(fs.readFileSync(path.join(outputDir, JOURNAL), 'utf8'))
+    return journal?.version === 1 && typeof journal.backup === 'string' ? journal : null
+  } catch {
+    return null
+  }
 }

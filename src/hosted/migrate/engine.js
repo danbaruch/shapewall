@@ -1,12 +1,12 @@
-// The one place `shapewall migrate` writes the engine's database
-// (experimental in 1.5.0). Everything else in src/hosted/migrate plans in plain
-// objects; this module turns a plan into rows, so a change to the engine's
-// schema (migration 24 and later) is a change here only.
+// The one place `shapewall migrate` touches the engine's database
+// (experimental in 1.5.0). The planners, the backup and the rollback live in
+// the core (src/migrate/) and work without this module, so a local project
+// can always be put back; this module reads the engine and turns a plan into
+// rows, so a change to the engine's schema is a change here only.
 //
-// The engine is the hosted server run for one project (`serve --engine
-// hosted`, docs/where-to-run.md). Its data lives in <outputDir>/server/: the
-// SQLite file plus files/<workspace>/<project>/<board>/, the same layout the
-// local board folders use (src/hosted/projects.js projectDir).
+// The engine is the hosted server run for one project. Its data lives in
+// <outputDir>/server/: the SQLite file plus files/<workspace>/<project>/<board>/,
+// the same layout the local board folders use (src/hosted/projects.js).
 //
 // Writes go through the hosted tenancy handles (src/hosted/tenancy.js): one
 // per workspace for tenant tables, the accounts handle for users and
@@ -16,20 +16,20 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { openDatabase, transaction } from '../db.js'
+import { hasCommentPolicy, openDatabase, transaction } from '../db.js'
 import { accounts, tenant } from '../tenancy.js'
+import { cleanDefinition } from '../push.js'
+import { slugFor } from '../projects.js'
 import { ID_PATTERNS } from '../../remote/ids.js'
+import { pushDefinition } from '../../remote/remote.js'
 import { newId } from '../../shared/account-tokens.js'
+import { ENGINE_DB, engineDbFile, engineDir } from '../../migrate/files.js'
 
-// The engine's folder inside the output directory. S5 named it `server`;
-// if migration 24 moves it (a dotted name, so no board id can clash), this
-// constant is the one line that changes.
-export const ENGINE_DIR = 'server'
-export const ENGINE_DB = 'shapewall.db'
+export { quietSqliteWarning } from '../db.js'
+export const projectSlug = (title) => slugFor(title)
 
-export const engineDir = (outputDir) => path.join(outputDir, ENGINE_DIR)
-export const engineDbFile = (outputDir) => path.join(engineDir(outputDir), ENGINE_DB)
-export const engineBoardDir = (outputDir, ids, boardId) => path.join(engineDir(outputDir), 'files', ids.workspaceId, ids.projectId, boardId)
+// A config board as the engine board it becomes (throws when it cannot).
+export const boardDefinition = (config, board) => cleanDefinition(pushDefinition(config, board))
 
 const columns = (db, table) =>
   db
@@ -46,6 +46,7 @@ export function engineSchema(db) {
   return {
     commentEnvironment: comment.includes('environment'),
     soloBinding: hasTable(db, 'solo_binding'),
+    commentPolicy: hasCommentPolicy(db),
   }
 }
 
@@ -86,17 +87,22 @@ export function mergeSchema(onDisk, fresh) {
   return Object.fromEntries(Object.keys(fresh).map((key) => [key, Boolean(onDisk?.[key] || fresh[key])]))
 }
 
+// The database holds the owner's passkeys and recovery code hashes: the
+// folder is 0700 and the file is made 0600 before SQLite opens it, so its
+// -wal and -shm files (which SQLite makes with the database's mode) are too.
 export async function openEngine(outputDir, { create = false } = {}) {
   const file = engineDbFile(outputDir)
   if (!create && !fs.existsSync(file)) return null
   fs.mkdirSync(engineDir(outputDir), { recursive: true, mode: 0o700 })
-  const db = await openDatabase(file)
   try {
+    fs.chmodSync(engineDir(outputDir), 0o700)
+    fs.closeSync(fs.openSync(file, 'a', 0o600))
     fs.chmodSync(file, 0o600)
-  } catch {
-    /* not on this filesystem */
+    for (const suffix of ['-wal', '-shm']) if (fs.existsSync(file + suffix)) fs.chmodSync(file + suffix, 0o600)
+  } catch (error) {
+    if (!['EPERM', 'ENOTSUP', 'EOPNOTSUPP'].includes(error.code)) throw error
   }
-  return db
+  return openDatabase(file)
 }
 
 // What an existing engine database holds that the migration would build on:
@@ -265,21 +271,15 @@ function writeBoard(t, ids, board, at) {
   )
 }
 
-// A planned comment (src/hosted/migrate/comments.js) as a row. The owner's own
-// comments and replies get the owner's account; every other name stays a
-// plain label with no account behind it.
-function writeComment(t, ids, boardId, comment, schema) {
+// A planned comment (src/migrate/comments.js) as a row. Only a comment the
+// board stamped as the owner's gets the owner's account. One signed with the
+// owner's name only is written as an import by the owner (no account, so it
+// reads as outside text, src/hosted/import.js does the same); replies and
+// reactions keep their names with no account behind them.
+function writeComment(t, ids, boardId, comment, schema, at) {
   const owner = (who) => (who === 'owner' ? ids.ownerId : null)
-  const replies = comment.replies.map(({ by, ...reply }) => ({
-    ...reply,
-    ...(by === 'owner' ? { handle: ids.handle, user: ids.ownerId } : {}),
-  }))
-  const reactions = (list) =>
-    list.map((item) => ({
-      emoji: item.emoji,
-      by: item.by.map(({ owner: own, ...who }) => (own ? { ...who, handle: ids.handle, user: ids.ownerId } : who)),
-    }))
-  for (const reply of replies) if (reply.reactions) reply.reactions = reactions(reply.reactions)
+  const byName = comment.by === 'name'
+  const replies = comment.replies
   const params = {
     project: ids.projectId,
     board: boardId,
@@ -306,20 +306,33 @@ function writeComment(t, ids, boardId, comment, schema) {
     created: comment.createdAt,
     updated: comment.updatedAt,
     resolved: comment.resolvedAt,
-    reactions: JSON.stringify(reactions(comment.reactions)),
+    reactions: JSON.stringify(comment.reactions),
     edited: comment.editedAt,
     images: comment.images.length ? JSON.stringify(comment.images) : null,
     drawing: json(comment.drawing),
   }
-  const environment = schema.commentEnvironment ? ', environment' : ''
-  if (environment) params.environment = comment.environment
+  const extra = []
+  if (schema.commentEnvironment) {
+    extra.push('environment')
+    params.environment = comment.environment
+  }
+  if (byName) {
+    extra.push('imported_by', 'imported_at')
+    Object.assign(params, { imported_by: ids.ownerId, imported_at: at })
+    if (schema.commentPolicy) {
+      extra.push('imported')
+      params.imported = 1
+    }
+  }
+  const columns = extra.map((name) => `, ${name}`).join('')
+  const values = extra.map((name) => `, :${name}`).join('')
   t.run(
     `INSERT INTO comments (workspace_id, project_id, board_id, number, page_id, viewport, x, y, body, author, author_handle, author_user_id,
        import_author_kind, anchor, capture_version, status, resolution, fix_ref, replies, agent_status, agent_status_at, reopen_count,
-       reopened_at, created_at, updated_at, resolved_at, reactions, edited_at, images, drawing${environment})
+       reopened_at, created_at, updated_at, resolved_at, reactions, edited_at, images, drawing${columns})
      VALUES (:ws, :project, :board, :number, :page, :viewport, :x, :y, :body, :author, :handle, :user, :kind, :anchor, :version, :status,
        :resolution, :fix, :replies, :agent, :agentAt, :reopens, :reopened, :created, :updated, :resolved, :reactions, :edited, :images,
-       :drawing${environment ? ', :environment' : ''})`,
+       :drawing${values})`,
     params,
   )
   for (const file of comment.files)
@@ -394,7 +407,7 @@ export function writePlan(db, plan, { now = new Date() } = {}) {
     const written = {}
     for (const board of plan.boards) {
       writeBoard(t, ids, board, at)
-      for (const comment of board.comments) writeComment(t, ids, board.id, comment, schema)
+      for (const comment of board.comments) writeComment(t, ids, board.id, comment, schema, at)
       for (const thread of board.threads) writeThread(t, ids, board.id, thread)
       const key = { project: ids.projectId, board: board.id }
       const count = (table) =>
