@@ -1,6 +1,7 @@
 // Installation updates are an explicit operator capability. Shapewall never
 // downloads or executes an updater unless its installer provides a helper.
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
@@ -33,6 +34,37 @@ export function runningVersion(env = process.env) {
     }
   }
   return { version: PACKAGE.version, revision: revision(env.SHAPEWALL_BUILD_REVISION) || revision(metadata?.revision) }
+}
+
+// A private file for an apply helper's answer (0600, in a 0700 folder):
+// fd for the child, release() closes this process's copy, read(max) returns
+// the text or null when it is longer than max bytes, remove() deletes it.
+function answerFile() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shapewall-update-'))
+  const file = path.join(dir, 'answer')
+  let fd = fs.openSync(file, 'wx', 0o600)
+  return {
+    fd,
+    release() {
+      if (fd === null) return
+      fs.closeSync(fd)
+      fd = null
+    },
+    read(max) {
+      const handle = fs.openSync(file, 'r')
+      try {
+        const buffer = Buffer.alloc(max + 1)
+        const length = fs.readSync(handle, buffer, 0, max + 1, 0)
+        return length > max ? null : buffer.toString('utf8', 0, length)
+      } finally {
+        fs.closeSync(handle)
+      }
+    },
+    remove() {
+      this.release()
+      fs.rmSync(dir, { recursive: true, force: true })
+    },
+  }
 }
 
 function tokenOk(req, token) {
@@ -151,6 +183,7 @@ export function appUpdateRouter({
     const active = { action, state: 'running', startedAt: new Date().toISOString(), finishedAt: null, error: null }
     job = active
     let child
+    let answer = null
     let timer
     let output = ''
     let bytes = 0
@@ -204,15 +237,22 @@ export function appUpdateRouter({
       // No shell or request-derived arguments/environment. The helper needs
       // the actual running artifact, since a previous attempt may already
       // have switched its pointer without completing the process restart.
+      // An apply writes its answer to a private file, not a pipe: if this
+      // server goes away mid-apply (stopped, crashed), the helper's own
+      // output must never kill it (EPIPE on a closed pipe) and leave the
+      // installation half replaced. A check stays on a pipe (it is stopped
+      // with the server, and its output is capped as it arrives).
+      if (action === 'apply') answer = answerFile()
       child = spawn(helper, [action], {
         shell: false,
-        stdio: ['ignore', 'pipe', 'ignore'],
+        stdio: ['ignore', answer ? answer.fd : 'pipe', 'ignore'],
         env: { ...env, SHAPEWALL_RUNNING_REVISION: current.revision || '' },
         // Its own process group: a terminal's Ctrl-C (sent to the whole
         // foreground group) must not interrupt an installation mid-replace.
         detached: action === 'apply' && process.platform !== 'win32',
       })
       entry.child = child
+      if (answer) answer.release()
       const timeout = action === 'check' ? 30000 : 900000
       const configured = appUpdate[`${action}TimeoutMs`]
       timer = setTimeout(
@@ -225,7 +265,7 @@ export function appUpdateRouter({
         Number.isFinite(configured) && configured > 0 ? Math.min(configured, timeout) : timeout,
       )
       timer.unref?.()
-      child.stdout.on('data', (chunk) => {
+      child.stdout?.on('data', (chunk) => {
         if (aborted) return
         bytes += chunk.length
         if (bytes > MAX_OUTPUT) giveUp('The update helper returned too much output.')
@@ -233,10 +273,22 @@ export function appUpdateRouter({
       })
       child.once('error', () => {
         closed()
+        answer?.remove()
         finish('The update helper could not start. Contact the installer.')
       })
       child.once('close', (code) => {
         closed()
+        if (answer) {
+          let read = ''
+          try {
+            read = answer.read(MAX_OUTPUT)
+          } catch {
+            aborted ||= 'The update helper returned an invalid response.'
+          }
+          answer.remove()
+          if (read === null) aborted ||= 'The update helper returned too much output.'
+          else output = read
+        }
         if (settled) return
         if (aborted) return finish(aborted)
         if (code !== 0) return finish('The update helper failed. Check the installation before trying again.')
@@ -247,6 +299,8 @@ export function appUpdateRouter({
         }
       })
     } catch {
+      answer?.release()
+      answer?.remove()
       closed()
       finish('The update helper could not start. Contact the installer.')
     }

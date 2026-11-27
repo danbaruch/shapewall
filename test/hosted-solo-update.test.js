@@ -10,6 +10,7 @@ import test, { after } from 'node:test'
 import { quietSqliteWarning } from '../src/hosted/db.js'
 import { createBrowser, createProject, invite, signUp, startHostedServer } from './hosted-helpers.js'
 import { tempDir } from './helpers.js'
+import { bindSoloProject } from '../src/hosted/solo/binding.js'
 
 quietSqliteWarning()
 
@@ -26,13 +27,19 @@ function helper(source) {
 }
 const answer = (extra = {}) => JSON.stringify({ latest: { version: '9.9.9', revision: 'abcdef1234567' }, updateAvailable: true, ...extra })
 
-async function start(name, options) {
+// The solo binding names the project the engine serves (migration 24); the
+// engine's start makes it (serve --engine hosted). bound: false leaves it out.
+const bind = (hosted, projectId) =>
+  bindSoloProject(hosted.db, { projectId, configPath: path.join(hosted.dataDir, 'shapewall.config.json') })
+
+async function start(name, options, { bound = true } = {}) {
   const hosted = await startHostedServer(name, options)
   servers.push(hosted)
   const owner = await signUp(hosted, { handle: 'owner' })
   const project = await createProject(owner, owner.workspaceId, 'Solo update')
+  if (bound && options?.solo) bind(hosted, project.id)
   const base = `/w/${owner.workspaceId}/p/${project.id}/api`
-  return { hosted, owner, base, url: `${base}/app-update` }
+  return { hosted, owner, project, base, url: `${base}/app-update` }
 }
 
 async function settled(browser, url) {
@@ -184,6 +191,7 @@ test('stopping the engine waits for an apply and never kills it', async () => {
   const hosted = await startHostedServer('solo-update-stop', { solo: { env: {}, appUpdate: { helper: file } } })
   const owner = await signUp(hosted, { handle: 'owner' })
   const project = await createProject(owner, owner.workspaceId, 'Solo update stop')
+  bind(hosted, project.id)
   const url = `/w/${owner.workspaceId}/p/${project.id}/api/app-update`
   assert.equal((await owner.browser.post(`${url}/check`, {})).status, 202)
   await settled(owner.browser, url)
@@ -191,4 +199,66 @@ test('stopping the engine waits for an apply and never kills it', async () => {
   assert.equal(hosted.app.locals.appUpdate.applying(), true)
   await hosted.close()
   assert.equal(fs.readFileSync(marker, 'utf8'), 'ok', 'close returned only after the apply finished')
+})
+
+// Review F1: the owner role in a workspace is not the installation's owner.
+// Any account can make a workspace of its own and own it.
+test('an account that owns a workspace of its own cannot update the installation', async () => {
+  const log = path.join(tempDir('solo-update-f1'), 'calls')
+  const file = helper(`
+    import fs from 'node:fs'
+    fs.appendFileSync(${JSON.stringify(log)}, process.argv[2] + '\\n')
+    console.log(${JSON.stringify(answer())})
+  `)
+  const { hosted, owner } = await start('solo-update-f1', { solo: { env: {}, appUpdate: { helper: file } } })
+  const viewer = await signUp(hosted, { handle: 'viewer', invite: await invite(owner, owner.workspaceId, 'viewer') })
+  const ws = await viewer.browser.post('/api/workspaces', { name: 'Mine' })
+  assert.equal(ws.status, 201)
+  const mine = await createProject(viewer, ws.json.workspace.id, 'Mine')
+  const url = `/w/${ws.json.workspace.id}/p/${mine.id}/api/app-update`
+  assert.equal((await viewer.browser.get(url)).json.canUpdate, false)
+  for (const action of ['check', 'apply']) {
+    const refused = await viewer.browser.post(`${url}/${action}`, {})
+    assert.equal(refused.status, 403, action)
+    assert.equal(refused.json.error.code, 'update_forbidden', action)
+  }
+  assert.equal(fs.existsSync(log), false, 'the helper never ran')
+})
+
+test('with open sign-up a new account still cannot update the installation', async () => {
+  const file = helper(`console.log(${JSON.stringify(answer())})`)
+  const { hosted } = await start('solo-update-f1b', { signup: 'open', solo: { env: {}, appUpdate: { helper: file } } })
+  const stranger = await signUp(hosted, { handle: 'stranger' })
+  const theirs = await createProject(stranger, stranger.workspaceId, 'Theirs')
+  const url = `/w/${stranger.workspaceId}/p/${theirs.id}/api/app-update`
+  assert.equal((await stranger.browser.get(url)).json.canUpdate, false)
+  assert.equal((await stranger.browser.post(`${url}/check`, {})).status, 403)
+})
+
+test('the owner on another project of the bound workspace, or with a second owner there, is refused', async () => {
+  const file = helper(`console.log(${JSON.stringify(answer())})`)
+  const { hosted, owner, url } = await start('solo-update-f1c', { solo: { env: {}, appUpdate: { helper: file } } })
+  const other = await createProject(owner, owner.workspaceId, 'Not bound')
+  const otherUrl = `/w/${owner.workspaceId}/p/${other.id}/api/app-update`
+  assert.equal((await owner.browser.get(otherUrl)).json.canUpdate, false)
+  assert.equal((await owner.browser.post(`${otherUrl}/check`, {})).status, 403)
+  assert.equal((await owner.browser.get(url)).json.canUpdate, true)
+
+  // A second owner of the bound workspace: which one installed it? Neither.
+  const second = await signUp(hosted, { handle: 'second', invite: await invite(owner, owner.workspaceId, 'member') })
+  hosted.db.prepare("UPDATE memberships SET role = 'owner' WHERE user_id = ?").run(second.user.id)
+  assert.equal((await owner.browser.get(url)).json.canUpdate, false)
+  assert.equal((await owner.browser.post(`${url}/check`, {})).status, 403)
+  assert.equal((await second.browser.post(`${url}/check`, {})).status, 403)
+})
+
+test('no solo binding: nobody can update (fails closed)', async () => {
+  const file = helper(`console.log(${JSON.stringify(answer())})`)
+  const { owner, url } = await start('solo-update-unbound', { solo: { env: {}, appUpdate: { helper: file } } }, { bound: false })
+  const status = await owner.browser.get(url)
+  assert.equal(status.status, 200)
+  assert.equal(status.json.canUpdate, false)
+  const check = await owner.browser.post(`${url}/check`, {})
+  assert.equal(check.status, 403)
+  assert.equal(check.json.error.code, 'update_forbidden')
 })

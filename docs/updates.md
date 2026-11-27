@@ -98,7 +98,8 @@ This capability can replace executable app code. Enable it only for the installa
 
 The solo engine (`shapewall serve --engine hosted`) offers the same About and updates dialog with the same rules: only the
 installer's fixed helper runs, an apply is never stopped, and the engine restarts only when the installer opted in. The owner is
-the engine's signed-in owner in a browser on this machine (a loopback address and host, no proxy headers), writing from the
-board's own page. Other accounts, requests through a proxy or tunnel, and read-only engines see the version only.
+the one owner of the workspace the engine serves, signed in on the board of the project it serves, in a browser on this
+machine (a loopback address and host, no proxy headers), writing from the board's own page. Owning some other workspace on the
+engine is not enough, and an engine with no bound project, or two owners in its workspace, updates for nobody. Other accounts, requests through a proxy or tunnel, and read-only engines see the version only.
 `SHAPEWALL_UPDATE_TOKEN` works as above and still needs the owner's session. A hosted team server has no update routes; update
 it the way it was installed.
