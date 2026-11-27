@@ -711,10 +711,17 @@ shapewall serve --engine hosted --open
   the files. A token file another user could read, a link in its place, or a `serve.json` that names another address is
   refused, never used. Before a token goes anywhere, the command asks whoever listens on the engine's port to prove it is
   this start's engine (an answer to a challenge under a key only `serve.json` and the engine hold; the question carries no
-  token), so a crashed engine's files never send a token to another program on that port. A rotation never widens a token:
+  token), so a crashed engine's files never send a token to another program on that port. A command that keeps running
+  (`mcp`, `watch`) asks again after any connection error or refused token, before it sends anything more. A rotation
+  never widens a token:
   a scope or an expiry you took away in the console stays away. On the engine, the token API and `/mcp` answer only on the
   engine's own name, from this machine (on Linux, your own OS user), as the sign-in does. A `shapewall` command that an agent
-  started (`watch --exec` without `--pass-token`, or a connected agent's own commands) gets none of these tokens.
+  started (`watch --exec` without `--pass-token`, or a connected agent's own commands) gets none of these tokens. That
+  mark is a guard against accidents, not against an agent set on getting a token: it is an environment variable the
+  agent's command can drop. Where the agent's commands run in the OS sandbox (a connected agent, the board's own agent)
+  the sandbox is what holds: `.shapewall` is unreadable there and the engine's port unreachable. Where they do not (a
+  `watch --exec` command, a local agent session set to `"own"`, the unsandboxed shell a solo owner can turn on), they run
+  as you, can read `.shapewall/.engine/` themselves, and the mark is only advisory.
   Agents never read `.shapewall/.engine/`: Shapewall's own file reads refuse it, and a Claude Code agent gets a deny rule for
   it in its session settings. `comments selectors` and `comments delete` are not on the engine yet; `comments add` takes `--page`,
   `--body` and `--viewport`. `shapewall export` reads the 1.x files, so while the engine runs it is refused unless

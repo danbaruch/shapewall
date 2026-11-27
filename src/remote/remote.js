@@ -14,7 +14,7 @@ import { isLoopback } from '../net.js'
 import { boardViewports } from '../config.js'
 import { boardDir } from '../store.js'
 import { readCredential } from './credentials.js'
-import { ENGINE_TOKEN } from '../engine-target.js'
+import { ENGINE_TARGET, ENGINE_TOKEN, guardEngineFetch } from '../engine-target.js'
 import { terminalSafe } from './terminal.js'
 
 export class RemoteError extends Error {
@@ -57,7 +57,7 @@ export function remoteSettings(flags = {}, env = process.env) {
   // The solo engine of this project folder (src/engine-target.js, set by main()): its own token for this command
   // line, whatever SHAPEWALL_TOKEN holds (that one is for another server).
   if (typeof flags[ENGINE_TOKEN] === 'string' && TOKEN_RE.test(flags[ENGINE_TOKEN]))
-    return { origin, token: flags[ENGINE_TOKEN], source: 'engine' }
+    return { origin, token: flags[ENGINE_TOKEN], source: 'engine', engine: flags[ENGINE_TARGET] || null }
   let token = env.SHAPEWALL_TOKEN || ''
   let source = token ? 'env' : null
   if (typeof flags['token-file'] === 'string') {
@@ -114,7 +114,18 @@ export async function readBounded(response, limit = RESPONSE_MAX) {
   }
 }
 
-export function createRemote({ origin, token, source = null, fetchImpl = fetch, maxResponseBytes = RESPONSE_MAX }) {
+// `engine`: the solo engine target this token is for (remoteSettings): its proof is asked again after a connection
+// error or a 401, before the next request (engine-target.js guardEngineFetch).
+export function createRemote({
+  origin,
+  token,
+  source = null,
+  fetchImpl: baseFetch = fetch,
+  maxResponseBytes = RESPONSE_MAX,
+  engine = null,
+  verifyEngine = undefined,
+}) {
+  const fetchImpl = engine ? guardEngineFetch(baseFetch, engine, verifyEngine ? { verify: verifyEngine } : {}) : baseFetch
   async function call(method, pathname, { json, body, contentType, signal } = {}) {
     const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' }
     let payload
