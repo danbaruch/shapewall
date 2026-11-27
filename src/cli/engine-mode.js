@@ -13,14 +13,14 @@
 
 import { getBoard, loadConfig } from '../config.js'
 import { assertMigrationAllows } from '../engine-folder.js'
-import { ENGINE_TOKEN, engineAtRest, engineTarget } from '../engine-target.js'
+import { ENGINE_TOKEN, NO_ENGINE_VAR, engineAtRest, engineTarget, verifyEngine } from '../engine-target.js'
 
 export const ENGINE_COMMANDS = ['comments', 'watch', 'mcp', 'export']
 
 // -> { target, config } when the command goes to the engine (flags changed
 // in place: remote, the token, a default board), else null. Throws when the
 // command must not run on the JSON files.
-export function engineMode(command, flags, { env = process.env, err = () => {} } = {}) {
+export async function engineMode(command, flags, { env = process.env, err = () => {}, verify = verifyEngine } = {}) {
   if (!ENGINE_COMMANDS.includes(command)) return null
   if (flags.remote !== undefined || env.SHAPEWALL_REMOTE) return null
   let config
@@ -32,6 +32,12 @@ export function engineMode(command, flags, { env = process.env, err = () => {} }
   }
   const target = engineTarget(config, { which: command === 'watch' ? 'watch' : 'cli' })
   if (target) {
+    // Started by an agent (watch --exec without --pass-token, an agent's own process): no engine token for it, and no
+    // JSON files either, which are not the board.
+    if (env[NO_ENGINE_VAR] === '1')
+      throw new Error(
+        "This command was started by an agent (shapewall watch without --pass-token, or a connected agent): it does not get the solo engine's tokens. Run it yourself, or give watch --pass-token.",
+      )
     if (command === 'export') {
       if (!flags['no-comments'])
         throw new Error(
@@ -39,6 +45,8 @@ export function engineMode(command, flags, { env = process.env, err = () => {} }
         )
       return null
     }
+    // Whoever listens on the engine's port proves it is this start's engine before any token goes there.
+    await verify(target)
     flags.remote = target.origin
     flags[ENGINE_TOKEN] = target.token
     // The board a command works on when it names none: the config's first, as on the JSON files (mcp lists them all).

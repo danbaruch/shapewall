@@ -709,7 +709,14 @@ shapewall serve --engine hosted --open
   `watch.token`, with the claim scope), as `watch --remote` is on a team server. Every start gives each token a new secret
   (the same token, so its agent and claims stay; the last start's secret stops working), and a stop retires them and removes
   the files. A token file another user could read, a link in its place, or a `serve.json` that names another address is
-  refused, never used. `comments selectors` and `comments delete` are not on the engine yet; `comments add` takes `--page`,
+  refused, never used. Before a token goes anywhere, the command asks whoever listens on the engine's port to prove it is
+  this start's engine (an answer to a challenge under a key only `serve.json` and the engine hold; the question carries no
+  token), so a crashed engine's files never send a token to another program on that port. A rotation never widens a token:
+  a scope or an expiry you took away in the console stays away. On the engine, the token API and `/mcp` answer only on the
+  engine's own name, from this machine (on Linux, your own OS user), as the sign-in does. A `shapewall` command that an agent
+  started (`watch --exec` without `--pass-token`, or a connected agent's own commands) gets none of these tokens.
+  Agents never read `.shapewall/.engine/`: Shapewall's own file reads refuse it, and a Claude Code agent gets a deny rule for
+  it in its session settings. `comments selectors` and `comments delete` are not on the engine yet; `comments add` takes `--page`,
   `--body` and `--viewport`. `shapewall export` reads the 1.x files, so while the engine runs it is refused unless
   `--no-comments`. With the engine stopped, these commands read the 1.x files as before, say so on stderr when the engine
   has kept comments for the project, and refuse a board `shapewall migrate` moved. An explicit `--remote` (or

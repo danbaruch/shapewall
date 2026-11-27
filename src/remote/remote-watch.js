@@ -16,6 +16,7 @@
 // untrusted comment text) unless `passToken` (--pass-token) says so. Ids from
 // the server are checked before they become file names.
 
+import { NO_ENGINE_VAR } from '../engine-target.js'
 import { isAgentAuthored } from '../agent/triggers.js'
 import { watchCapabilities, writeCapabilitiesFile } from '../agent/watch-capabilities.js'
 import fs from 'node:fs'
@@ -68,7 +69,11 @@ export async function watchRemote({
   if (!ID_RE.test(String(boardId || ''))) throw new Error('the server sent an invalid board id')
   if (signal?.aborted) return
   const childEnv = { ...env }
-  if (!passToken) delete childEnv.SHAPEWALL_TOKEN
+  if (!passToken) {
+    delete childEnv.SHAPEWALL_TOKEN
+    // Nor the solo engine's own tokens, through a `shapewall` command in the project folder (engine-mode.js).
+    childEnv[NO_ENGINE_VAR] = '1'
+  }
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) throw new Error('--concurrency must be 1 to 4')
   let argv = null
   if (exec) {

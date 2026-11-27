@@ -15,6 +15,8 @@
 // not be readable by anyone else; anything that does not hold fails closed
 // with an error, never a silent fall back to the JSON files.
 
+import http from 'node:http'
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { ENGINE_DIR, engineDir, migratedBoards } from './engine-folder.js'
@@ -24,6 +26,10 @@ import { SOLO_HOST_RE } from './net.js'
 // The flag key a resolved engine token travels under from main() to
 // remoteSettings (src/remote/remote.js). A Symbol: no command line can set it.
 export const ENGINE_TOKEN = Symbol('shapewall.engineToken')
+// Set in the environment of what an agent runs (`watch --exec` without --pass-token, a connected agent's own
+// process): a `shapewall` command started there never reaches the engine with this machine's tokens (rev57 R57-4).
+export const NO_ENGINE_VAR = 'SHAPEWALL_NO_ENGINE'
+const PROOF_RE = /^[A-Za-z0-9_-]{43}$/
 
 const TOKEN_RE = /^swp_[A-Za-z0-9_-]{43}$/
 const TOKEN_NAME_RE = /^[a-z]+\.token$/
@@ -93,7 +99,61 @@ export function engineTarget(config, { which = 'cli' } = {}) {
   const token = (readPrivateFile(path.join(dir, name)) || '').trim()
   if (!TOKEN_RE.test(token))
     throw new EngineTargetError(`The solo engine's command-line token (${path.join(ENGINE_DIR, name)}) is missing. Restart the engine.`)
-  return { origin, url: typeof state.url === 'string' ? state.url : `${origin}/`, token, pid: Number(lock.pid), dir }
+  const proof = typeof state.proof === 'string' && PROOF_RE.test(state.proof) ? state.proof : null
+  if (!proof)
+    throw new EngineTargetError(
+      `The solo engine for this project (pid ${lock.pid}) left no way to check it is the one answering. Restart it with this version of Shapewall.`,
+    )
+  return { origin, url: typeof state.url === 'string' ? state.url : `${origin}/`, token, pid: Number(lock.pid), dir, proof }
+}
+
+// The engine's answer to a challenge: HMAC-SHA256 of it under the key in its serve.json (0600, a new one each start).
+export const engineProof = (key, challenge) => createHmac('sha256', Buffer.from(key, 'base64url')).update(challenge).digest('base64url')
+
+// Before any token goes to the engine's port: whoever listens there must prove it holds this start's key (rev57
+// R57-6). Without /proc a crashed engine's lock can pass for live (a reused pid), and another user may hold the port
+// now. The request carries no token and goes straight to 127.0.0.1. Throws EngineTargetError when it does not prove it.
+export async function verifyEngine(target, { timeoutMs = 3000 } = {}) {
+  const url = new URL(target.origin)
+  const challenge = randomBytes(24).toString('base64url')
+  const answer = await new Promise((resolve) => {
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port: Number(url.port) || 80,
+        method: 'POST',
+        path: '/solo/whoami',
+        headers: { Host: url.host, 'X-Shapewall-Challenge': challenge, 'Content-Length': 0 },
+        timeout: timeoutMs,
+        agent: false,
+      },
+      (res) => {
+        let body = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk) => {
+          body += chunk
+          if (body.length > 1024) req.destroy()
+        })
+        res.on('end', () => {
+          try {
+            resolve(res.statusCode === 200 ? String(JSON.parse(body).proof || '') : '')
+          } catch {
+            resolve('')
+          }
+        })
+      },
+    )
+    req.on('timeout', () => req.destroy())
+    req.on('error', () => resolve(''))
+    req.end()
+  })
+  const expected = Buffer.from(engineProof(target.proof, challenge))
+  const given = Buffer.from(answer)
+  if (given.length !== expected.length || !timingSafeEqual(given, expected))
+    throw new EngineTargetError(
+      `No running solo engine of this project answers at ${target.origin} (its files say pid ${target.pid}). If it stopped without cleaning up, start it again; nothing was sent.`,
+    )
+  return target
 }
 
 // What the solo engine folder says when no engine runs: { data, migrated }.

@@ -21,6 +21,7 @@
 //   manager restarts), as `serve` does; a stop waits for an apply in flight.
 // - Refused while `shapewall migrate` runs or after one stopped midway.
 import fs from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 import { loadConfig } from '../../config.js'
 import { DEFAULT_PORT } from '../../serve-state.js'
@@ -153,6 +154,8 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
     throw error
   }
   const holder = { stop: null }
+  // This start's proof key (engine-target.js verifyEngine): only in serve.json (0600) and the engine's memory.
+  const proofKey = randomBytes(32).toString('base64url')
   const solo = {
     signIn: 'local',
     config,
@@ -163,6 +166,7 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
     chat: !flags['no-chat'],
     allowCapture: !flags['read-only'] && !flags['no-capture'],
     env,
+    proofKey,
     // A managed installer opts in to a restart after its helper switched the release (exit 75), as `serve`.
     appUpdate: env.SHAPEWALL_UPDATE_RESTART === '1' ? { onRestart: () => holder.stop?.(UPDATE_RESTART_EXIT) } : {},
   }
@@ -211,6 +215,7 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
       pid: process.pid,
       start: processStartTime(process.pid),
       tokens: Object.fromEntries(Object.entries(tokenFiles).map(([which, file]) => [which, path.basename(file)])),
+      proof: proofKey,
     })}\n`,
     { mode: 0o600 },
   )

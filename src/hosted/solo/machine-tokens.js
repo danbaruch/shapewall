@@ -14,10 +14,12 @@
 //                by `serve --engine hosted` (R2). Scopes: exactly what an
 //                approved agent connection gets (AGENT_LOGIN_SCOPES).
 //
-// Each start rotates both: the same token row (so its agent, its name, icon,
+// Each start rotates them: the same token row (so its agent, its name, icon,
 // audience and claims stay) gets a new secret, and the old one stops working
-// at once. A stop rotates them again to a secret nobody holds and removes the
-// files, so a copy of a file outlives the engine by nothing. A token revoked
+// at once. A token is made only when there is none (or it was revoked); a
+// rotation never widens it again (scopes or an expiry the owner set stay).
+// A stop rotates them again to a secret nobody holds and removes the files,
+// so a copy of a file outlives the engine by nothing. A token revoked
 // from the console is not brought back: a new one is made.
 //
 // The token values are never logged or printed. machine-tokens.json in the
@@ -91,19 +93,28 @@ export function mintMachineToken(db, { dataDir, owner, which, now = () => new Da
     const id = typeof ids[which] === 'string' ? ids[which] : null
     const row = id
       ? t.get(
-          `SELECT id FROM api_tokens WHERE workspace_id = :ws AND project_id = :project AND id = :id AND revoked_at IS NULL
+          `SELECT id, scopes FROM api_tokens WHERE workspace_id = :ws AND project_id = :project AND id = :id AND revoked_at IS NULL
            AND created_by = :user`,
           { project: owner.projectId, id, user: owner.userId },
         )
       : null
     const agents = createAgentStore(t, { now })
     if (row) {
-      // The same row, a new secret: what the old file held stops working now. Scopes are put back to the set above.
-      t.run(
-        `UPDATE api_tokens SET token_hash = :hash, prefix = :prefix, scopes = :scopes, expires_at = NULL
-         WHERE workspace_id = :ws AND id = :id`,
-        { hash, prefix, scopes, id: row.id },
-      )
+      // The same row, a new secret: what the old file held stops working now. Never wider than it is: a scope or an
+      // expiry the owner took away stays away (rev57 R57-3); only what this release no longer gives is dropped.
+      let kept = []
+      try {
+        kept = JSON.parse(row.scopes || '[]')
+      } catch {
+        kept = []
+      }
+      const narrowed = JSON.stringify([...new Set(Array.isArray(kept) ? kept : [])].filter((scope) => spec.scopes.includes(scope)).sort())
+      t.run('UPDATE api_tokens SET token_hash = :hash, prefix = :prefix, scopes = :scopes WHERE workspace_id = :ws AND id = :id', {
+        hash,
+        prefix,
+        scopes: narrowed,
+        id: row.id,
+      })
       audit(t, { userId: owner.userId, action: 'token_rotated', target: row.id, ip: null, at, detail: { solo: which } })
       const agentId = spec.scopes.includes('claim') ? agents.forToken(owner.projectId, row.id)?.id || null : null
       return { tokenId: row.id, agentId, created: false }

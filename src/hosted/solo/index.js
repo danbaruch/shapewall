@@ -39,6 +39,7 @@ import { mountSoloInfo } from './info.js'
 import { ensureSoloOwner, mountSoloSignIn } from './signin.js'
 import { mountSoloUpdate } from './update.js'
 import { mintMachineToken, retireMachineTokens } from './machine-tokens.js'
+import { engineProof } from '../../engine-target.js'
 
 function mountOwner(app, deps, closers) {
   const solo = deps.solo
@@ -70,6 +71,14 @@ function mountOwner(app, deps, closers) {
     for (const which of ['cli', 'watch'])
       tokenFiles[which] = mintMachineToken(deps.db, { dataDir: deps.dataDir, owner, which, now: deps.now }).file
   }
+  // The proof a command line asks for before it sends a token (engine-target.js verifyEngine): an HMAC of its
+  // challenge under this start's key, which only serve.json (0600) and this process hold. No session, no token.
+  if (typeof solo.proofKey === 'string')
+    app.post('/solo/whoami', (req, res) => {
+      const challenge = String(req.headers['x-shapewall-challenge'] || '')
+      if (!/^[A-Za-z0-9_-]{16,64}$/.test(challenge)) return res.status(400).json({ error: { code: 'bad_challenge' } })
+      res.set('Cache-Control', 'no-store').json({ proof: engineProof(solo.proofKey, challenge) })
+    })
   app.locals.solo = { owner, boardUrl, boards, tokenFiles }
   return { ...deps, solo: { ...solo, workspaceId: owner.workspaceId, projectId: owner.projectId, boardUrl } }
 }

@@ -45,6 +45,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
   an agent of its own there, as `watch --remote` is. `comments get` and `comments add` work against a hosted board too.
   `export` is refused while the engine runs unless `--no-comments`. With the engine stopped, the commands say on stderr when
   the engine has kept comments, and refuse a board `shapewall migrate` moved. An explicit `--remote` wins.
+- Solo engine (experimental): the commands in the project folder ask the engine to prove it is this start's engine (a
+  challenge answered under a key in `serve.json`) before they send a token, and refuse when nothing proves it. A start rotates
+  the machine tokens without putting back a scope or an expiry removed in the console. On the engine the token API and `/mcp`
+  answer the engine's own name from this machine only (on Linux, your own OS user). A `shapewall` command an agent started
+  (`watch --exec` without `--pass-token`, a connected agent's own commands) gets no engine token. Agents never read
+  `.shapewall/.engine/`: the agent sandbox refuses it, and Claude Code gets a Read deny rule for it.
 - `shapewall serve` and `shapewall watch` do not start while `shapewall migrate` runs or after one stopped midway, and refuse
   the boards a migration moved to the solo engine.
 - `--remote` accepts plain `http` to the solo engine's own name (`<project>-<random>.shapewall.localhost`) as it does to
