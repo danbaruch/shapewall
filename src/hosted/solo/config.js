@@ -10,9 +10,10 @@
 // with the file's board ids.
 //
 // What the definition still leaves out, as a push does: capture-only
-// settings (auth, actions, setup) and environments beyond the first
-// (collapsed to `default` until G4). In-process capture (G3) reads those
-// from the bound config itself. A board the file no longer declares keeps
+// settings (auth, actions, setup). In-process capture (G3) reads those
+// from the bound config itself. Unlike a team server's push, it keeps the
+// board's environments (G4): their ids, titles and addresses, so the board
+// compares them as a local board does (src/hosted/board-compare.js). A board the file no longer declares keeps
 // its row and its comments (removing a board stays an explicit act).
 //
 // A file that cannot be read or is invalid leaves the boards as they were,
@@ -28,7 +29,12 @@ import { bindSoloProject } from './binding.js'
 // The board definitions the config file declares, as a push would send them.
 export function soloDefinitions(configPath) {
   const config = loadConfig(configPath)
-  return { config, definitions: config.boards.map((board) => cleanDefinition(pushDefinition(config, board))) }
+  return {
+    config,
+    definitions: config.boards.map((board) =>
+      cleanDefinition(pushDefinition(config, board, { environments: true }), { environments: true }),
+    ),
+  }
 }
 
 // sync() -> true when it changed something. ids: { workspaceId, projectId }.

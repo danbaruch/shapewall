@@ -31,7 +31,21 @@ export const DEFAULT_POLICY = {
   shell: true,
   browser: true,
 }
-export const dispatchHash = (row) => sha256(JSON.stringify([row.body, row.anchor || null, row.page_id, row.viewport, row.x, row.y]))
+// What a vouch covers: the text and where it is pinned, and (migration 24)
+// the environment, when it is not `default`: a team board's comments are all
+// on `default`, so the hashes vouches stored before stay the same.
+export const dispatchHash = (row) =>
+  sha256(
+    JSON.stringify([
+      row.body,
+      row.anchor || null,
+      row.page_id,
+      row.viewport,
+      row.x,
+      row.y,
+      ...(row.environment && row.environment !== 'default' ? [row.environment] : []),
+    ]),
+  )
 export function cleanPolicy(input) {
   const out = { ...DEFAULT_POLICY, boards: {} }
   if (!input || typeof input !== 'object' || Array.isArray(input))

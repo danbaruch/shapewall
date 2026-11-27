@@ -743,7 +743,7 @@ export async function migrateCommand(config, flags, out, { env = process.env, ve
       printPlan(plan, out, { dryRun: false })
       out('')
       out(`Migrated. Backup: ${rel(config, result.backup)} (undo with shapewall migrate --rollback).`)
-      out('This build cannot serve the solo engine yet; shapewall migrate --rollback puts the folder back as it was.')
+      out('Start the solo engine with shapewall serve --engine hosted; shapewall migrate --rollback puts the folder back as it was.')
     }
     return 0
   }

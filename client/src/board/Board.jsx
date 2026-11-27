@@ -347,6 +347,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     environmentList: data?.environments,
     setCommentMode,
     pageCount: data?.board?.pages?.length || 0,
+    allowed: DEMO || hostedOrSolo(info, 'compare'),
   })
 
   const layoutPages = useMemo(() => {

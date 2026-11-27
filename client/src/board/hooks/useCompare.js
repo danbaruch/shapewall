@@ -6,14 +6,17 @@ import { useResource } from '../../lib/hooks'
 // Boards this big open compare on "Changed pages only" (`changed=0` shows all).
 export const CHANGED_ONLY_MIN_PAGES = 30
 
-export function useCompare({ boardId, params, updateParams, environmentList, setCommentMode, pageCount = 0 }) {
+// `allowed`: this board compares (client/src/board/solo.js hostedOrSolo(info,
+// 'compare'): a local board, or the solo engine for its owner).
+export function useCompare({ boardId, params, updateParams, environmentList, setCommentMode, pageCount = 0, allowed = true }) {
   const environments = useMemo(() => (Array.isArray(environmentList) ? environmentList : []), [environmentList])
   const comparePair = useMemo(() => {
+    if (!allowed) return null
     const [a, b] = String(params.get('cmp') || '').split('_')
     const ids = environments.map((env) => env.id)
     return a && b && a !== b && ids.includes(a) && ids.includes(b) ? [a, b] : null
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.get('cmp'), environments])
+  }, [params.get('cmp'), environments, allowed])
   const changedParam = params.get('changed')
   const changedDefault = pageCount >= CHANGED_ONLY_MIN_PAGES
   const changedOnly = Boolean(comparePair) && (changedParam === '1' || (changedParam !== '0' && changedDefault))
@@ -55,7 +58,7 @@ export function useCompare({ boardId, params, updateParams, environmentList, set
       diff: pair ? params.get('diff') : null,
     })
   }
-  const canCompare = environments.length > 1
+  const canCompare = allowed && environments.length > 1
   const toggleCompare = () => setCompare(comparePair ? null : [environments[0].id, environments[1].id])
   return {
     environments,

@@ -130,7 +130,8 @@ Shapewall has two licenses:
 - **Apache 2.0** ([LICENSE](LICENSE)) for everything except `src/hosted`: the CLI, capture, the board, local accounts, shared helpers,
   MCP, the agents and the clients of the team server (`push`, `share`, `--remote`, in `src/remote`). Open source.
 - **Functional Source License 1.1, Apache 2.0 future license** ([src/hosted/LICENSE.md](src/hosted/LICENSE.md)) for the self-hosted
-  team server in `src/hosted`. Source-available: you can read, modify and run it for yourself or your company, but not offer it as a
-  competing commercial service. Each release becomes Apache 2.0 two years later.
+  team server in `src/hosted`, which also holds the solo engine (`shapewall serve --engine hosted`, experimental).
+  Source-available: you can read, modify and run it for yourself or your company, but not offer it as a competing commercial
+  service. Each release becomes Apache 2.0 two years later.
 
 Copyright Dan Baruch and Shapewall contributors. See [NOTICE](NOTICE) and [THIRD_PARTY.md](THIRD_PARTY.md).

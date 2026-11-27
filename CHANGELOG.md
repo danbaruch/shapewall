@@ -5,30 +5,26 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+1.5.0 adds the solo engine, opt-in and experimental: `shapewall serve --engine hosted` runs the hosted server's engine for
+one project on your own machine, with the project's agent on the same link protocol a team server's agents use, and
+`shapewall migrate` moves an existing `.shapewall/` into it. The plain `shapewall serve` is unchanged and stays the default.
+The engine is part of the hosted server (`src/hosted`, Functional Source License 1.1, Apache 2.0 future license); the CLI,
+capture, the local board and the migration's planner, backup and rollback stay Apache 2.0. See
+[Where to run Shapewall](docs/where-to-run.md#the-solo-engine-experimental).
+
 ### Added
 
-- Solo engine (experimental): "Capture now" on the board and `recapture_pages` on the engine's `/mcp` capture in the engine
-  itself, from the live `shapewall.config.json`, straight into the board, with no push. Owner only (the board on this machine,
-  or a `push` token the owner made, used on this machine); the capture browser reaches the app's origin only, never the
-  engine, its live HTML origin or this machine's LAN and tailnet addresses. `--no-capture` and `--read-only` turn it off.
-  Team servers never capture. See docs/hosted.md, "The solo engine (experimental)".
-- Solo engine (experimental): **Run checks** in the board's Checks panel runs the page checks in the engine itself, from the
-  live `shapewall.config.json`, and the SEO tab shows that run's search previews, as on a local board. Owner only, on this
-  machine; the check browser reaches the app's origin only, like the capture browser. One job at a time on the engine
-  (checks and captures wait for each other); `--read-only` and `--no-capture` turn runs off. Team servers never run checks.
-  Reports a push brought read as imported, the engine's own runs as its own. A run that does not stop in time is closed
-  and ends as stopped, and writes nothing after; a capture that does not stop in time keeps its board, and removing that
-  board answers that the engine needs a restart. See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
-- Solo engine (experimental): batch fixes on the board's chat, as on a local board: the owner picks open comments
-  (Select in the comments panel), and the engine fixes them one after another through the link to the connected agent.
-  Each fix is its own turn with its own trust (a comment by someone else never runs solo-tier), its own approval cards and
-  its own branch. The engine's owner only, signed in from the terminal on this machine, checked again before each fix.
-  Off until `agent.batchFixes` turns it on; team servers have no batch routes. See
+- Solo engine (experimental): `shapewall serve --engine hosted` runs the hosted engine for one project on this machine, at
+  `http://<project>-<random>.shapewall.localhost:<port>`, with its data in `.shapewall/.engine/` (refused when git tracks it or
+  cannot say, but not for a stray `.git` above the project that git does not see; `--skip-git-check` to start anyway). One
+  owner, no passkey: `--open` or `--print-owner-link` gives a one-time sign-in page, a private file in the data folder, so
+  the one-time code is never on a command line or in the output. It works once, within 60 seconds (5 minutes when printed),
+  from this machine (on Linux, your own OS user) and on the engine's own name only; the sign-in cookie is `SameSite=Strict`
+  (also when it is renewed) and lasts 24 hours from the last use, 7 days at most. The start prints
+  `SHAPEWALL_REMOTE=<address> shapewall agent connect` for agents. Its boards follow `shapewall.config.json`. Flags that
+  reach beyond this machine are refused; `--read-only`, `--no-chat` and `--no-capture` apply to the board. The engine is
+  the hosted server's code, under its license (FSL-1.1-ALv2), not the core's Apache 2.0. See
   [the solo engine](docs/hosted.md#the-solo-engine-experimental).
-- Solo engine (experimental): the owner makes, edits and deletes the board's own journeys from the board, as on a local
-  board, with the same validation against the config file's pages. They are stored in the board's `journeys.json` in the
-  engine's folder; journeys from the config stay read only. Team servers keep journeys read only. See
-  [Journeys made on the board](docs/journeys.md#journeys-made-on-the-board).
 - Solo engine (experimental): `serve --engine hosted` runs this project's agent on the link protocol, as
   `shapewall agent connect --as local` with a token the engine makes at start (0600 in `.shapewall/.engine/`, rotated each
   start, retired at stop; the address goes in the environment, never on a command line). The board's chat, Fix with and
@@ -38,18 +34,43 @@ and the project uses [Semantic Versioning](https://semver.org/).
   away). It acts only when asked (the chat, Fix with, Send to agent, an @mention). A stop, by SIGINT or SIGTERM too, stops
   it, and it stops by itself when the engine is killed. Neither it nor what it runs gets the engine's command-line or watch
   tokens. `--no-chat` runs without it. See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
-- `shapewall agent connect --endpoint` (experimental): a model endpoint (Ollama, DeepSeek, OpenAI or any OpenAI-compatible
-  server) as a connected agent, read and answer only: no edits, commands, tools, browser or extensions. The key stays in
-  its variable and is never printed, logged, saved or sent to the server.
+- Solo engine (experimental): "Capture now" on the board and `recapture_pages` on the engine's `/mcp` capture in the engine
+  itself, from the live `shapewall.config.json`, straight into the board, with no push. Owner only (the board on this machine,
+  or a `push` token the owner made, used on this machine); the capture browser reaches the app's origin only, never the
+  engine, its live HTML origin or this machine's LAN and tailnet addresses. `--no-capture` and `--read-only` turn it off.
+  Team servers never capture. See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
+- Solo engine (experimental): environments and compare. The engine's boards keep the config's `environments`, the board
+  compares them as a local board does, `shapewall push` to the engine sends and keeps every environment's
+  captures, "Capture now" takes an environment (`env`), and a comment placed on a compare card's side is stored on that
+  environment (the `comments.environment` column of migration 24). The token API (`?environment=`) and the hosted MCP
+  `list_comments` (`environment`) filter by it, and a vouch for "Send to agent" covers it. Team servers keep one environment
+  per board (`default`) and no compare. See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
+- Solo engine (experimental): **Run checks** in the board's Checks panel runs the page checks in the engine itself, from the
+  live `shapewall.config.json`, and the SEO tab shows that run's search previews, as on a local board. Owner only, on this
+  machine; the check browser reaches the app's origin only, like the capture browser. One job at a time on the engine
+  (checks and captures wait for each other); `--read-only` and `--no-capture` turn runs off. Team servers never run checks.
+  Reports a push brought read as imported, the engine's own runs as its own. A run that does not stop in time is closed
+  and ends as stopped, and writes nothing after; a capture that does not stop in time keeps its board, and removing that
+  board answers that the engine needs a restart. See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
+- Solo engine (experimental): the owner makes, edits and deletes the board's own journeys from the board, as on a local
+  board, with the same validation against the config file's pages. They are stored in the board's `journeys.json` in the
+  engine's folder; journeys from the config stay read only. Team servers keep journeys read only. See
+  [Journeys made on the board](docs/journeys.md#journeys-made-on-the-board).
+- Solo engine (experimental): batch fixes on the board's chat, as on a local board: the owner picks open comments
+  (Select in the comments panel), and the engine fixes them one after another through the link to the connected agent.
+  Each fix is its own turn with its own trust (a comment by someone else never runs solo-tier), its own approval cards and
+  its own branch. The engine's owner only, signed in from the terminal on this machine, checked again before each fix.
+  Off until `agent.batchFixes` turns it on; team servers have no batch routes. See
+  [the solo engine](docs/hosted.md#the-solo-engine-experimental).
 - Solo engine (experimental): the engine writes `.shapewall/events.jsonl` in the same line format as the local board and sends
   notifications as `serve` does, so `shapewall events`, bots and notification channels keep working. See
   [the event log](docs/notifications.md#the-event-log).
-- Solo engine (experimental): the board's `/info` says `solo: true` and lists the local-only features the engine serves
-  (`soloFeatures`). The board turns those on for the engine's owner only (journey editing, checks runs, batch fixes, the capture
-  hint in the empty state), each once the engine serves it. Team servers never send
-  `solo` and keep their behaviour.
 - Solo engine (experimental): About and updates can check for and apply an installation update, as on a local board: the
-  installer's fixed helper only, for the engine's owner on this machine. See [Installation updates](docs/updates.md#on-the-solo-engine-experimental).
+  installer's fixed helper only, for the engine's owner on this machine. See
+  [Installation updates](docs/updates.md#on-the-solo-engine-experimental).
+- Solo engine (experimental): the board's `/info` says `solo: true` and lists the local-only features the engine serves
+  (`soloFeatures`). The board turns those on for the engine's owner only (journey editing, checks runs, batch fixes, the
+  capture hint in the empty state), each once the engine serves it. Team servers never send `solo` and keep their behaviour.
 - `shapewall migrate` (experimental): moves one project's `.shapewall/` into the solo engine (`.shapewall/.engine/`).
   Captures, versions, variants, environments, diffs and journeys move as files; comments (with images, drawings, reactions
   and replies), chat threads and the local `serve --accounts` owner with their passkeys and recovery codes become engine rows.
@@ -57,19 +78,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `.shapewall/backup-1x-<time>/` first, a failed run puts the folder back, a second run does nothing (`MIGRATED-TO-2`), and
   `--rollback` restores every board checked byte for byte, from the backups a run recorded only, linking or copying only
   the backup's own files (each checked by device and inode as it is read). A run that finished but was stopped before it
-  removed `MIGRATING-TO-2` counts as finished. It refuses while serve, capture, watch or an agent runs, holds the boards'
-  comment and chat locks for the whole run, and after a run that was stopped midway points at `--rollback`. Only comments the board stamped as the owner's become the owner's; others signed
-  with the owner's name come in as imported text. Agent settings and keys stay on the machine; sign-in sessions and paired
-  devices do not move (sign in and pair again). The planner, backup and rollback are part of the Apache-licensed core; only
-  the engine database writer is under the server's license.
-- Solo engine (experimental): `shapewall serve --engine hosted` runs the hosted engine for one project on this machine, at
-  `http://<project>-<random>.shapewall.localhost:<port>`, with its data in `.shapewall/.engine/` (refused when git tracks it or
-  cannot say, but not for a stray `.git` above the project that git does not see; `--skip-git-check` to start anyway). One owner, no passkey: `--open` or `--print-owner-link` gives a one-time
-  sign-in page, a private file in the data folder, so the one-time code is never on a command line or in the output. It works
-  once, within 60 seconds (5 minutes when printed), from this machine (on Linux, your own OS user) and on the engine's own name
-  only; the sign-in cookie is `SameSite=Strict` (also when it is renewed) and lasts 24 hours from the last use, 7 days at most.
-  The start prints `SHAPEWALL_REMOTE=<address> shapewall agent connect` for agents. Its boards follow `shapewall.config.json`. Flags that reach beyond this machine are refused; `--read-only` and `--no-chat` apply to the board.
-  See docs/hosted.md, "The solo engine (experimental)".
+  removed `MIGRATING-TO-2` counts as finished. It refuses while serve (either engine), capture, watch or an agent runs,
+  holds the boards' comment and chat locks for the whole run, and after a run that was stopped midway points at
+  `--rollback`. Only comments the board stamped as the owner's become the owner's; others signed with the owner's name come
+  in as imported text. Agent settings and keys stay on the machine; sign-in sessions and paired devices do not move (sign in
+  and pair again). The planner, backup and rollback are part of the Apache 2.0 core; only the engine database writer
+  (`src/hosted/migrate`) is under the server's license. After a run, start the engine with `shapewall serve --engine hosted`.
+  See [moving a local project into the engine](docs/hosted.md#moving-a-local-project-into-the-engine-shapewall-migrate).
+- `shapewall agent connect --endpoint` (experimental): a model endpoint (Ollama, DeepSeek, OpenAI or any OpenAI-compatible
+  server) as a connected agent, read and answer only: no edits, commands, tools, browser or extensions. The key stays in
+  its variable and is never printed, logged, saved or sent to the server.
 
 ### Changed
 
@@ -98,19 +116,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   8 seconds), and exits with the code the update asked for.
 - Hosted servers: migration 24 prepares the database for the solo engine. It adds `comments.environment` (every existing comment
   is on `default`), lets `sessions.via` be `local` (a rebuild of `sessions`, like migration 18) and adds the `solo_binding`
-  table. Nothing changes on a team server. Stop `shapewall hosted admin` jobs before the first start. Rollback notes are in
-  docs/hosted.md, "Migration 24 and rollback".
-
-### Security
-
-- Agents: an ACP agent's file reads (`fs/read_text_file`) no longer reach Shapewall's own store (`.shapewall/`: accounts,
-  sessions, notification settings, tokens), the recorded logins in `.shapewall-auth/` or the config's `auth.storageState`
-  files, through a link either; only writes were refused before. A Claude Code agent also gets `Read` deny rules for those
-  paths in its session settings, since it reads files itself (checked against a real Claude Code on Linux: Read, Grep,
-  Glob and links into the store are refused). Comments and captures reach agents through Shapewall's tools as before.
-  Codex, goose and Gemini CLI read files with their own tools, which take no per-path deny, so on a local board they can
-  still read these paths; for a board where people you do not trust write comments, use Claude Code, or a connected agent
-  (`shapewall agent connect`), whose commands run in the OS sandbox.
+  table. Nothing changes on a team server. Stop `shapewall hosted admin` jobs before the first start. Rollback notes:
+  [Migration 24 and rollback](docs/hosted.md#migration-24-and-rollback).
 
 ### Fixed
 
@@ -130,6 +137,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- Agents: an ACP agent's file reads (`fs/read_text_file`) no longer reach Shapewall's own store (`.shapewall/`: accounts,
+  sessions, notification settings, tokens), the recorded logins in `.shapewall-auth/` or the config's `auth.storageState`
+  files, through a link either; only writes were refused before. A Claude Code agent also gets `Read` deny rules for those
+  paths in its session settings, since it reads files itself (checked against a real Claude Code on Linux: Read, Grep,
+  Glob and links into the store are refused). Comments and captures reach agents through Shapewall's tools as before.
+  Codex, goose and Gemini CLI read files with their own tools, which take no per-path deny, so on a local board they can
+  still read these paths; for a board where people you do not trust write comments, use Claude Code, or a connected agent
+  (`shapewall agent connect`), whose commands run in the OS sandbox.
 - `shapewall serve --open` and `shapewall settings --open` no longer put the one-time open link's nonce on the browser
   opener's command line (`xdg-open`, `open`, `explorer.exe`), where another user of the machine could read it and open the
   board as its owner first. The browser is opened on a page in the project's `.shapewall/` folder, readable only by you, that
