@@ -17,8 +17,10 @@ Walk through the [checklist before you invite the team](#before-you-invite-the-t
 `shapewall hosted` supplies team accounts, roles and collaboration. A public domain or a Shapewall-operated service is not needed
 for tailnet multiplayer.
 
-What v0 does not do: capture on the server. The server never opens a browser and never fetches a URL a user gives it, so there is no
+What a team server does not do: capture. It never opens a browser and never fetches a URL a user gives it, so there is no
 SSRF surface. You capture on your machine or in CI (it can reach `localhost` and staging, which a hosted crawler cannot) and push.
+The [solo engine](#the-solo-engine-experimental), this server run for one project on your own machine, is the one exception: it
+captures and runs checks itself, against the app's own origin only.
 
 ## Run it
 
@@ -671,6 +673,11 @@ folder:
 shapewall serve --engine hosted --open
 ```
 
+It is this server's code (`src/hosted`), so it is under this server's license, the
+[Functional Source License 1.1, ALv2 future license](../src/hosted/LICENSE.md), not the core's Apache 2.0: anyone may use, change
+and run it, at work too, but not to offer competing hosting, and each release becomes Apache 2.0 two years after it ships. An
+existing project's `.shapewall/` moves into it with [`shapewall migrate`](#moving-a-local-project-into-the-engine-shapewall-migrate).
+
 - **Where it listens.** On 127.0.0.1 only, at `http://<project>-<random>.shapewall.localhost:<port>`: the project's title in
   lowercase and a random part made on the first start and kept in `.shapewall/.engine/host.key`, for example
   `http://lumen-notes-k3x7q2mvw9a4bd.shapewall.localhost:4600`. Browsers send every `*.localhost` name to this machine.
@@ -692,7 +699,8 @@ shapewall serve --engine hosted --open
   a link from another site opens the board signed out (open the board's address yourself). A sign-in lasts 24 hours from
   the last use and 7 days at most, and is checked the same way (this machine, your OS user, the engine's name) on every
   request; the account's Sessions list shows it as "Signed in from the terminal". With no passkeys, the console asks you to
-  type the name of what you remove or delete.
+  type the name of what you remove or delete. The workspace the engine serves, and your account, cannot be deleted on the
+  engine (409): to start over, stop the engine and move its data folder (by default `.shapewall/.engine`) aside.
 - **The boards** are the ones `shapewall.config.json` declares; the engine reads it again when it changes. `shapewall push`,
   `shapewall comments`, `shapewall login` and `shapewall agent connect` take the engine's address in `SHAPEWALL_REMOTE` (or
   `--remote`), as with a team server (approve them on `/device` in the signed-in browser). The start prints the line for
@@ -777,7 +785,8 @@ shapewall serve --engine hosted --open
   comments), `--no-capture` (no captures from the board or from agents).
 - **Capturing.** "Capture now" on the board, and `recapture_pages` for an agent on the engine's `/mcp`, capture the pages
   in the engine itself from the board's `baseUrl` in `shapewall.config.json` (pages, auth, actions and setup as the file
-  says now), straight into the board: no `shapewall push`. The default environment only, for now. Only the owner starts one:
+  says now), straight into the board: no `shapewall push`. Any of the board's environments (`{ "env": "<id>" }`, as
+  `shapewall capture --env`), from that environment's `baseUrl`. Only the owner starts one:
   from the board in a signed-in browser on this machine, or with a project token the owner made that has the `push` scope,
   used on this machine on the engine's name. One capture runs at a time, and a push of the board waits until it ends. The
   capture browser reaches the app's origin (scheme, host and port of `baseUrl`) and nothing else, through a proxy that also
@@ -788,7 +797,15 @@ shapewall serve --engine hosted --open
   not hold "Capture now" back: the capture ends it. A workspace over its storage quota does not capture, and each capture
   counts toward it. Removing the board while it captures stops the capture first. `shapewall hosted backup` waits while a
   capture runs. A team server never captures.
-  comments), `--no-capture`.
+- **Environments and compare.** The engine's boards keep the `environments` of `shapewall.config.json`, and the board
+  compares them as a local board does (Compare in the view menu, `?cmp=<a>_<b>`, the diff masks, "Changed pages only"). A
+  `shapewall push` to the engine (`SHAPEWALL_REMOTE` set to its address) sends every environment's latest captures, and the engine keeps them all (a push
+  without them, from an older CLI or another `--remote`, keeps the environments the board has and replaces its captures, so
+  the other environments' captures go until they are pushed or captured again). A comment placed on one side of a compare
+  card is stored on that environment (and a comment made outside compare on the first), only the first environment keeps
+  old captures (versions), and "Send to agent" covers the environment too. `GET /api/v1/boards/:board/comments?environment=<id>`
+  and the hosted MCP `list_comments` (`environment`) list only the comments on that environment. A team server keeps one
+  environment per board (`default`) whatever a push sends, so it never compares.
 - **Checks.** **Run checks** in the board's Checks panel runs `shapewall checks run` in the engine itself, from the live
   `shapewall.config.json` (pages, auth, actions and setup as the file says now, `checks.seo` included), and the reports go
   straight into the board, with no push. The SEO tab shows the search previews of the engine's own runs, as on a local
@@ -807,6 +824,40 @@ shapewall serve --engine hosted --open
 - **Updates.** With `SHAPEWALL_UPDATE_RESTART=1` (set by a managed install), a finished update stops the engine with exit code
   75 so the service manager starts the new version. Stopping it (Ctrl+C) while an update is being applied waits for the update
   to finish first, and exits with 75 too when that update needs a restart.
+
+### Moving a local project into the engine: `shapewall migrate`
+
+**Experimental.** Outside the [stability promise](stability.md): it can change, or go, in a minor release.
+
+```sh
+shapewall migrate --dry-run     # what would move, and every item that would not, with the reason; writes nothing
+shapewall migrate               # backup, then move; prints the same counts
+shapewall serve --engine hosted --open
+shapewall migrate --rollback    # put it back (add --dry-run to see what it would restore)
+```
+
+Run it in the project folder with nothing else running for the project: it refuses while `shapewall serve` (either engine),
+a capture, `watch`, the starter agent or another migration runs. `--board ID` moves one board; `--json` prints the result as JSON.
+The exit code is 0 when it is done or there is nothing to do, 1 when it refused or failed.
+
+- **What moves.** Captures, versions, variants, environments, diffs and journeys move as files into `.shapewall/.engine/`.
+  Comments (with replies, reactions, images and drawings) and chat threads become engine rows with their numbers, and a
+  `serve --accounts` owner becomes the engine's owner with their passkeys and recovery codes. Only comments the board stamped
+  as the owner's become the owner's; others signed with the owner's name come in as imported text, and other names stay labels.
+- **What does not.** Agent settings and keys stay on the machine (the engine reads Settings > Agent as before). Sign-in
+  sessions and paired devices do not move: sign in and pair again. `events.jsonl` stays where it is, and the engine keeps
+  writing it. The dry run lists every item that would not come along.
+- **Safety.** A hard-link backup goes to `.shapewall/backup-1x-<time>/` first. The run holds each board's comment and chat
+  locks throughout, and a run that fails after the backup puts the folder back as it was. `MIGRATING-TO-2` marks a run in
+  progress; after one that was stopped midway, `migrate`, `serve`, `watch` and the engine refuse to start and point at
+  `--rollback`. `MIGRATED-TO-2` records each finished run, so a second run does nothing, and the plain `shapewall serve` and
+  `watch` refuse the boards that moved (the engine serves them).
+- **Rollback.** `shapewall migrate --rollback` restores every board from the backups the runs recorded, checked byte for byte,
+  and the engine folder as it was before the run (none, if there was none). Nothing is deleted on the way: what is there now,
+  with anything made on the engine since, moves aside into `<backup>/replaced-<time>/`. The backups stay until you delete them. To go back to an older Shapewall, roll back
+  with this version first, then run the older one pinned (`npx shapewall@1.4 serve`).
+- **License.** The planner, the backup and the rollback are part of the Apache 2.0 core (`src/migrate`); only the writer of the
+  engine's database (`src/hosted/migrate`) is under this server's license, and `--rollback` never needs it.
 
 ## Accounts
 
@@ -1131,7 +1182,8 @@ The server treats every upload as untrusted, even from our CLI:
 `/w/<workspace>/p/<project>/` serves the same board client as `shapewall serve`, on an API with the same shape, for members of the
 workspace. Comments are signed with the account's name and handle (the server sets them; the board shows the handle beside the name).
 A token's replies are signed with the token's name and marked as an agent, with its agent's icon beside them; the API ignores any `author` it sends. Captures from the board and editing journeys are off on a
-hosted board (push again instead). Compare between environments is not hosted yet.
+hosted board (push again instead). A team server keeps one environment per board (`default`), so it has no compare; the solo
+engine keeps a board's environments and compares them ([the solo engine](#the-solo-engine-experimental)).
 
 Live HTML is served from `/uc/...` through HMAC-signed URLs that expire after 2 minutes. The board API gives each new frame load a
 fresh redirect. Guest URLs are bound to their share link and checked again on every load: revoking the link stops new loads immediately
@@ -1227,8 +1279,8 @@ API, `more` counts the rest; a current capture's URL answers `409 capture_moved`
 with `read` can list and fetch every kept version of every page: old captures are as readable as the current ones, so give a
 read token only to someone who may see the board's history. A claim token (a connected agent's) is the exception: it lists and
 fetches only the current captures and the versions the comments dispatched to it were made on,
-`GET /api/v1/boards/:board/comments?status=open|resolved|all&page=&mention=&guests=1`, `GET /api/v1/boards/:board/comments/:id`,
-`GET /api/v1/boards/:board/files/:kind/:file`, `POST /api/v1/boards/:board/comments` (scope `reply`: `{ page, body, viewport?, x?, y?,
+`GET /api/v1/boards/:board/comments?status=open|resolved|all&page=&mention=&environment=&guests=1`, `GET /api/v1/boards/:board/comments/:id`,
+`GET /api/v1/boards/:board/files/:kind/:file` (and `files/envs/:env/:file` for another environment's screenshot or element map), `POST /api/v1/boards/:board/comments` (scope `reply`: `{ page, body, viewport?, x?, y?,
 anchor? }`, the pin in percent of the page, near the top-left corner by default; no images, drawing or author name; audited as
 `token_commented`), `POST .../comments/:id/replies`, `POST .../comments/:id/agent-status`
 (`{ agentStatus, onlyFrom }`), `POST .../comments/:id/resolve` (`{ note, fixRef, agentStatus }`), `POST .../comments/:id/reopen`,

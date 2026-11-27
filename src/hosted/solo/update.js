@@ -17,8 +17,11 @@
 //   any account can make a workspace of its own and own it. The fixed update
 //   token (SHAPEWALL_UPDATE_TOKEN) also passes, as on a local board behind
 //   the update proxy, still behind the session check.
-// - No fresh passkey check before an apply yet: a solo owner's local session
-//   cannot give one (see the A2 notes); local serve asks for none either.
+// - An apply asks for the fixed core's check first (coreFreshOrThrow, PR #53
+//   F4): passkeys are off on the engine, so the owner's local session types
+//   the workspace's name (X-Shapewall-Confirm), as for the console's other
+//   always-asking actions. The fixed update token skips it, as the installer's
+//   own. A check never asks.
 // - An apply is never killed; shutdown (close, awaited by app.locals.close)
 //   stops a running check and waits for an apply, and the helper answers
 //   through a file, so it outlives this server if it must. A restart happens
@@ -30,6 +33,7 @@
 // solo options read here: appUpdate ({ helper, onRestart, restartDelayMs,
 // checkTimeoutMs, applyTimeoutMs }), env (default process.env), readOnly.
 import { localRequest } from '../../agent/settings-routes.js'
+import { HttpError } from '../http.js'
 import { appUpdateRouter } from '../../update/routes.js'
 import { readSoloBinding } from './binding.js'
 
@@ -49,6 +53,19 @@ export function soloOwner(db, req) {
   return owners.length === 1 && owners[0].user_id === req.user.id
 }
 
+// null when the session passed the fixed core's check, else the refusal to send.
+function freshRefusal(deps, req) {
+  if (typeof deps.coreFreshOrThrow !== 'function')
+    return { status: 403, code: 'reauth_required', message: 'This server cannot confirm an update here.' }
+  try {
+    deps.coreFreshOrThrow(req)
+    return null
+  } catch (error) {
+    if (!(error instanceof HttpError)) throw error
+    return { status: error.statusCode, code: error.code, message: error.message, extra: error.extra || {} }
+  }
+}
+
 export function mountSoloUpdate(app, deps) {
   if (!deps.boardApi) return null
   const solo = deps.solo || {}
@@ -59,6 +76,8 @@ export function mountSoloUpdate(app, deps) {
     // On the engine (serve --engine hosted): its own exact host, from this OS user (the sign-in gate).
     owner: (req) =>
       soloOwner(deps.db, req) && localRequest(req, { ownHost: deps.localGate?.host }) && (!deps.localGate || deps.localGate.admits(req)),
+    // Fails closed: without the core's check no session applies.
+    confirmApply: (req) => freshRefusal(deps, req),
   })
   deps.boardApi.use('/app-update', updates)
   // As on a local server (src/server/app.js): whoever stops the engine can

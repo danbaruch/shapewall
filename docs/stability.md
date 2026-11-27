@@ -46,6 +46,14 @@ Anything marked experimental may change, or go, in a minor release, with a note 
 all`), an experimental command or option ends its first line with `(experimental)`; in these docs, its section or page says
 **Experimental** at the top.
 
+- **The solo engine (1.5.0):** `serve --engine hosted` and every flag it takes there, `--skip-git-check`, the board's
+  `/info` fields `solo` and `soloFeatures`, `.shapewall/.engine/` and its `serve.json` and token files, and what the
+  project-folder commands do while the engine runs ([the solo engine](hosted.md#the-solo-engine-experimental)). The hosted
+  server itself, its token API and `/mcp` stay covered as before.
+- **The migration (1.5.0):** `shapewall migrate` with `--dry-run`, `--board`, `--rollback` and `--json`, its JSON output, and
+  the files it leaves in `.shapewall/` (`backup-1x-<time>/`, `MIGRATING-TO-2`, `MIGRATED-TO-2`, `migrate.lock`)
+  ([moving a local project into the engine](hosted.md#moving-a-local-project-into-the-engine-shapewall-migrate)).
+- **Endpoint agents on the link:** `agent connect --endpoint`.
 - **The sandboxed starter agent:** `shapewall agent sandbox run|watch|doctor|build-image`, the `starterAgent` config key,
   `Dockerfile.agent`, `SHAPEWALL_AGENT_IMAGE`, `SHAPEWALL_AGENT_RUNTIME`, `SHAPEWALL_AGENT_REGISTRY`, `SHAPEWALL_AGENT_EGRESS`,
   `SHAPEWALL_AGENT_KEY_HOSTS`, `SHAPEWALL_SANDBOX` and `SHAPEWALL_EGRESS_*` ([the starter agent](starter-agent.md)).

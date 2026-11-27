@@ -70,3 +70,33 @@ export function isSoloFolder(db) {
 
 export const SOLO_FOLDER_OPERATOR_MESSAGE = (dir) =>
   `${dir} is a solo engine's folder (shapewall serve --engine hosted): it has one owner and no operator commands. Run them on a team server's folder.`
+
+// Deleting the workspace the engine serves, or the account that owns it
+// (rev63 R1-L1): refused on the solo engine. It would leave the engine bound
+// to nothing, and a capture or checks run going at that moment would write
+// its files back under the removed folder, where no row counts them. A team
+// server has no binding, so nothing is refused there. A binding that does
+// not read fails closed (it is still a solo folder).
+const START_OVER = 'To start over, stop the engine (shapewall serve) and move its data folder (by default .shapewall/.engine) aside.'
+export const SOLO_BOUND_DELETE_MESSAGE = {
+  workspace: 'This is the workspace the engine serves, so it cannot be deleted here. ' + START_OVER,
+  account: 'Your account owns the workspace the engine serves, so it cannot be deleted here. ' + START_OVER,
+}
+// Whether deleting `workspaceId`, or the account `userId` (which removes the
+// workspaces it owns), would take the workspace the engine serves.
+export function deletesSoloBinding(db, { workspaceId = null, userId = null }) {
+  if (!isSoloFolder(db)) return false
+  let bound
+  try {
+    bound = readSoloBinding(db)?.workspaceId
+  } catch {
+    return true
+  }
+  if (!bound) return true
+  if (workspaceId && workspaceId === bound) return true
+  if (userId)
+    return Boolean(
+      db.prepare("SELECT 1 FROM memberships WHERE workspace_id = ? AND user_id = ? AND role = 'owner'").get(bound, String(userId)),
+    )
+  return false
+}

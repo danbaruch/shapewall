@@ -251,6 +251,11 @@ export async function createRemoteMcpServer({
         board: boardArg,
         status: z.enum(['open', 'resolved', 'all']).optional().describe('Default open'),
         page: z.string().max(64).optional().describe('Only comments on this page id (and its variants)'),
+        environment: z
+          .string()
+          .regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
+          .optional()
+          .describe('Only comments left on this environment of the board (its id, e.g. "staging"; compare mode)'),
         journey: z.string().max(64).optional().describe('Only comments on pages of this journey'),
         agentStatus: z
           .enum([...STORED_AGENT_STATUSES, 'none'])
@@ -270,7 +275,7 @@ export async function createRemoteMcpServer({
       annotations: { readOnlyHint: true },
     },
     tool(async (args) => {
-      const { board, status = 'open', journey, agentStatus, mention, includeGuests = false } = args
+      const { board, status = 'open', journey, agentStatus, mention, includeGuests = false, environment = null } = args
       const { author, since, until, timeZone, q, pageName, limit, cursor } = args
       const id = boardFor(board)
       // Every filter is checked before anything is read.
@@ -293,6 +298,7 @@ export async function createRemoteMcpServer({
         page,
         mention: mention ? mention.replace(/^@/, '').toLowerCase() : null,
         guests: includeGuests,
+        environment,
       })
       let comments = report.comments
       if (journey) {
