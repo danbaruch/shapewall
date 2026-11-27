@@ -5,6 +5,27 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Deprecated
+
+- Kept through 2.x with a one-line warning on stderr, removed in 3.0: `serve --lan` and `serve --accounts` (also
+  `SHAPEWALL_ACCOUNTS=1`), the `devices` command (pair through the tailnet with `serve --tailscale`), and
+  `starterAgent.testCommand` (set `commands.test`). The warning now reads "will be removed in Shapewall 3.0".
+
+### Removed
+
+- The spellings deprecated through 1.x. Each now stops with a one-line error that names the replacement
+  (`... was removed in Shapewall 2.0; use ...`), not an unknown-command error:
+  - `agent run|watch|doctor|build-image`: use `agent sandbox run|watch|doctor|build-image`.
+  - `audit`: use `checks lighthouse`; `--production`: use `--build-mode`; the board argument of `checks lighthouse BOARD`: use
+    `--board BOARD`.
+  - `hosted --setup`: use `hosted setup`. `variant rm`: use `variant remove`. `export --noindex`: use `--no-index`.
+    `capture --yes` (`-y`): leave it out, capture never prompts.
+  - Config: `versions` (use `keepVersions`), `notifications.boardUrl` and `github.boardUrl` (use the top-level `boardUrl` or
+    `SHAPEWALL_BOARD_URL`), and `agent.localSession: "own"` (leave it out: a local board's Claude Code session is always the
+    restricted one). The config refuses each with that line.
+  - `SHAPEWALL_USERCONTENT_ORIGIN`: rename it to `SHAPEWALL_HOSTED_USERCONTENT_ORIGIN`. A hosted server with only the old name
+    stops at start with that line.
+
 ## 1.5.0 - 2026-11-27
 
 1.5.0 adds the solo engine, opt-in and experimental: `shapewall serve --engine hosted` runs the hosted server's engine for
@@ -136,27 +157,6 @@ capture, the local board and the migration's planner, backup and rollback stay A
   and pins again.
 - Solo engine: "Update now" asks the owner to type the workspace's name first, as the console does for its other
   always-asking actions (passkeys are off on the engine). A check does not ask.
-
-### Deprecated
-
-- Kept through 2.x with a one-line warning on stderr, removed in 3.0: `serve --lan` and `serve --accounts` (also
-  `SHAPEWALL_ACCOUNTS=1`), the `devices` command (pair through the tailnet with `serve --tailscale`), and
-  `starterAgent.testCommand` (set `commands.test`). The warning now reads "will be removed in Shapewall 3.0".
-
-### Removed
-
-- The spellings deprecated through 1.x. Each now stops with a one-line error that names the replacement
-  (`... was removed in Shapewall 2.0; use ...`), not an unknown-command error:
-  - `agent run|watch|doctor|build-image`: use `agent sandbox run|watch|doctor|build-image`.
-  - `audit`: use `checks lighthouse`; `--production`: use `--build-mode`; the board argument of `checks lighthouse BOARD`: use
-    `--board BOARD`.
-  - `hosted --setup`: use `hosted setup`. `variant rm`: use `variant remove`. `export --noindex`: use `--no-index`.
-    `capture --yes` (`-y`): leave it out, capture never prompts.
-  - Config: `versions` (use `keepVersions`), `notifications.boardUrl` and `github.boardUrl` (use the top-level `boardUrl` or
-    `SHAPEWALL_BOARD_URL`), and `agent.localSession: "own"` (leave it out: a local board's Claude Code session is always the
-    restricted one). The config refuses each with that line.
-  - `SHAPEWALL_USERCONTENT_ORIGIN`: rename it to `SHAPEWALL_HOSTED_USERCONTENT_ORIGIN`. A hosted server with only the old name
-    stops at start with that line.
 
 ### Security
 
