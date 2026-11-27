@@ -36,13 +36,52 @@ export function runningVersion(env = process.env) {
   return { version: PACKAGE.version, revision: revision(env.SHAPEWALL_BUILD_REVISION) || revision(metadata?.revision) }
 }
 
+const ANSWER_PREFIX = 'shapewall-update-'
+const STALE_ANSWER_MS = 24 * 3_600_000
+
+// Answer folders an earlier process left behind (it stopped or crashed
+// before removing its own): this user's, more than a day old (no apply runs
+// that long), plain folders only. Never follows a link. Best effort.
+export function removeStaleAnswerFolders({ tmp = os.tmpdir(), now = Date.now(), uid = process.getuid?.() } = {}) {
+  let names = []
+  try {
+    names = fs.readdirSync(tmp)
+  } catch {
+    return 0
+  }
+  let removed = 0
+  for (const name of names) {
+    if (!name.startsWith(ANSWER_PREFIX)) continue
+    const dir = path.join(tmp, name)
+    try {
+      const stat = fs.lstatSync(dir)
+      if (!stat.isDirectory() || (Number.isInteger(uid) && stat.uid !== uid) || now - stat.mtimeMs < STALE_ANSWER_MS) continue
+      fs.rmSync(dir, { recursive: true, force: true })
+      removed += 1
+    } catch {
+      /* gone, or not ours */
+    }
+  }
+  return removed
+}
+
 // A private file for an apply helper's answer (0600, in a 0700 folder):
-// fd for the child, release() closes this process's copy, read(max) returns
-// the text or null when it is longer than max bytes, remove() deletes it.
+// fd for the child, release() closes this process's write copy, read(max)
+// returns the text or null when it is longer than max bytes, remove()
+// deletes it. The answer is read through a descriptor opened on the file
+// this process made, never by its name again: whatever stands at that path
+// later (replaced, a link) is never read.
 function answerFile() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shapewall-update-'))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), ANSWER_PREFIX))
   const file = path.join(dir, 'answer')
   let fd = fs.openSync(file, 'wx', 0o600)
+  let readFd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
+  if (!fs.fstatSync(readFd).isFile() || fs.fstatSync(readFd).ino !== fs.fstatSync(fd).ino) {
+    fs.closeSync(readFd)
+    fs.closeSync(fd)
+    fs.rmSync(dir, { recursive: true, force: true })
+    throw new Error('The update answer file could not be made safely.')
+  }
   return {
     fd,
     release() {
@@ -51,17 +90,17 @@ function answerFile() {
       fd = null
     },
     read(max) {
-      const handle = fs.openSync(file, 'r')
-      try {
-        const buffer = Buffer.alloc(max + 1)
-        const length = fs.readSync(handle, buffer, 0, max + 1, 0)
-        return length > max ? null : buffer.toString('utf8', 0, length)
-      } finally {
-        fs.closeSync(handle)
-      }
+      if (readFd === null || !fs.fstatSync(readFd).isFile()) return null
+      const buffer = Buffer.alloc(max + 1)
+      const length = fs.readSync(readFd, buffer, 0, max + 1, 0)
+      return length > max ? null : buffer.toString('utf8', 0, length)
     },
     remove() {
       this.release()
+      if (readFd !== null) {
+        fs.closeSync(readFd)
+        readFd = null
+      }
       fs.rmSync(dir, { recursive: true, force: true })
     },
   }
@@ -108,6 +147,10 @@ function result(value) {
 // src/hosted/solo/update.js: its signed-in owner on this machine). Without it,
 // the owner is the local settings token holder on this machine, as before.
 // The fixed update token passes either way.
+
+// What a managed installer's service manager restarts (SHAPEWALL_UPDATE_RESTART=1): the exit code after an apply that needs a restart.
+export const UPDATE_RESTART_EXIT = 75
+
 export function appUpdateRouter({
   env = process.env,
   settingsToken = null,
@@ -123,6 +166,8 @@ export function appUpdateRouter({
       `SHAPEWALL_UPDATE_TOKEN must be at least ${UPDATE_TOKEN_MIN} characters (it has ${updateToken.length}). Generate one with "openssl rand -base64 32".`,
     )
   }
+  // Answer folders a stopped or crashed earlier server left in the temp folder.
+  removeStaleAnswerFolders()
   const router = express.Router()
   // Wrong update tokens are counted per address; past the limit, requests
   // carrying a wrong one are refused before any check (GET status says too,
@@ -342,6 +387,8 @@ export function appUpdateRouter({
   // and reports an apply, which shutdown waits for.
   router.lifecycle = {
     applying: () => helperRun?.action === 'apply',
+    // An apply finished that needs a restart, and the installer opted in (onRestart).
+    restartPending: () => restartPending,
     stop() {
       stopping = true
       if (helperRun?.action === 'check') {

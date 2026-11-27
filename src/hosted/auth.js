@@ -3,32 +3,53 @@ import { AuthError, createAuth as createAccountAuth, NEVER_VERIFIED, passkeyOnHo
 import { sha256 } from '../shared/account-tokens.js'
 import { transaction } from '../shared/sqlite.js'
 import { accounts } from './tenancy.js'
+import { knownVia } from './session-via.js'
 export * from '../accounts/auth.js'
 
 // Admin and owner sessions: console admin pages need a request in the last
 // 12 hours (or a fresh passkey check) to keep working.
 export const ADMIN_IDLE_MS = 12 * 3_600_000
 
+// The solo engine's local sessions (src/hosted/solo/signin.js) are short:
+// a day from their last use, a week at most. A new one-time link from the
+// terminal (shapewall serve --engine hosted --open) starts a new one.
+export const LOCAL_SESSION_IDLE_MS = 24 * 3_600_000
+export const LOCAL_SESSION_MAX_MS = 7 * 24 * 3_600_000
+
+const tokenHash = (via, token) => sha256(via === 'tailnet' ? `tailnet:${token}` : via === 'local' ? `local:${token}` : token)
+
 const hostedSessions = {
   insert(q, token, fields, login) {
     const { via } = fields
-    if (!['passkey', 'recovery', 'tailnet'].includes(via)) throw new Error(`unknown sign-in method: ${via}`)
+    if (!knownVia(via)) throw new Error(`unknown sign-in method: ${via}`)
     if (via === 'tailnet' && !login) throw new Error('a tailnet session needs its login')
+    if (via === 'local' && login) throw new Error('a local session has no tailnet login')
     const tailnet = via === 'tailnet' ? login : null
     q.run(
       `INSERT INTO sessions (token_hash, id, user_id, created_at, last_seen_at, expires_at, verified_at, via, user_agent, ip, tailnet_login)
        VALUES (:hash, :id, :user, :at, :at, :expires, :verified, :via, :device, :ip, :tailnet)`,
-      { ...fields, tailnet, hash: sha256(tailnet ? `tailnet:${token}` : token) },
+      {
+        ...fields,
+        // A local session never carries a passkey check (migration 24's CHECK holds it to the mark).
+        ...(via === 'local' ? { verified: NEVER_VERIFIED } : {}),
+        tailnet,
+        hash: tokenHash(via, token),
+      },
     )
   },
-  // Ordinary and tailnet cookies use different hashes. A downgraded server
-  // cannot mistake a tailnet sign-in for a passkey session.
+  // Ordinary, tailnet and local cookies use different hashes. A downgraded
+  // server cannot mistake a tailnet or a local sign-in for a passkey session.
   find(q, token) {
     return (
-      q.get('SELECT * FROM sessions WHERE token_hash = :hash AND tailnet_login IS NULL', { hash: sha256(token) }) ||
-      q.get('SELECT * FROM sessions WHERE token_hash = :hash AND tailnet_login IS NOT NULL', { hash: sha256(`tailnet:${token}`) })
+      q.get("SELECT * FROM sessions WHERE token_hash = :hash AND tailnet_login IS NULL AND via <> 'local'", {
+        hash: tokenHash('passkey', token),
+      }) ||
+      q.get('SELECT * FROM sessions WHERE token_hash = :hash AND tailnet_login IS NOT NULL', { hash: tokenHash('tailnet', token) }) ||
+      // A local session that a passkey confirmed (/auth/reauth/verify) is a passkey session now and keeps its hash.
+      q.get('SELECT * FROM sessions WHERE token_hash = :hash AND tailnet_login IS NULL', { hash: tokenHash('local', token) })
     )
   },
+  lifetime: (row) => (row?.via === 'local' ? { idleMs: LOCAL_SESSION_IDLE_MS, maxMs: LOCAL_SESSION_MAX_MS } : null),
   via: (row) => (row.tailnet_login ? 'tailnet' : row.via === 'tailnet' ? 'passkey' : row.via),
 }
 

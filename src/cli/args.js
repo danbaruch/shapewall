@@ -21,6 +21,7 @@ const BOOLEAN_FLAGS = new Set([
   'no-capture',
   'open',
   'print-owner-link',
+  'skip-git-check',
   'resolved',
   'all',
   'json',
@@ -134,6 +135,8 @@ export const COMMAND_FLAGS = {
   // Every flag any `checks` action takes; SUBCOMMAND_FLAGS narrows it per action.
   checks: [...new Set([...CHECKS_FLAGS, ...LIGHTHOUSE_FLAGS])],
   serve: [
+    'engine',
+    'skip-git-check',
     'buzz-bridge',
     'accounts',
     'accounts-origin',

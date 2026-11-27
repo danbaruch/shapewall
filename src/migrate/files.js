@@ -2,7 +2,7 @@
 // the backup, the moves into the engine's folder, and putting it all back.
 //
 // The engine keeps board files in the layout the local tool uses (src/
-// store.js), under <outputDir>/server/files/<workspace>/<project>/<board>/,
+// store.js), under <outputDir>/.engine/files/<workspace>/<project>/<board>/,
 // so captures, versions, variants, environments, diffs, journeys and check
 // reports move as they are: by rename on the same filesystem, by copy then
 // delete across filesystems. Comments and chat become rows
@@ -23,6 +23,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { ID_RE } from '../config.js'
+import { ENGINE_DIR, MIGRATED, MIGRATE_LOCK, MIGRATING, engineDir } from '../engine-folder.js'
 import { readLock } from '../lock.js'
 
 function isLink(file) {
@@ -33,10 +34,11 @@ function isLink(file) {
   }
 }
 
-// The engine's folder inside the output directory (S5 named it `server`).
-export const ENGINE_DIR = 'server'
+// The engine's folder inside the output directory, and the names migrate
+// leaves there: one definition, shared with the guards of serve and watch
+// (src/engine-folder.js).
+export { ENGINE_DIR, MIGRATE_LOCK, engineDir }
 export const ENGINE_DB = 'shapewall.db'
-export const engineDir = (outputDir) => path.join(outputDir, ENGINE_DIR)
 export const engineDbFile = (outputDir) => path.join(engineDir(outputDir), ENGINE_DB)
 export const engineBoardDir = (outputDir, ids, boardId) => path.join(engineDir(outputDir), 'files', ids.workspaceId, ids.projectId, boardId)
 
@@ -53,13 +55,15 @@ export const EPHEMERAL = {
   'migrated.json': 'the marker of an earlier move to a shared board (shapewall share)',
 }
 export const BACKUP_PREFIX = 'backup-1x-'
-export const MARKER = 'MIGRATED-TO-2'
+export const MARKER = MIGRATED
 // Written when a run starts, removed when it ends either way: one left
 // behind is a run that was interrupted.
-export const JOURNAL = 'MIGRATING-TO-2'
+export const JOURNAL = MIGRATING
 
 // Folder names under the output directory that are not boards: a board with
 // one of these ids would be migrated into (or over) Shapewall's own folder.
+// The engine's `.engine` can never be a board id (ID_RE starts with a letter
+// or digit); it is listed anyway, so no reader has to rely on that.
 export const RESERVED = [ENGINE_DIR, 'agent', 'notifications', '.accounts']
 export const reservedBoardId = (id) => RESERVED.includes(id) || String(id).startsWith(BACKUP_PREFIX)
 

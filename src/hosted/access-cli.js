@@ -10,6 +10,7 @@
 //     records a move to a new origin and prints what to do next
 //     (src/hosted/rebind.js has the whole flow).
 
+import { SOLO_FOLDER_OPERATOR_MESSAGE, isSoloFolder } from './solo/binding.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { MIN_NODE, nodeSupportsSqlite, openDatabase, quietSqliteWarning } from './db.js'
@@ -46,7 +47,13 @@ async function openData(dataDir) {
   if (!fs.existsSync(path.join(dir, 'shapewall.db')))
     throw new Error(`No hosted data in ${dir}. Start the server once, or pass --data DIR.`)
   quietSqliteWarning()
-  return { dir, db: await openDatabase(path.join(dir, 'shapewall.db')) }
+  const db = await openDatabase(path.join(dir, 'shapewall.db'))
+  // A second account or owner written here would lock the engine out (it serves one owner).
+  if (isSoloFolder(db)) {
+    db.close()
+    throw new Error(SOLO_FOLDER_OPERATOR_MESSAGE(dir))
+  }
+  return { dir, db }
 }
 
 export async function operatorCommand(action, { dataDir, flags, env = process.env, out = console.log }) {

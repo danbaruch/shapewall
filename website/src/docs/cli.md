@@ -191,6 +191,26 @@ experimental `--buzz-bridge` in [the Buzz bridge](/docs/buzz). `shapewall serve 
 host-only agent settings on this computer ([local accounts](/docs/local-accounts#tailscale-account-origin)). That command,
 `shapewall settings`, still works but is no longer listed in the help.
 
+### shapewall serve --engine hosted
+
+**Experimental.** Outside the [stability promise](/docs/stability): it can change, or go, in a minor release.
+
+```sh
+shapewall serve --engine hosted [--port 4600] [--open] [--print-owner-link] [--read-only] [--no-chat] [--no-capture]
+                [--skip-git-check]
+```
+
+Runs the hosted engine for this project, on this machine only, at `http://<project>-<random>.shapewall.localhost:<port>`, with
+its data in `.shapewall/.engine/` (never commit it: the engine refuses to start if git tracks it, or if git cannot say;
+`--skip-git-check` starts anyway once you have checked). There is one account, yours, with no passkey: `--open` opens a
+one-time sign-in page, a private file in the data folder, so the one-time code never shows on a command line or in the
+output. It works once, from this machine and your own OS user, on that address only. `--print-owner-link` prints the page's
+address instead; run either again while the engine runs to get a fresh one. `shapewall push`, `comments`, `login` and
+`agent connect` take the engine's address in `SHAPEWALL_REMOTE` (or `--remote`) as they take a team server's, and always
+connect straight to 127.0.0.1 for it, never through a proxy. Prefer `SHAPEWALL_REMOTE`: other users of the machine can read
+a command line. The start prints `SHAPEWALL_REMOTE=http://<name>:<port> shapewall agent connect` for agents. The flags that reach beyond this machine (`--host`, `--lan`, `--tailscale`, `--tls-cert`, `--accounts`,
+`--agent-acp`, ...) are refused. Details: [the solo engine](/docs/hosted#the-solo-engine-experimental).
+
 ## shapewall buzz-bridge
 
 **Experimental.** Outside the [stability promise](/docs/stability): it can change, or go, in a minor release.
@@ -711,6 +731,10 @@ Commands
       --agent-acp "CMD"     chat with an agent CLI over ACP, e.g. "claude-agent-acp" (installed globally)
                             (also $SHAPEWALL_AGENT_ACP; never read from the config; https://shapewall.com/docs/chat)
       --allow-remote-agent  with --chat on a shared board, let an ACP agent run anyway (anyone reaching it acts as you)
+      --engine hosted       run the hosted engine for this project, on this machine only: one owner, signed in by a
+                            one-time page (--open), data in .shapewall/.engine/; takes --port, --open,
+                            --print-owner-link, --read-only, --no-chat, --no-capture, --skip-git-check
+                            (start even when git cannot say whether it tracks .engine/) (experimental)
   devices list              paired devices and pending requests for this project [--json]
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request
@@ -931,7 +955,7 @@ Commands
       --board ID            move only this board (default all)
       --dry-run             show counts; sends nothing
       --no-comments         captures, history and journeys only
-  migrate                   move this project's .shapewall/ into the solo engine (.shapewall/server/) (experimental)
+  migrate                   move this project's .shapewall/ into the solo engine (.shapewall/.engine/) (experimental)
                             captures, comments, chat and the local account; a backup goes to
                             .shapewall/backup-1x-<time>/ first. Refuses while serve, capture, watch or an agent runs
       --dry-run             counts, and every item that would not come along; writes nothing

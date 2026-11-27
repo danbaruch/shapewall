@@ -17,6 +17,7 @@ import { FIXED_CORE, STEP_UP_GROUP_BEFORE, stepUpWindowLabel } from './step-up.j
 import { stepUpSettings } from './step-up-settings.js'
 import { sessionReader } from './tailnet.js'
 import { PASSKEYS_OFF_MESSAGE, isPasskeyRoute } from './passkey-policy.js'
+import { passkeylessVia, viaCookieSameSite } from './session-via.js'
 
 const ACTIVE_EVERY_MS = 5 * 60_000
 
@@ -37,10 +38,14 @@ export function createGuards({
   tailnet = null,
   // Whether passkeys exist on this server ({ on() }, src/hosted/passkey-policy.js).
   passkeys = { on: () => true },
+  // The solo engine's local sign-in ({ admits(req) }, src/hosted/solo/signin.js), or null.
+  local = null,
 }) {
   const clientIp = (req) => (trustProxy ? req.ip : req.socket.remoteAddress) || 'unknown'
-  const setCookie = (res, name, value, maxAgeSeconds) => {
-    res.append('Set-Cookie', `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure ? '; Secure' : ''}`)
+  // sameSite: 'Lax' (default) or 'Strict' (the solo engine's local session: never sent on a navigation from another site).
+  const setCookie = (res, name, value, maxAgeSeconds, { sameSite = 'Lax' } = {}) => {
+    const site = sameSite === 'Strict' ? 'Strict' : 'Lax'
+    res.append('Set-Cookie', `${name}=${value}; Path=/; HttpOnly; SameSite=${site}; Max-Age=${maxAgeSeconds}${secure ? '; Secure' : ''}`)
   }
   const limit =
     (bucket, keyOf = clientIp) =>
@@ -54,18 +59,24 @@ export function createGuards({
   // ---- Sessions ----
   // A session that came in by tailnet identity counts only on a request that
   // carries that identity (src/hosted/tailnet.js sessionReader).
-  const readSession = sessionReader({ auth, tailnet, passkeys })
+  const readSession = sessionReader({ auth, tailnet, passkeys, local })
+  // A session with no passkey behind it (tailnet, local: src/hosted/session-via.js).
+  const passkeyless = (session) => passkeylessVia(session?.via)
   function sessionOf(req) {
     if (req.sessionChecked) return req.auth
     req.sessionChecked = true
     const token = parseCookies(req.headers.cookie)[SESSION_COOKIE]
     req.auth = readSession(req, token) || null
-    // With passkeys off (a tailnet sign-in server, the default there) only the tailnet signs anyone in:
-    // a session a passkey or a recovery code started, from before they were switched off, does not count.
-    if (req.auth && req.auth.session.via !== 'tailnet' && !passkeys.on()) req.auth = null
-    // The session slid (at most once an hour): the browser cookie slides with it, same attributes.
+    // With passkeys off (a tailnet sign-in server, the default there; a solo engine) only the tailnet or the
+    // local link signs anyone in: a session a passkey or a recovery code started, from before they were
+    // switched off, does not count (sessionReader decides by the table; this says it again).
+    if (req.auth && !passkeyless(req.auth.session) && !passkeys.on()) req.auth = null
+    // The session slid (at most once an hour): the browser cookie slides with it, same attributes,
+    // SameSite included (Strict for a local session: src/hosted/session-via.js).
     if (req.auth?.renewedUntil && req.res && !req.res.headersSent)
-      setCookie(req.res, SESSION_COOKIE, token, Math.max(0, Math.floor((req.auth.renewedUntil - now().getTime()) / 1000)))
+      setCookie(req.res, SESSION_COOKIE, token, Math.max(0, Math.floor((req.auth.renewedUntil - now().getTime()) / 1000)), {
+        sameSite: viaCookieSameSite(req.auth.session?.via),
+      })
     return req.auth
   }
   // Whether the session a long request (a live stream) was admitted with
@@ -74,7 +85,7 @@ export function createGuards({
   function stillSignedIn(req) {
     if (!req.auth || !req.user) return false
     const found = readSession(req, parseCookies(req.headers.cookie)[SESSION_COOKIE]) || null
-    if (!found || (found.session.via !== 'tailnet' && !passkeys.on())) return false
+    if (!found || (!passkeyless(found.session) && !passkeys.on())) return false
     return found.user.id === req.user.id
   }
   // Passkey routes on a server where passkeys are off: a clear answer, before anything else looks at them.
@@ -93,7 +104,7 @@ export function createGuards({
       }
       if (removesHeldPasskey(req, id)) return next()
     }
-    return fail(res, 403, 'passkeys_off', PASSKEYS_OFF_MESSAGE)
+    return fail(res, 403, 'passkeys_off', passkeys.offMessage || PASSKEYS_OFF_MESSAGE)
   }
   // ---- The fixed core without passkeys: a typed confirmation ----
   //
@@ -106,7 +117,9 @@ export function createGuards({
   // --yes on the command line. The name is the workspace's for something in
   // a workspace, the account's handle otherwise; the request carries it in
   // X-Shapewall-Confirm (URI-encoded). Stateless: every such request says it.
-  const tailnetOnly = (req) => req.auth.session.via === 'tailnet' && !passkeys.on()
+  // The same for the solo engine's owner (a local session, passkeys off there): the terminal's one-time link
+  // is the sign-in, and the machine is the trust boundary.
+  const tailnetOnly = (req) => passkeyless(req.auth.session) && !passkeys.on()
   const CONFIRM_HEADER = 'x-shapewall-confirm'
   function confirmRefusal(req, workspaceId = null) {
     const ws = workspaceId || req.t?.workspaceId || null
@@ -190,7 +203,7 @@ export function createGuards({
   // session has no passkey check in the window, or null. An account that
   // signs in by its tailnet identity and has no passkey cannot give one: it
   // is told to add a passkey first (`passkey_required`), never let through.
-  const noPasskey = (req) => req.auth.session.via === 'tailnet' && auth.passkeyCount(req.auth.user.id) === 0
+  const noPasskey = (req) => passkeyless(req.auth.session) && auth.passkeyCount(req.auth.user.id) === 0
   function notFresh(req, windowMs, message, extra) {
     // No passkeys on this server: the fixed core asks for a typed confirmation, and nothing else asks
     // (a workspace's "Ask for a passkey again" groups have nothing to ask for; the card is not shown).
@@ -273,7 +286,7 @@ export function createGuards({
   // workspace (projects, comments, members and viewers, settings that ask
   // for more), and tokens and agents that exist already. Decided from the
   // session; nothing a client sends changes it.
-  const identityOnly = (req) => req.auth.session.via === 'tailnet' && !auth.isFresh(req.auth.session)
+  const identityOnly = (req) => passkeyless(req.auth.session) && !auth.isFresh(req.auth.session)
   const cliApprovalOrThrow = (req, t, message) => {
     if (identityOnly(req) && stepUpSettings(t).get().cliApproval) {
       const error = notFresh(req, REAUTH_MS, message, { stepUp: 'cliApproval' })
@@ -447,7 +460,7 @@ export function createGuards({
       target,
       ip: clientIp(req),
       // What a person did in a session their tailnet signed in says so.
-      detail: req.auth?.session?.via === 'tailnet' && req.user ? { ...detail, signedInBy: 'tailnet' } : detail,
+      detail: passkeyless(req.auth?.session) && req.user ? { ...detail, signedInBy: req.auth.session.via } : detail,
       at: iso(),
     })
 

@@ -1,5 +1,6 @@
 // `shapewall serve`: the local board server, and the checks that decide what it may share.
 
+import { UPDATE_RESTART_EXIT } from '../update/routes.js'
 import fs from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { isLoopback } from '../net.js'
@@ -8,6 +9,7 @@ import http from 'node:http'
 import https from 'node:https'
 import { lanAccess, tailscaleAccess } from '../server/tailscale.js'
 import { loadConfig } from '../config.js'
+import { assertMigrationAllows } from '../engine-folder.js'
 import { formatCommand } from '../agent/acp/command.js'
 import { detectAgents } from '../agent/acp/detect.js'
 import { agentSettings } from '../agent/config.js'
@@ -106,11 +108,13 @@ export async function listenFailure(error, { port, host, config, flags = {} }) {
   return friendly
 }
 
-// What a managed installer's service manager restarts (SHAPEWALL_UPDATE_RESTART).
-export const UPDATE_RESTART_EXIT = 75
+// What a managed installer's service manager restarts (SHAPEWALL_UPDATE_RESTART): src/update/routes.js.
+export { UPDATE_RESTART_EXIT }
 
 export async function serve(flags, out) {
   const config = loadConfig(flags.config)
+  // Not while shapewall migrate runs or after one stopped midway, nor for boards it moved to the solo engine.
+  assertMigrationAllows(config, { local: true })
   // Keys the config has but Shapewall does not use (a typo, most often).
   for (const line of keyWarningLines(config.warnings)) out(line)
   // The first serve in a project adds the Shapewall section to AGENTS.md, once (src/agent-docs.js).

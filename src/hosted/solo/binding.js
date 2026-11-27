@@ -54,3 +54,19 @@ export function readSoloBinding(db) {
     updatedAt: row.updated_at,
   }
 }
+
+// Whether a data folder's database belongs to a solo engine (shapewall serve
+// --engine hosted): its binding row exists, or reading it fails. A database
+// from before migration 24 has no binding table and is not one.
+export function isSoloFolder(db) {
+  const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'solo_binding'").get()
+  if (!table) return false
+  try {
+    return Boolean(readSoloBinding(db))
+  } catch {
+    return true
+  }
+}
+
+export const SOLO_FOLDER_OPERATOR_MESSAGE = (dir) =>
+  `${dir} is a solo engine's folder (shapewall serve --engine hosted): it has one owner and no operator commands. Run them on a team server's folder.`

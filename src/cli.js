@@ -5,6 +5,7 @@ import { devicesCommand } from './devices-cli.js'
 import { loadConfig } from './config.js'
 import { HELP, SECTIONS, SHORT_HELP, VERSION, commandHelp } from './cli/help.js'
 import { parseArgs } from './cli/args.js'
+import { pinSoloLoopback, soloHttpRemote } from './remote/loopback-pin.js'
 import { deprecated, setDeprecationSink } from './deprecation.js'
 import { init, initCi, sitemap } from './cli/init.js'
 import { serve } from './cli/serve.js'
@@ -56,6 +57,12 @@ const COMMANDS = {
   },
   links: ({ flags, out }) => links(flags, out),
   serve: async ({ flags, out }) => {
+    // --engine hosted (experimental): the solo engine, in src/hosted (src/hosted/solo/serve.js).
+    if (flags.engine !== undefined) {
+      const { serveEngine } = await import('./hosted/ops-cli.js')
+      await serveEngine(flags, out)
+      return null
+    }
     await serve(flags, out)
     return null
   },
@@ -171,5 +178,8 @@ export async function main(
     return command || flags.help ? 0 : 1
   }
   if (!Object.hasOwn(COMMANDS, command)) throw new Error(`unknown command "${command}" (try shapewall --help)`)
+  // http to the solo engine's own name: every connection of this process to it goes to 127.0.0.1 (src/remote/loopback-pin.js).
+  const remote = typeof flags.remote === 'string' ? flags.remote : process.env.SHAPEWALL_REMOTE
+  if (remote && soloHttpRemote(remote)) await pinSoloLoopback()
   return COMMANDS[command]({ positional, flags, out, err, fetch })
 }

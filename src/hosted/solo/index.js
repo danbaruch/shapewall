@@ -19,21 +19,57 @@
 // mountSolo returns { close() } (optional): app.locals.close() awaits it, so
 // a surface that subscribes to the event bus or holds a lease lets go.
 //
-// Mounted so far: info.js (`solo` and `soloFeatures` on the board's /info,
-// G16), events.js (events.jsonl and notifications, G8), update.js (self-update,
-// G10). A surface the board turns on (client/src/board/solo.js) sets its flag
-// in `features`.
+// With `solo.signIn === 'local'` (what `serve --engine hosted` always
+// passes) the engine is the owner's: signin.js makes the owner, workspace
+// and project on the first start and signs the browser in by the terminal's
+// one-time link, and config.js keeps the project's boards on the bound
+// config file (G1, G2). The surfaces after it get the owner's workspace and
+// project (solo.workspaceId, solo.projectId, solo.boardUrl).
+//
+// Mounted so far: signin.js and config.js (G1, G2), info.js (`solo` and
+// `soloFeatures` on the board's /info, G16), events.js (events.jsonl and
+// notifications, G8), update.js (self-update, G10). A surface the board turns on (client/src/board/solo.js)
+// sets its flag in `features`.
+import { createSoloBoards } from './config.js'
 import { mountSoloEvents } from './events.js'
 import { mountSoloInfo } from './info.js'
+import { ensureSoloOwner, mountSoloSignIn } from './signin.js'
 import { mountSoloUpdate } from './update.js'
+
+function mountOwner(app, deps, closers) {
+  const solo = deps.solo
+  if (!solo.configPath) throw new Error('solo: local sign-in needs the project config path (solo.configPath)')
+  const owner = ensureSoloOwner(deps.db, {
+    dataDir: deps.dataDir,
+    ownerName: solo.ownerName,
+    projectName: solo.projectName || solo.config?.title,
+    configPath: solo.configPath,
+    boardIds: (solo.config?.boards || []).map((board) => board.id),
+    now: deps.now,
+  })
+  if (owner.created) deps.log(`Solo engine: made the owner account, its workspace and the project (${owner.projectId}).`)
+  const signIn = mountSoloSignIn(app, { ...deps, gate: deps.localGate, owner })
+  closers.push(() => signIn.close())
+  const boards = createSoloBoards({ db: deps.db, ids: owner, configPath: solo.configPath, now: deps.now, log: deps.log })
+  boards.sync({ force: true })
+  // Before every other solo board route: the boards follow the file.
+  deps.boardApi?.use((req, res, next) => {
+    if (req.project?.id === owner.projectId) boards.sync()
+    next()
+  })
+  const boardUrl = solo.boardUrl || `${deps.publicOrigin}/w/${owner.workspaceId}/p/${owner.projectId}/`
+  app.locals.solo = { owner, boardUrl, boards }
+  return { ...deps, solo: { ...solo, workspaceId: owner.workspaceId, projectId: owner.projectId, boardUrl } }
+}
 
 export function mountSolo(app, deps) {
   const closers = []
   const features = {}
-  mountSoloInfo(deps, features)
-  const events = mountSoloEvents(app, deps)
+  const soloDeps = deps.solo?.signIn === 'local' ? mountOwner(app, deps, closers) : deps
+  mountSoloInfo(soloDeps, features)
+  const events = mountSoloEvents(app, soloDeps)
   if (events) closers.push(() => events.close())
-  const update = mountSoloUpdate(app, deps)
+  const update = mountSoloUpdate(app, soloDeps)
   if (update) {
     features.appUpdates = true
     closers.push(() => update.close())

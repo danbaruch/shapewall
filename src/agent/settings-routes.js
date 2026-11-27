@@ -71,6 +71,7 @@ import { ACP_TEST_TIMEOUT_MS } from './test-timing.js'
 const TEST_TIMEOUT_MS = 15000
 const VISION_PROBE_MS = 3000
 const LOOPBACK_NAMES = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
+export const loopbackHostName = (name) => LOOPBACK_NAMES.has(String(name || '').toLowerCase())
 // Any of these means a proxy or tunnel stands between the person and us.
 export const PROXY_HEADERS = [
   'x-forwarded-for',
@@ -127,12 +128,15 @@ function loopbackAddress(address) {
 
 // From this machine, straight to this server: a loopback peer, a loopback
 // Host, no proxy headers (a proxy on this machine would make every visitor
-// look local), and no other site's Origin.
-export function localRequest(req) {
+// look local), and no other site's Origin. `ownHost`: the solo engine's exact
+// host and port (src/hosted/solo/signin.js gate.host), accepted besides the
+// loopback names; never any other name of that shape.
+export function localRequest(req, { ownHost = null } = {}) {
   if (!loopbackAddress(req.socket?.remoteAddress)) return false
   if (PROXY_HEADERS.some((name) => req.headers[name] !== undefined)) return false
   const host = String(req.headers.host || '')
-  if (!LOOPBACK_NAMES.has(host.replace(/:\d+$/, '').toLowerCase())) return false
+  const own = typeof ownHost === 'string' && ownHost !== '' && host.toLowerCase() === ownHost.toLowerCase()
+  if (!own && !loopbackHostName(host.replace(/:\d+$/, ''))) return false
   const origin = req.headers.origin
   if (origin !== undefined) {
     try {

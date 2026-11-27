@@ -74,6 +74,8 @@ import { createTailnetAccounts } from './tailnet.js'
 import { mountTailnetAdmin } from './tailnet-routes.js'
 import { cspWithErrors, reportServerError } from '../error-tracking.js'
 import { mountSolo } from './solo/index.js'
+import { soloLocalGate } from './solo/signin.js'
+import { soloFlagGate } from './solo/flags.js'
 
 export { changeEventType, publicBoardView, TOKEN_SCOPES, INVITE_DAYS }
 
@@ -157,11 +159,18 @@ export function createHostedApp({
   solo = null,
 }) {
   if (guestOnly) tailnet = null
-  const passkeys = createPasskeyPolicy({ db, tailnet, flag: tailnetPasskeys })
   const base = new URL(origin)
   if (!['http:', 'https:'].includes(base.protocol) || base.pathname !== '/' || base.search)
     throw new Error('origin: an http(s) origin without a path')
   const publicOrigin = base.origin
+  // The solo engine's local sign-in (src/hosted/solo/signin.js): the owner
+  // signs in by the terminal's one-time link, passkeys are off, and a local
+  // session counts only on a request this gate admits. Never with a tailnet
+  // gate, a share listener or a proxy in front.
+  const soloLocal = solo?.signIn === 'local' ? soloLocalGate(publicOrigin) : null
+  if (soloLocal && (tailnet || guestOnly || trustProxy))
+    throw new Error('solo: local sign-in runs with no tailnet sign-in, share listener or proxy')
+  const passkeys = createPasskeyPolicy({ db, tailnet, flag: tailnetPasskeys, soloLocal: Boolean(soloLocal) })
   const secure = base.protocol === 'https:'
   if (!secret || Buffer.byteLength(secret) < 32) throw new Error('secret: at least 32 bytes')
   if (reportEmail !== null && !cleanEmail(reportEmail)) throw new Error('report email: an email address')
@@ -318,6 +327,7 @@ export function createHostedApp({
     log,
     tailnet,
     passkeys,
+    local: soloLocal,
   })
   const tailnetAccounts = createTailnetAccounts({ db, iso, now })
 
@@ -338,6 +348,9 @@ export function createHostedApp({
   app.use(passkeysGate)
   // The fixed core: what always asks for a fresh passkey check (one table, src/hosted/step-up.js).
   app.use(fixedCore)
+  // The solo engine's serve flags (--read-only, --no-chat: src/hosted/solo/flags.js), before every board route.
+  const soloFlags = solo ? soloFlagGate(solo) : null
+  if (soloFlags) app.use(soloFlags)
 
   const { publicUser, createWorkspace, acceptInvite, revokeGrantsOf, ownerCount } = createMembership({
     db,
@@ -578,6 +591,7 @@ export function createHostedApp({
         SESSION_COOKIE,
         boardContext,
         agentsFor,
+        localGate: soloLocal,
         boardApi: soloBoardApi,
       })
     : null
@@ -655,7 +669,7 @@ export function createHostedApp({
   // The one-time link that lets the first person sign up on an invite-only
   // server. Returns the secret URL for the operator file, or null when users exist.
   app.locals.setupLink = () => {
-    if (guestOnly || auth.userCount() > 0) return null
+    if (guestOnly || soloLocal || auth.userCount() > 0) return null
     return mintSetupLink(db, publicOrigin, now())
   }
   app.locals.deviceLogins = deviceLogins
@@ -717,9 +731,12 @@ export function createHostedApp({
     while (i < hops.length - 1 && hops[i + 1] && trusted(hops[i], i)) i += 1
     return hops[i] || 'unknown'
   }
-  const presence = hub.listener(presenceAuthorizer({ db, dataDir, origin: publicOrigin, auth, now, guestOnly, tailnet, passkeys }), {
-    clientIp: upgradeIp,
-  })
+  const presence = hub.listener(
+    presenceAuthorizer({ db, dataDir, origin: publicOrigin, auth, now, guestOnly, tailnet, passkeys, local: soloLocal }),
+    {
+      clientIp: upgradeIp,
+    },
+  )
   app.locals.presence = { attach: presence.attach, close: presence.close, hub }
   app.locals.events = events
   app.locals.agentPresence = agentPresence

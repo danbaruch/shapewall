@@ -23,6 +23,13 @@ function intFlag(flags, name, { min, max, fallback }) {
 
 const mb = (bytes) => `${(bytes / 1048576).toFixed(1)} MB`
 
+// `shapewall serve --engine hosted` (experimental): the solo engine for this
+// project (src/hosted/solo/serve.js). Kept running until stopped.
+export async function serveEngine(flags, out) {
+  const { serveEngine: run } = await import('./solo/serve.js')
+  return run(flags, out)
+}
+
 export async function hostedCommand(positional, flags, out, err = out) {
   const [sub, ...rest] = positional
   if (sub === 'setup') return setup(flags, out)
@@ -186,7 +193,13 @@ async function openExisting(flags) {
   if (!fs.existsSync(file)) throw new Error(`no hosted database at ${file} (pass --data, the server's data folder)`)
   const { openDatabase, quietSqliteWarning } = await import('./db.js')
   quietSqliteWarning()
-  return { dir, db: await openDatabase(file) }
+  const db = await openDatabase(file)
+  const { SOLO_FOLDER_OPERATOR_MESSAGE, isSoloFolder } = await import('./solo/binding.js')
+  if (isSoloFolder(db)) {
+    db.close()
+    throw new Error(SOLO_FOLDER_OPERATOR_MESSAGE(dir))
+  }
+  return { dir, db }
 }
 
 const ADMIN_HELP = `shapewall hosted admin <command> --data DIR   (on the server's machine)

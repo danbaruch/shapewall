@@ -93,7 +93,11 @@ export const SECTIONS = {
       --chat | --no-chat    the board chat with your agent (default on, off when shared beyond this machine)
       --agent-acp "CMD"     chat with an agent CLI over ACP, e.g. "claude-agent-acp" (installed globally)
                             (also $SHAPEWALL_AGENT_ACP; never read from the config; https://shapewall.com/docs/chat)
-      --allow-remote-agent  with --chat on a shared board, let an ACP agent run anyway (anyone reaching it acts as you)`,
+      --allow-remote-agent  with --chat on a shared board, let an ACP agent run anyway (anyone reaching it acts as you)
+      --engine hosted       run the hosted engine for this project, on this machine only: one owner, signed in by a
+                            one-time page (--open), data in .shapewall/.engine/; takes --port, --open,
+                            --print-owner-link, --read-only, --no-chat, --no-capture, --skip-git-check
+                            (start even when git cannot say whether it tracks .engine/)${EXPERIMENTAL}`,
   devices: `  devices list              paired devices and pending requests for this project [--json]
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request
@@ -314,7 +318,7 @@ export const SECTIONS = {
       --board ID            move only this board (default all)
       --dry-run             show counts; sends nothing
       --no-comments         captures, history and journeys only`,
-  migrate: `  migrate                   move this project's .shapewall/ into the solo engine (.shapewall/server/)${EXPERIMENTAL}
+  migrate: `  migrate                   move this project's .shapewall/ into the solo engine (.shapewall/.engine/)${EXPERIMENTAL}
                             captures, comments, chat and the local account; a backup goes to
                             .shapewall/backup-1x-<time>/ first. Refuses while serve, capture, watch or an agent runs
       --dry-run             counts, and every item that would not come along; writes nothing

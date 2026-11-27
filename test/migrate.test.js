@@ -8,13 +8,14 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { tempDir } from './helpers.js'
-import { loadConfig } from '../src/config.js'
+import { ID_RE, loadConfig } from '../src/config.js'
 import { main } from '../src/cli.js'
 import { openDatabase, quietSqliteWarning } from '../src/hosted/db.js'
 import { rowToComment } from '../src/hosted/comments.js'
 import { processStartTime } from '../src/lock.js'
 import { migrateCommand, MigrateError } from '../src/migrate/index.js'
-import { JOURNAL, MARKER, engineDbFile, treeDigest } from '../src/migrate/files.js'
+import { ENGINE_DIR, JOURNAL, MARKER, RESERVED, engineDbFile, reservedBoardId, treeDigest, validBoardName } from '../src/migrate/files.js'
+import * as engineFolder from '../src/engine-folder.js'
 
 quietSqliteWarning()
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrate-fixtures')
@@ -147,7 +148,7 @@ for (const version of VERSIONS) {
     assert.ok(fs.existsSync(path.join(p.out, MARKER)))
     assert.equal(fs.existsSync(path.join(p.out, 'site')), false, 'the board folder is empty and gone')
     assert.ok(fs.readdirSync(p.out).some((name) => name.startsWith('backup-1x-')))
-    const engineBoard = path.join(p.out, 'server', 'files', first.json.ids.workspaceId, first.json.ids.projectId, 'site')
+    const engineBoard = path.join(p.out, ENGINE_DIR, 'files', first.json.ids.workspaceId, first.json.ids.projectId, 'site')
     assert.ok(fs.existsSync(path.join(engineBoard, 'captures', 'manifest.json')))
     assert.ok(fs.readdirSync(path.join(engineBoard, 'versions')).length > 0)
 
@@ -249,9 +250,9 @@ test('v1.2.0: owners, labels, reactions, images, environments and chat map as th
   const visitor = rows.messages.filter((row) => row.thread_id === 'chat-fedcba9876543210')
   assert.equal(visitor[0].author_user_id, null)
   // The attachment file moves with the board's files.
-  const [ws] = fs.readdirSync(path.join(p.out, 'server', 'files'))
-  const [pr] = fs.readdirSync(path.join(p.out, 'server', 'files', ws))
-  assert.equal(fs.readdirSync(path.join(p.out, 'server', 'files', ws, pr, 'site', 'chat', 'files')).length, 1)
+  const [ws] = fs.readdirSync(path.join(p.out, ENGINE_DIR, 'files'))
+  const [pr] = fs.readdirSync(path.join(p.out, ENGINE_DIR, 'files', ws))
+  assert.equal(fs.readdirSync(path.join(p.out, ENGINE_DIR, 'files', ws, pr, 'site', 'chat', 'files')).length, 1)
 })
 
 test('without a local account the owner is the name this machine signs with', async () => {
@@ -361,6 +362,14 @@ test('refuses while a capture, a watcher or serve holds the project, and writes 
       assert.deepEqual(digest(p.out), state)
       fs.rmSync(file)
     }
+    assert.deepEqual(digest(p.out), before)
+    // The solo engine running in this folder (its lock in .engine/): refused, named as the engine.
+    fs.mkdirSync(path.join(p.out, ENGINE_DIR), { recursive: true, mode: 0o700 })
+    fs.writeFileSync(path.join(p.out, ENGINE_DIR, 'serve.lock'), body('serve-engine'))
+    const engineBusy = await run(p)
+    assert.equal(engineBusy.code, 1, engineBusy.text)
+    assert.match(engineBusy.text, /the solo engine \(shapewall serve --engine hosted\) is running/)
+    fs.rmSync(path.join(p.out, ENGINE_DIR, 'serve.lock'))
     assert.deepEqual(digest(p.out), before)
     // Rollback refuses the same way.
     fs.writeFileSync(path.join(p.out, 'site', 'capture.lock'), body('capture'))
@@ -586,15 +595,55 @@ test("F6: a board named like one of Shapewall's own folders is refused", async (
   const p = project('v1.2.0')
   const cfgFile = path.join(p.dir, 'shapewall.config.json')
   const cfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8'))
-  fs.writeFileSync(cfgFile, JSON.stringify({ ...cfg, id: 'server' }))
-  fs.renameSync(path.join(p.out, 'site'), path.join(p.out, 'server'))
+  fs.writeFileSync(cfgFile, JSON.stringify({ ...cfg, id: 'notifications' }))
+  fs.renameSync(path.join(p.out, 'site'), path.join(p.out, 'notifications'))
   p.config = loadConfig(cfgFile)
   const before = digest(p.out)
   const dry = await run(p, { 'dry-run': true })
   assert.equal(dry.code, 1)
-  assert.match(dry.text, /board server: the id is the name of one of Shapewall's own folders/)
+  assert.match(dry.text, /board notifications: the id is the name of one of Shapewall's own folders/)
   assert.equal((await run(p)).code, 1)
   assert.deepEqual(digest(p.out), before)
+})
+
+test('the engine folder is .engine, shared with the guards of serve and watch; `server` is an ordinary board id', () => {
+  assert.equal(ENGINE_DIR, '.engine')
+  assert.equal(ENGINE_DIR, engineFolder.ENGINE_DIR)
+  assert.equal(MARKER, engineFolder.MIGRATED)
+  assert.equal(JOURNAL, engineFolder.MIGRATING)
+  assert.equal(engineFolder.MIGRATE_LOCK, 'migrate.lock')
+  assert.deepEqual(RESERVED, ['.engine', 'agent', 'notifications', '.accounts'])
+  // `.engine` is never a board: reserved, and not a valid board id at all.
+  assert.equal(reservedBoardId('.engine'), true)
+  assert.equal(validBoardName('.engine'), false)
+  assert.equal(ID_RE.test('.engine'), false, 'no config can name a board .engine')
+  // `server` was the spike's folder name: no longer reserved.
+  assert.equal(reservedBoardId('server'), false)
+  assert.equal(validBoardName('server'), true)
+})
+
+test('what a run leaves is what serve and watch read: the marker, the journal and the lock (src/engine-folder.js)', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  assert.deepEqual([...engineFolder.assertMigrationAllows(p.config, { local: true })], [])
+  const done = await run(p, { json: true })
+  assert.equal(done.code, 0, done.text)
+  assert.ok(fs.existsSync(path.join(p.out, ENGINE_DIR, 'shapewall.db')), 'the database is in .engine/')
+  // The marker names the board: the local serve and watch refuse it, the engine starts.
+  assert.deepEqual([...engineFolder.migrationState(p.out).migrated], ['site'])
+  assert.throws(() => engineFolder.assertMigrationAllows(p.config, { local: true }), /Board site was migrated to the solo engine/)
+  assert.deepEqual([...engineFolder.assertMigrationAllows(p.config)], ['site'])
+  // A journal left behind (a run stopped midway): nothing starts.
+  fs.writeFileSync(path.join(p.out, JOURNAL), JSON.stringify({ version: 1, backup: done.json.backup }))
+  assert.throws(() => engineFolder.assertMigrationAllows(p.config), /stopped midway/)
+  fs.rmSync(path.join(p.out, JOURNAL))
+  // migrate's own lock, held by a live process: nothing starts.
+  fs.writeFileSync(
+    path.join(p.out, engineFolder.MIGRATE_LOCK),
+    JSON.stringify({ pid: process.pid, start: processStartTime(process.pid), kind: 'migrate' }),
+  )
+  assert.throws(() => engineFolder.assertMigrationAllows(p.config), /shapewall migrate is running/)
+  fs.rmSync(path.join(p.out, engineFolder.MIGRATE_LOCK))
 })
 
 test('F7: the dry run lists what holds the project, as the real run does', async () => {
@@ -628,7 +677,7 @@ test('F8: the dry run lists everything a real run removes', async () => {
 test('F9: the engine database, its folder and its copy in the backup are owner-only', async () => {
   const p = project('v1.2.0')
   await withEnvironmentColumn(p.out)
-  const server = path.join(p.out, 'server')
+  const server = path.join(p.out, ENGINE_DIR)
   fs.chmodSync(server, 0o755)
   fs.chmodSync(engineDbFile(p.out), 0o644)
   const done = await run(p, { json: true })
@@ -682,7 +731,7 @@ test('N1: a backup with a symbolic link anywhere (boards/, engine, deeper) is re
     const before = digest(p.out)
     await assert.rejects(run(p, { rollback: true }), /symbolic link/, variant)
     assert.equal(fs.existsSync(path.join(p.out, 'brain')), false, `${variant}: nothing pulled in`)
-    assert.equal(fs.existsSync(path.join(p.out, 'server')), false, `${variant}: no engine folder made`)
+    assert.equal(fs.existsSync(path.join(p.out, ENGINE_DIR)), false, `${variant}: no engine folder made`)
     assert.deepEqual(digest(p.out), before, `${variant}: nothing changed`)
   }
   assert.deepEqual(fs.readdirSync(path.join(outside, 'brain')), ['secret.md'])

@@ -291,24 +291,23 @@ for (const [label, environments, stored] of [
 // A passkey that confirms a local session makes it a passkey session in one
 // statement, so the row never breaks the CHECK that keeps a local session
 // unverified (review of PR #50, F2).
-test('a passkey check on a local session turns it into a passkey session', async () => {
+// A local session (the solo owner's terminal link) counts only on a solo
+// engine with local sign-in, from this machine to its own host
+// (src/hosted/session-via.js, test/hosted-solo-signin.test.js). On a team
+// server such a row signs nobody in, so a passkey check can never be made on
+// it there either (the /auth/reauth/verify branch that would turn it into a
+// passkey session stays as a guard for a later solo profile with passkeys).
+test('a local session row signs nobody in on a team server', async () => {
   const hosted = await startHostedServer('migration-24-reauth')
   try {
     const owner = await signUp(hosted, { handle: 'ada' })
-    // The session as a solo sign-in link would make it.
     hosted.db
       .prepare("UPDATE sessions SET via = 'local', verified_at = ?, admin_seen_at = NULL WHERE user_id = ?")
       .run(NEVER, owner.user.id)
-    const session = () => hosted.db.prepare('SELECT via, verified_at, admin_seen_at FROM sessions WHERE user_id = ?').get(owner.user.id)
-    assert.equal(session().via, 'local')
-    await reauth(owner)
-    const after = session()
-    assert.equal(after.via, 'passkey')
-    assert.notEqual(after.verified_at, NEVER)
-    assert.equal(after.admin_seen_at, after.verified_at)
-    // A passkey session from then on: the next check is the ordinary one.
-    await reauth(owner)
-    assert.equal(session().via, 'passkey')
+    assert.equal(hosted.db.prepare('SELECT via FROM sessions WHERE user_id = ?').get(owner.user.id).via, 'local')
+    const me = await owner.browser.get('/auth/me')
+    assert.equal(me.json.user, null)
+    await assert.rejects(reauth(owner))
   } finally {
     await hosted.close()
   }
