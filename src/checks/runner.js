@@ -611,8 +611,12 @@ export const seoEnabledFor = (seo, page) => seo === true || (Array.isArray(seo) 
 // A checks run holds the board-job lock (board-job.js) for its whole run,
 // whoever started it (the terminal or the board's child process): it never
 // runs beside a capture or an agent Apply of the same board, in any process.
+// `jobHeld`: the caller took that lock itself and holds it for the run (the
+// solo engine, src/hosted/solo/checks.js, takes it before it starts the
+// run's browser).
 export async function runChecks(options) {
   const board = getBoard(options.config, options.boardId ?? null)
+  if (options.jobHeld === true) return runChecksUnlocked(options)
   const job = acquireBoardJob(options.config, board.id, 'checks')
   if (!job.ok) throw new BoardBusyError(job.holder, board.id)
   try {
@@ -630,6 +634,11 @@ async function runChecksUnlocked({
   seo = false,
   limit = 20,
   browser: suppliedBrowser = null,
+  // The supplied browser already reaches the app origin only (the solo
+  // engine's egress proxy, src/hosted/solo/capture-egress.js): the run
+  // neither launches a browser of its own nor puts a proxy of its own on the
+  // page contexts (a context proxy would replace the browser's).
+  egressPinned = false,
   sourceBuild = null,
   onProgress = () => {},
   // Aborting stops the run: the view in progress is abandoned, views not
@@ -650,6 +659,7 @@ async function runChecksUnlocked({
   const targets = selectPages(board, only).flatMap((page) => page.viewports.map((viewport) => ({ page, viewport })))
   if (targets.length > limit) throw new Error('The selected page views exceed the limit. Select fewer pages or explicitly raise the limit.')
   let browser = suppliedBrowser
+  if (egressPinned && !browser) throw new Error('Page check browser unavailable')
   if (!browser && !signal?.aborted) {
     try {
       // The run handles SIGTERM and SIGINT itself (see signal), so Playwright
@@ -670,7 +680,7 @@ async function runChecksUnlocked({
     let authFailed = false
     try {
       if (!signal?.aborted) {
-        scoped = await checkBrowser(browser, environment.baseUrl)
+        scoped = egressPinned ? { browser } : await checkBrowser(browser, environment.baseUrl)
         storageState = await resolveStorageState(scoped.browser, config, { ...board, baseUrl: environment.baseUrl })
       }
     } catch {

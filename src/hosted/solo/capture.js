@@ -22,7 +22,8 @@
 // (capture-egress.js): never the engine's own origin, its usercontent
 // origin, or this machine's LAN and tailnet addresses.
 //
-// One capture at a time on the engine, and none while a push of the same
+// One capture at a time on the engine, none while checks run (index.js
+// engineJobs, G6), and none while a push of the same
 // board is open (a push swaps the board folder in whole); a push or a push
 // commit waits (409) while a capture runs (push.js refuses on the live
 // board-job lock itself; the route guard here only answers first). An open
@@ -107,6 +108,8 @@ export function createSoloCapture({
   interfaces,
   quotaOf = () => PUSH_LIMITS.workspaceBytes,
   now = () => new Date(),
+  // What else runs a browser on the engine (index.js engineJobs), as a message, or null.
+  busy = () => null,
 }) {
   const enginePort = Number(new URL(publicOrigin).port) || (new URL(publicOrigin).protocol === 'https:' ? 443 : 80)
   let current = null
@@ -176,6 +179,8 @@ export function createSoloCapture({
   // run's promise (it never rejects: { ok, result, error, lines }).
   async function start(boardId, { pages = null, env = null } = {}) {
     if (current) throw new HttpError(409, 'capture_running', 'A capture is already running on this engine.')
+    const other = busy()
+    if (other) throw new HttpError(409, 'engine_busy', other)
     const { bound, board, config } = target(boardId)
     if (env !== null && env !== undefined && env !== board.environments[0].id)
       throw new HttpError(400, 'unknown_environment', 'The engine captures the default environment only for now.')
@@ -341,8 +346,10 @@ export function mountSoloCapture(app, deps, features) {
     ...deps,
     now: () => (deps.now ? new Date(deps.now()) : new Date()),
     quotaOf: deps.quotaOf || (() => PUSH_LIMITS.workspaceBytes),
+    busy: () => deps.engineJobs?.busy('capture') || null,
     ...(solo.capture || {}),
   })
+  deps.engineJobs?.set('capture', () => (capture.running() ? 'A capture is running on this engine. Try again when it finishes.' : null))
   const router = deps.boardApi
 
   // The board's /info: allowCapture for the owner here (the board shows
