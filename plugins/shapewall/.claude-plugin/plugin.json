@@ -1,6 +1,6 @@
 {
   "name": "shapewall",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Steer and build your app with your coding agent from a Shapewall board: the board's MCP tools plus skills that take a comment from request to recaptured, compared and answered.",
   "author": { "name": "Dan Baruch", "url": "https://github.com/danbaruch" },
   "homepage": "https://shapewall.com/docs/plugins",

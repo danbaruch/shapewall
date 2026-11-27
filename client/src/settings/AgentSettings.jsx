@@ -434,8 +434,7 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
             </p>
             <p>
               Claude Code gets a restricted session here: read and edit tools plus Shapewall’s own tools for commands and the browser, never
-              a shell of its own, its own MCP servers or your Claude settings files. The config’s{' '}
-              <code className="font-mono">agent.localSession: "own"</code> gives it back its own full session.
+              a shell of its own, its own MCP servers or your Claude settings files.
             </p>
             <p>
               Codex, goose and Gemini CLI run with their own tools and extensions (a shell, browser control, MCP servers from their own
@@ -443,12 +442,6 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
               setting: in a mode that acts without asking, it does, and Shapewall shows no request. Use a restricted profile:
             </p>
             <ul className="list-disc space-y-0.5 pl-5">
-              <li>
-                Claude Code in its own session (<code className="font-mono">agent.localSession: "own"</code>): permission mode{' '}
-                <code className="font-mono">default</code> or <code className="font-mono">plan</code> in your Claude settings, never{' '}
-                <code className="font-mono">auto</code>, <code className="font-mono">acceptEdits</code> or{' '}
-                <code className="font-mono">bypassPermissions</code>.
-              </li>
               <li>
                 Codex: <code className="font-mono">sandbox_mode = "workspace-write"</code> or <code className="font-mono">"read-only"</code>
                 with <code className="font-mono">approval_policy = "on-request"</code>, never{' '}

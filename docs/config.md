@@ -408,8 +408,7 @@ Versions are kept for the default environment only.
 { "boardUrl": "https://board.example.com/", "github": { "repo": "acme/site", "labels": ["shapewall"] } }
 ```
 
-`repo` (`owner/name`), `boardUrl` (deprecated: set the top-level `boardUrl` instead; where the board is served, for links from issues; default the top-level `boardUrl`, else a running
-`shapewall serve` for this config, else `http://127.0.0.1:4600/`), `labels` (up to
+`repo` (`owner/name`), `labels` (up to
 10, put on new issues), `board` (the board that bare `shapewall:<id>` markers mean) and `apiUrl` (GitHub Enterprise Server). Top level
 only. The token comes from `SHAPEWALL_GITHUB_TOKEN` or `GITHUB_TOKEN` and the webhook secret from `SHAPEWALL_GITHUB_WEBHOOK_SECRET`; a
 `token`, `webhookSecret` or `secret` key here is an error. Environment overrides: `SHAPEWALL_GITHUB_REPO`, `SHAPEWALL_BOARD_URL`,
@@ -484,9 +483,9 @@ What an agent's tools may reach (1.4.0, see [what an agent can do](agent-capabil
   checkout, never from the fix copy an agent writes in.
 - `fixIn`: `"copy"` (the default, every fix in a fix copy of its own) or `"checkout"`, which lets a local board's owner keep solo
   fixes in this checkout. Every other tier and every hosted path still uses a fix copy.
-- `localSession`: `"restricted"` (the default since 1.4.0: a local board's Claude Code session gets read and edit tools plus
-  Shapewall's own tools for commands, the sandboxed shell and the browser, and never its own shell or your `~/.claude` settings)
-  or `"own"`, the 1.2.0 session with the agent's own full tool set. `"own"` is deprecated and goes in 2.0.
+- `localSession`: `"restricted"`, the only value since 2.0 (a local board's Claude Code session gets read and edit tools plus
+  Shapewall's own tools for commands, the sandboxed shell and the browser, and never its own shell or your `~/.claude` settings).
+  `"own"`, the 1.2.0 session with the agent's own full tool set, was removed in 2.0; leave the key out.
 
 ```json
 { "agent": { "browser": { "allow": ["https://staging.example.com"] }, "fixIn": "copy" } }
@@ -525,7 +524,7 @@ Whether a command runs at once or waits for a card on the board depends on who w
 allows, not on this file: see [what each turn may do](agent-hardening.md#what-each-turn-may-do) and
 [commands through Shapewall](agent-hardening.md#commands-through-shapewall). The lines are always read from your checkout, never
 from the copy an agent edits. `starterAgent.testCommand` still
-works; `commands.test` wins when both are set. A change needs a restart of `serve`.
+works through 2.x with a deprecation warning (it goes in 3.0); `commands.test` wins when both are set. A change needs a restart of `serve`.
 
 ## Auth
 

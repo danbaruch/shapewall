@@ -551,9 +551,9 @@ test('F6: an agent that is not Claude Code, or one in its own full session, has 
   }
   // What a local board runs, as routes.js and the card read it.
   assert.deepEqual(localAgentOf({ agent: {} }, { backend: 'acp', acp: { argv: ['/x/codex-acp'] } }), { kind: 'codex', hardened: true })
-  assert.deepEqual(localAgentOf({ agent: { localSession: 'own' } }, { backend: 'acp', acp: { argv: ['/x/claude-agent-acp'] } }), {
+  assert.deepEqual(localAgentOf({ agent: {} }, { backend: 'acp', acp: { argv: ['/x/claude-agent-acp'] } }), {
     kind: 'claude',
-    hardened: false,
+    hardened: true,
   })
   assert.equal(localAgentOf({}, { backend: 'openai' }).kind, null)
   // agent connect says so for an agent that is not Claude Code.

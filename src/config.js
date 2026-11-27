@@ -15,7 +15,7 @@ import { normalizeBudgets } from './checks/budgets.js'
 import { CAPTURE_PACING_DEFAULTS, CAPTURE_PACING_MAX } from './capture/pacing.js'
 import { validateCi } from './ci/settings.js'
 import { configKeyWarnings, formatKeyWarning, missingKeyHint } from './config-keys.js'
-import { deprecated } from './deprecation.js'
+import { removedLine } from './deprecation.js'
 
 export const CONFIG_FILE = 'shapewall.config.json'
 // Captures, comments and Shapewall's other files, unless the config's outputDir says otherwise.
@@ -801,16 +801,10 @@ function validateGithub(raw, problems) {
   }
   const repo = typeof raw.repo === 'string' ? raw.repo.trim() : ''
   if (raw.repo !== undefined && !GITHUB_REPO_RE.test(repo)) problems.push(`github.repo: "owner/name" (got ${JSON.stringify(raw.repo)})`)
-  let boardUrl = null
-  // Deprecated: the top-level boardUrl (or SHAPEWALL_BOARD_URL) is the one
-  // board URL; this one still wins over it through 1.x, as it did.
-  if (raw.boardUrl !== undefined) {
-    if (!isHttpUrl(raw.boardUrl)) problems.push('github.boardUrl: an http(s) URL where the board is served')
-    else {
-      boardUrl = raw.boardUrl
-      deprecated('github.boardUrl', 'move it to the top-level "boardUrl" (or set SHAPEWALL_BOARD_URL)')
-    }
-  }
+  const boardUrl = null
+  // Removed in 2.0: the top-level boardUrl (or SHAPEWALL_BOARD_URL) is the one board URL.
+  if (raw.boardUrl !== undefined)
+    problems.push(removedLine('github.boardUrl', 'move it to the top-level "boardUrl" (or set SHAPEWALL_BOARD_URL)'))
   let apiUrl = null
   if (raw.apiUrl !== undefined) {
     if (!isHttpUrl(raw.apiUrl)) problems.push('github.apiUrl: an http(s) URL (GitHub Enterprise: https://HOST/api/v3)')
@@ -898,12 +892,11 @@ export function normalizeConfig(raw, { dir = process.cwd(), file = null, env = p
     }
   }
   const outputDir = path.resolve(dir, typeof raw.outputDir === 'string' && raw.outputDir.trim() ? raw.outputDir : DEFAULT_OUTPUT_DIR)
-  // `keepVersions` was `versions` before 1.0: the old key is still read (the new one wins), with a warning.
-  if (raw.versions !== undefined) deprecated('the config key "versions"', 'rename it to "keepVersions"')
-  const versionsKey = raw.keepVersions === undefined && raw.versions !== undefined ? 'versions' : 'keepVersions'
-  const versions = raw.keepVersions ?? raw.versions ?? VERSIONS_DEFAULT
+  // `keepVersions` was `versions` before 1.0; the old key was removed in 2.0.
+  if (raw.versions !== undefined) problems.push(removedLine('the config key "versions"', 'rename it to "keepVersions"'))
+  const versions = raw.keepVersions ?? VERSIONS_DEFAULT
   if (!Number.isInteger(versions) || versions < 0 || versions > VERSIONS_MAX) {
-    problems.push(`${versionsKey}: previous captures kept per page and viewport, a whole number from 0 to ${VERSIONS_MAX}`)
+    problems.push(`keepVersions: previous captures kept per page and viewport, a whole number from 0 to ${VERSIONS_MAX}`)
   }
   // Where people open the board, for links in notifications and GitHub issues.
   let boardUrl = null

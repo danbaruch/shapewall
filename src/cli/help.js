@@ -78,14 +78,15 @@ export const SECTIONS = {
       --host ADDR           default 127.0.0.1 (see https://shapewall.com/docs/self-hosting before changing)
       --tailscale[=print]    private HTTPS over Tailscale; =print changes nothing
       --no-identity         pair even devices signed in as the Tailscale owner
-      --lan[=IP|INTERFACE]   pair devices on your network (HTTP cookies can be sniffed)
+      --lan[=IP|INTERFACE]   pair devices on your network (HTTP cookies can be sniffed; deprecated: use --tailscale)
       --tls-cert FILE       with --lan: HTTPS certificate (also --tls-key FILE)
       --no-remote-chat      paired devices cannot use the agent
       --approve-on-host     paired devices cannot approve agent commands
       --open                also open the board in your browser, with agent settings
       --print-owner-link    print the private owner link in full (also $SHAPEWALL_PRINT_OWNER_LINK=1)
       --read-only           no comments or captures from the UI
-      --accounts            require local passkey accounts after owner setup (Node 22.19+)
+      --accounts            require local passkey accounts after owner setup (Node 22.19+; deprecated: the solo
+                            engine signs its owner in by itself)
       --accounts-origin URL fixed HTTPS origin (default: loopback URL or --tailscale URL)
       --no-capture          comments allowed, captures only from the CLI
       --buzz-bridge FILE    owner-only existing Buzz conversation (private operator map; https://shapewall.com/docs/buzz)${EXPERIMENTAL}
@@ -104,6 +105,7 @@ export const SECTIONS = {
       --engine legacy       the 1.x board server (deprecated, removed in 3.0; also $SHAPEWALL_ENGINE=legacy);
                             --host, --lan, --tailscale, --accounts, --agent-acp and the other 1.x-only flags pick it too`,
   devices: `  devices list              paired devices and pending requests for this project [--json]
+                            (deprecated: use the tailnet instead, see shapewall serve --help)
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request
   devices revoke ID|--all   revoke a device or all devices immediately`,
@@ -187,10 +189,10 @@ export const SECTIONS = {
       --agent NAME          which agent: claude, or a saved agent's id that runs Claude Code (default: this
                             project's agent, else Claude Code when found). Codex, goose and Gemini CLI are not
                             offered in this release. Never a command from the server
-      --endpoint            a model endpoint instead (Ollama, DeepSeek, OpenAI-compatible: this project's
-                            agent.baseUrl and agent.model, Settings > Agent or SHAPEWALL_AGENT_BASE_URL and
-                            SHAPEWALL_AGENT_MODEL; the key stays in its variable). Answers only: no edits, no
-                            commands, no tools (experimental)
+      --endpoint            a model endpoint instead (experimental): Ollama, DeepSeek, OpenAI-compatible, from
+                            this project's agent.baseUrl and agent.model, Settings > Agent or SHAPEWALL_AGENT_BASE_URL
+                            and SHAPEWALL_AGENT_MODEL; the key stays in its variable. Answers only: no edits, no
+                            commands, no tools
       --name "Builder"      the name to suggest on the approval page (the approver has the last word)
       --project SLUG        on a server with tailnet sign-in, run on a tailnet machine (experimental)
                             no browser, your tailnet user approves it. --project (and --workspace NAME) pick the
@@ -329,7 +331,8 @@ export const SECTIONS = {
       --no-comments         captures, history and journeys only`,
   migrate: `  migrate                   move this project's .shapewall/ into the solo engine (.shapewall/.engine/)${EXPERIMENTAL}
                             captures, comments, chat and the local account; a backup goes to
-                            .shapewall/backup-1x-<time>/ first. Refuses while serve, capture, watch or an agent runs
+                            .shapewall/backup-1x-<time>/ first; the solo engine serves it after. Refuses while
+                            serve (either engine), capture, watch or an agent runs
       --dry-run             counts, and every item that would not come along; writes nothing
       --board ID            only this board (default: every board)
       --rollback            put every migration back from its backup (checked byte for byte)

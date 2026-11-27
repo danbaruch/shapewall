@@ -106,3 +106,68 @@ test('a backup waits while a board job holds a board folder, and fails if it doe
     await hosted.close()
   }
 })
+
+// rev58 RR1-L1: a capture in another process can take its lock after the backup looked and while the pin
+// runs. The locks are read again after the pin: the pin is dropped and the backup waits, then pins again.
+test('a board job that starts while the backup pins drops the pin, and the backup waits and pins again', async () => {
+  const hosted = await startHostedServer('backup-board-job-race')
+  const realLink = fs.linkSync
+  try {
+    const owner = await signUp(hosted, { handle: 'races' })
+    const ws = owner.workspaceId
+    const project = await createProject(owner, ws, 'Site')
+    const remote = createRemote({ origin: hosted.origin, token: await createToken(owner, ws, project.id) })
+    const config = sampleConfig('backup-board-job-race')
+    writeLocalCaptures(config, 'sample')
+    const board = config.boards[0]
+    const started = await remote.startPush(pushDefinition(config, board))
+    for (const [area, name, file] of pushFiles(config, board)) await remote.pushFile(started.id, area, name, fs.readFileSync(file))
+    const manifest = JSON.parse(fs.readFileSync(path.join(config.outputDir, 'sample', 'captures', 'manifest.json'), 'utf8'))
+    await remote.commitPush(started.id, { manifest, variants: [] })
+
+    const outputDir = projectDir(hosted.dataDir, ws, project.id)
+    let job = null
+    let links = 0
+    // The first link of the pin: a capture takes the board right then (as from another process).
+    // (The lock itself is made with a link: only the backup's links count.)
+    let taking = false
+    fs.linkSync = (...args) => {
+      if (taking) return realLink(...args)
+      links += 1
+      if (!job) {
+        taking = true
+        try {
+          job = acquireBoardJob({ outputDir }, 'sample', 'capture')
+        } finally {
+          taking = false
+        }
+        assert.equal(job.ok, true)
+        setTimeout(() => job.release(), 150)
+      }
+      return realLink(...args)
+    }
+    const lines = []
+    const saved = await backup({
+      dataDir: hosted.dataDir,
+      to: tempDir('backup-board-job-race-out'),
+      busyPollMs: 30,
+      log: (line) => lines.push(line),
+    })
+    assert.ok(job, 'the job started during the pin')
+    assert.ok(
+      lines.some((line) => /waiting for the capture of board/.test(line)),
+      'the backup waited for the job',
+    )
+    assert.ok(links > 1, 'the board was pinned again')
+    assert.equal(saved.manifest?.complete ?? true, true)
+    assert.ok(fs.existsSync(path.join(saved.dir, 'files', ws, project.id, 'sample', 'captures', 'manifest.json')))
+    assert.deepEqual(
+      fs.readdirSync(hosted.dataDir).filter((name) => name.startsWith('.backup-pin-')),
+      [],
+      'no pin is left in the data folder',
+    )
+  } finally {
+    fs.linkSync = realLink
+    await hosted.close()
+  }
+})

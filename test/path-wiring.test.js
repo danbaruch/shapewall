@@ -218,10 +218,14 @@ test('restricted local session: read and edit tools, no shell, no settings, Shap
   assert.deepEqual(readOnlySession('claude', { exec: true })._meta.claudeCode.options.allowedTools, ['mcp__shapewall_exec'])
 })
 
-test('agent.localSession: "restricted" or "own", nothing else', () => {
+test('agent.localSession: "restricted" only; "own" was removed in 2.0 and the config says so by name', () => {
   const ok = []
-  assert.equal(validateAgent({ localSession: 'own' }, ok).localSession, 'own')
+  assert.equal(validateAgent({ localSession: 'restricted' }, ok).localSession, 'restricted')
   assert.deepEqual(ok, [])
+  const own = []
+  validateAgent({ localSession: 'own' }, own)
+  assert.equal(own.length, 1)
+  assert.match(own[0], /^agent\.localSession "own" was removed in Shapewall 2\.0; leave it out/)
   const bad = []
   validateAgent({ localSession: 'yolo' }, bad)
   assert.ok(bad.some((line) => line.includes('agent.localSession')))

@@ -11,8 +11,7 @@ import { EVENT_VERSION } from '../events.js'
 
 const QUOTE_MAX = 500
 
-// Where links in messages point: $SHAPEWALL_BOARD_URL, the config's boardUrl
-// (notifications.boardUrl first, deprecated), this server's own address, a
+// Where links in messages point: $SHAPEWALL_BOARD_URL, the config's boardUrl, this server's own address, a
 // `shapewall serve` running for this config, and only then the default port.
 export function boardUrlFor(config, { boardUrl = null, env = process.env } = {}) {
   return localBoardBase(config, { boardUrl, env }).url

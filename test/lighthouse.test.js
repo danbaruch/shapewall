@@ -159,22 +159,20 @@ test('Lighthouse refuses applicable setup and board storage seeds before launchi
   }
 })
 
-test('audit says how to install Lighthouse when it is missing, and warns about the board argument', async () => {
+test('checks lighthouse says how to install Lighthouse when it is missing, and reports an unsupported view', async () => {
   const config = sampleConfig('lighthouse-cli', { pages: [{ id: 'home', path: '/private', waitFor: 'text=Signed in' }] })
   const { main } = await import('../src/cli.js')
   const lines = []
   const file = path.join(config.dir, 'shapewall.config.json')
   fs.writeFileSync(file, JSON.stringify({ baseUrl: 'http://127.0.0.1:9', pages: [{ id: 'home', path: '/', waitFor: 'text=Signed in' }] }))
   const code = await main(
-    ['audit', 'site', '--config', file, '--only', 'home', '--viewports', 'desktop', '--production', 'unknown', '--json'],
+    ['checks', 'lighthouse', '--config', file, '--only', 'home', '--viewports', 'desktop', '--build-mode', 'unknown', '--json'],
     {
       out: () => {},
       err: (line) => lines.push(line),
     },
   )
-  // The board argument and --production still work, with a warning each.
-  assert.ok(lines.some((line) => /the board argument of audit .* deprecated.*--board BOARD/.test(line)))
-  assert.ok(lines.some((line) => /audit --production is deprecated.*--build-mode/.test(line)))
+  assert.ok(!lines.some((line) => /deprecated/.test(line)))
   assert.equal(code, 2, 'the unsupported view is reported, and the run exits 2')
 })
 

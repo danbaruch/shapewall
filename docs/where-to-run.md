@@ -6,13 +6,16 @@ Shapewall has two shapes. Pick by who needs the board and when, not by how big t
 | ----------------------------------------------- | ------------------------------------------------------------ | ------------------------------------ | -------------------------- |
 | One person, building with an agent              | `npx shapewall serve` in the project, next to its dev server | You, on this machine                 | No: start it when you work |
 | One person, also on your phone or second laptop | `npx shapewall serve --tailscale`                            | Your own devices on your tailnet     | No                         |
+| One person, on the hosted engine (experimental) | `npx shapewall serve --engine hosted` in the project         | You, on this machine                 | No: start it when you work |
 | A team, or you and your agents around the clock | `shapewall hosted --tailscale` on a machine that stays on    | Everyone you invite, on your tailnet | Yes                        |
 | The same, with no passkeys to set up            | `shapewall hosted --tailscale --tailnet-sign-in`             | Tailnet users you invite by login    | Yes                        |
 | A team with people outside your tailnet         | `shapewall hosted` behind your own domain                    | Everyone you invite, from anywhere   | Yes                        |
 
-The first two are the same local board. The others are the same hosted server, reached in different ways. Nothing about a project changes
-when you move between them: the config, the captures and the comments are the same files. From 2.0 the local board is the hosted engine
-too, for one owner on this machine ([upgrading a 1.x project](#upgrading-a-1x-project)).
+The first two are the same local board. The last three are the same hosted server, reached in different ways. The third is that
+hosted server run for one project on your own machine (the solo engine). From 2.0 it is what `shapewall serve` runs, so the local
+board is the solo engine too ([upgrading a 1.x project](#upgrading-a-1x-project)). Moving between the local board and a hosted server
+changes nothing about the project's config; `shapewall push` and `shapewall share` move captures and comments to a server, and
+`shapewall migrate` moves them into the solo engine.
 
 ## The local board
 
@@ -63,6 +66,37 @@ and your other devices pair once. See [Your own other devices](deployment.md#you
 
 Working on several projects? Each one has its own board on its own port, and the board switcher switches between the ones that are
 running. See [Several local projects](deployment.md#several-local-projects).
+
+## The solo engine (experimental)
+
+**Experimental.** Outside the [stability promise](stability.md): it can change, or go, in a minor release.
+
+```sh
+npx shapewall migrate --dry-run         # optional: what an existing .shapewall/ would bring along
+npx shapewall migrate                   # optional: move it, with a backup first
+npx shapewall serve --engine hosted --open
+```
+
+`serve --engine hosted` runs the hosted server's engine for this one project, on this machine, for you alone: one owner with no
+passkey (a one-time sign-in page from the terminal), on 127.0.0.1 at `http://<project>-<random>.shapewall.localhost:<port>`, with its
+data in `.shapewall/.engine/`. The board is the hosted board, and the work that a team server leaves to your machine happens in the
+engine itself: "Capture now", page checks, journeys made on the board, environments and compare, batch fixes and installation
+updates. The project's agent runs as a connected agent (`shapewall agent connect --as local`) on the same link a team server's
+agents use, so the chat, Fix with and Send to agent go through one protocol whether the board is on your machine or a server. While
+it runs, `shapewall comments`, `watch` and `mcp` in the project folder go to it.
+In 1.5.0 it is opt-in: the plain `shapewall serve` is unchanged and stays the default.
+
+`shapewall migrate` (experimental) moves an existing project's `.shapewall/` (captures, versions, environments, journeys,
+comments, chat threads, a `serve --accounts` owner) into the engine, after a hard-link backup; `shapewall migrate --rollback` puts
+it back. After a migration the plain `shapewall serve` and `shapewall watch` refuse the boards that moved. A project with no
+`.shapewall/` yet needs no migration: start the engine and capture.
+
+The engine is the hosted server's code (`src/hosted`), so it is under the hosted server's license, not the core's: the
+[Functional Source License 1.1, ALv2 future license](../src/hosted/LICENSE.md). Anyone may use, change and run it, at work too;
+what it does not allow is offering it as a competing hosted service, and each release becomes Apache 2.0 two years after it ships.
+The CLI, capture, the local board and the migration planner, backup and rollback stay Apache 2.0.
+
+Every detail (sign-in, tokens, the board's own agent, capturing, what it refuses): [the solo engine](hosted.md#the-solo-engine-experimental).
 
 ## The hosted server
 
@@ -236,7 +270,8 @@ One process holds an agent's link: a second `agent connect` on the same token is
 
 ## Which one should I start with?
 
-Start local. It takes four commands and nothing to maintain. Move to the hosted server when one of these is true:
+Start local. It takes four commands and nothing to maintain. To try the solo engine, run it on a copy of a project, or
+migrate a project and keep the backup until you are sure (`shapewall migrate --rollback`). Move to the hosted server when one of these is true:
 
 - someone else needs to comment, and a share link or a screenshot is not enough;
 - you want to leave comments from anywhere and have an agent on another machine act on them;

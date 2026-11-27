@@ -158,6 +158,9 @@ export function appUpdateRouter({
   readOnly = false,
   appUpdate = {},
   owner = null,
+  // The solo engine only: (req) => null, or the refusal { status, code, message, extra } an owner's
+  // session gets before an apply runs (the fixed core's typed confirmation; PR #53 F4).
+  confirmApply = null,
 } = {}) {
   // The proxy capability can replace app code: a guessable one is refused at startup.
   const updateToken = env.SHAPEWALL_UPDATE_TOKEN || null
@@ -218,7 +221,7 @@ export function appUpdateRouter({
     checkedAt,
     job,
   })
-  const fail = (res, code, name, message) => res.status(code).json({ error: { code: name, message } })
+  const fail = (res, code, name, message, extra = {}) => res.status(code).json({ error: { ...extra, code: name, message } })
 
   function run(action) {
     if (action === 'check') {
@@ -378,6 +381,9 @@ export function appUpdateRouter({
       if (action === 'apply' && (!checkedAt || !updateAvailable))
         return fail(res, 409, 'update_not_available', 'Check for an available update first.')
       if (stopping) return fail(res, 503, 'update_stopping', 'Shapewall is stopping.')
+      // Last, so the person confirms only an apply that will run. The fixed update token is the installer's own.
+      const refusal = action === 'apply' && confirmApply && !tokenOk(req, updateToken) ? confirmApply(req) : null
+      if (refusal) return fail(res, refusal.status, refusal.code, refusal.message, refusal.extra || {})
       run(action)
       res.status(202).json(status(req))
     })

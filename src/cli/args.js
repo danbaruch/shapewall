@@ -2,6 +2,7 @@
 
 import { AUTH_FLAGS, AUTH_BOOLEAN_FLAGS } from '../auth/record.js'
 import { cliCommand } from '../invocation.js'
+import { removed } from '../deprecation.js'
 
 const BOOLEAN_FLAGS = new Set([
   ...AUTH_BOOLEAN_FLAGS,
@@ -79,13 +80,13 @@ const BOOLEAN_FLAGS = new Set([
   'no-agent-docs',
   'rollback',
 ])
-// Old flag spellings each command still takes, hidden from its help: the
-// value moves to the new name and a one-line warning says to switch. null:
-// the flag is accepted and ignored (it never did anything).
-export const FLAG_ALIASES = {
-  export: { noindex: 'no-index' },
-  checks: { production: 'build-mode' },
-  capture: { yes: null },
+// Flag spellings removed in 2.0 (deprecated through 1.x), per command (or
+// command and action, as actionScope names it): what to use instead. A strict parse refuses one with a one-line error naming
+// the replacement, not "unknown option".
+export const REMOVED_FLAGS = {
+  export: { noindex: 'use --no-index' },
+  'checks lighthouse': { production: 'use --build-mode' },
+  capture: { yes: 'leave it out: capture never prompts' },
 }
 
 const REPEATABLE = new Set(['only', 'allowed-host', 'exclude', 'allow-host', 'trusted'])
@@ -120,8 +121,7 @@ const LIGHTHOUSE_FLAGS = [
   'json',
 ]
 // Commands whose actions take different flags: the action (the first word
-// after the command) picks its list, '*' is every other action. An old
-// spelling in FLAG_ALIASES counts only where the flag it stands for does.
+// after the command) picks its list, '*' is every other action.
 export const SUBCOMMAND_FLAGS = {
   checks: { lighthouse: LIGHTHOUSE_FLAGS, '*': CHECKS_FLAGS },
 }
@@ -364,8 +364,14 @@ export function suggestFlag(key, known) {
   return best && (bestScore <= allowed || best.startsWith(key) || key.startsWith(best)) ? best : null
 }
 
-const takes = (command, key) =>
-  GLOBAL_FLAGS.includes(key) || COMMAND_FLAGS[command].includes(key) || Object.hasOwn(FLAG_ALIASES[command] || {}, key)
+const takes = (command, key) => GLOBAL_FLAGS.includes(key) || COMMAND_FLAGS[command].includes(key)
+
+// The error for a flag this command no longer takes: the removed-in-2.0
+// line when it is an old spelling (REMOVED_FLAGS), else "unknown option".
+function refusedFlag(key, scope) {
+  if (Object.hasOwn(REMOVED_FLAGS[scope.name] || {}, key)) return removed(`${scope.name} --${key}`, REMOVED_FLAGS[scope.name][key])
+  return unknownFlag(key, scope.name, scope.flags)
+}
 
 // The flags a command takes for the action named after it, and that
 // command line's name ("checks lighthouse") for the error.
@@ -386,11 +392,10 @@ function unknownFlag(key, command, flags = COMMAND_FLAGS[command] || []) {
   return error
 }
 
-// Parses argv into { command, positional, flags, deprecations }. With
-// `strict`, a flag the command does not take is an error (before it can
-// swallow the next word as its value), with the closest real flag as a hint.
-// An old spelling (FLAG_ALIASES) is read as the new one; `deprecations` holds
-// [old, new] for the warning.
+// Parses argv into { command, positional, flags }. With `strict`, a flag
+// the command does not take is an error (before it can swallow the next word
+// as its value), with the closest real flag as a hint, or the replacement
+// when it is a spelling removed in 2.0.
 export function parseArgs(argv, { strict = false } = {}) {
   const positional = []
   const flags = {}
@@ -413,8 +418,7 @@ export function parseArgs(argv, { strict = false } = {}) {
     }
     const command = positional[0]
     if (strict && command && COMMAND_FLAGS[command] && !takes(command, key)) {
-      const scope = actionScope(command, positional[1])
-      throw unknownFlag(key, scope.name, scope.flags)
+      throw refusedFlag(key, actionScope(command, positional[1]))
     }
     seen.push(key)
     const ownValue = Boolean(command && COMMAND_OPTIONAL_VALUE[command]?.has(key))
@@ -447,22 +451,14 @@ export function parseArgs(argv, { strict = false } = {}) {
   // Flags written before the command are checked once it is known.
   if (strict && command && COMMAND_FLAGS[command]) {
     const scope = actionScope(command, positional[1])
-    for (const key of seen) if (!takes(command, key)) throw unknownFlag(key, scope.name, scope.flags)
+    for (const key of seen) if (!takes(command, key)) throw refusedFlag(key, scope)
     // Each action takes only its own flags ("checks run --samples 3" is a mistake).
     if (SUBCOMMAND_FLAGS[command]) {
       for (const key of seen) {
-        const meant = Object.hasOwn(FLAG_ALIASES[command] || {}, key) ? FLAG_ALIASES[command][key] : key
-        if (meant === null || GLOBAL_FLAGS.includes(key) || scope.flags.includes(meant)) continue
+        if (GLOBAL_FLAGS.includes(key) || scope.flags.includes(key)) continue
         throw unknownFlag(key, scope.name, scope.flags)
       }
     }
   }
-  const deprecations = []
-  for (const [old, now] of Object.entries((command && FLAG_ALIASES[command]) || {})) {
-    if (!Object.hasOwn(flags, old)) continue
-    deprecations.push([old, now])
-    if (now && flags[now] === undefined) flags[now] = flags[old]
-    delete flags[old]
-  }
-  return { command, positional: positional.slice(1), flags, deprecations }
+  return { command, positional: positional.slice(1), flags }
 }

@@ -20,9 +20,10 @@
 //               usercontent origin (uc.<name>), sandboxed, so the board pins
 //               from the capture's element map instead (G17).
 //   appUpdates  About and updates can check for and apply an update
+//   compare     comparing the board's environments (the engine keeps them all)
 // (In-process capture, G3, turns on with the owner's /info allowCapture: true;
 // the engine also lists it as soloFeatures.capture.)
-export const SOLO_FEATURES = ['journeys', 'checksRun', 'batchFixes', 'domFallback', 'appUpdates']
+export const SOLO_FEATURES = ['journeys', 'checksRun', 'batchFixes', 'domFallback', 'appUpdates', 'compare']
 
 // The signed-in owner of a solo engine. Never a guest or a public visitor
 // (their /info is their own and never says solo).

@@ -101,5 +101,7 @@ installer's fixed helper runs, an apply is never stopped, and the engine restart
 the one owner of the workspace the engine serves, signed in on the board of the project it serves, in a browser on this
 machine (a loopback address and host, no proxy headers), writing from the board's own page. Owning some other workspace on the
 engine is not enough, and an engine with no bound project, or two owners in its workspace, updates for nobody. Other accounts, requests through a proxy or tunnel, and read-only engines see the version only.
-`SHAPEWALL_UPDATE_TOKEN` works as above and still needs the owner's session. A hosted team server has no update routes; update
+**Update now** first asks the owner to type the workspace's name (passkeys are off on the engine, so this is the typed
+confirmation the console asks for elsewhere); **Check for updates** does not ask. `SHAPEWALL_UPDATE_TOKEN` works as above, still
+needs the owner's session, and skips the typed confirmation. A hosted team server has no update routes; update
 it the way it was installed.

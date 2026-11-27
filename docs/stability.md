@@ -19,8 +19,10 @@ New commands, flags, config keys, JSON fields and event types can arrive in any 
 fields you do not know.
 
 Before something stable is removed, it is deprecated for at least one minor release: it keeps working and prints a one-line
-warning on stderr when it is used (`Warning: ... is deprecated and will be removed in Shapewall 2.0; ...`), and it is removed only
-in the next major. The [CLI reference](https://shapewall.com/docs/cli#deprecated-spellings) lists the spellings deprecated so far.
+warning on stderr when it is used (`Warning: ... is deprecated and will be removed in Shapewall 3.0; ...`), and it is removed only
+in the next major. Once removed, using it stops with a one-line error that names the replacement (`... was removed in Shapewall
+2.0; ...`). The [CLI reference](https://shapewall.com/docs/cli#deprecated-spellings) lists the spellings deprecated now and the
+ones 2.0 removed.
 
 Shapewall supports the Node.js versions in active or maintenance LTS from 22.19 on. Dropping one is announced a minor release
 ahead.
@@ -35,7 +37,7 @@ The core of Shapewall:
   (its server flags, `backup` and `restore`). From 2.0 `serve` runs the solo engine; `serve --engine legacy` and
   `SHAPEWALL_ENGINE=legacy` (the 1.x board server) are deprecated and go in 3.0;
 - the core config keys, including `commands`, `agent.browser.allow`, `agent.fixIn` and `agent.localSession` (1.4.0; its value
-  `"own"` is deprecated and goes in 2.0), the comment item JSON, the MCP tools, `/api/v1` (except `/api/v1/agent/*`), `/mcp`, the webhook payload and
+  `"own"` was removed in 2.0), the comment item JSON, the MCP tools, `/api/v1` (except `/api/v1/agent/*`), `/mcp`, the webhook payload and
   its signature, `events.jsonl`, the environment variables that are not listed as experimental below, the exit codes, and the
   `shapewall` bin name.
 
@@ -45,6 +47,14 @@ Anything marked experimental may change, or go, in a minor release, with a note 
 all`), an experimental command or option ends its first line with `(experimental)`; in these docs, its section or page says
 **Experimental** at the top.
 
+- **The solo engine (1.5.0):** `serve --engine hosted` and every flag it takes there, `--skip-git-check`, the board's
+  `/info` fields `solo` and `soloFeatures`, `.shapewall/.engine/` and its `serve.json` and token files, and what the
+  project-folder commands do while the engine runs ([the solo engine](hosted.md#the-solo-engine-experimental)). The hosted
+  server itself, its token API and `/mcp` stay covered as before.
+- **The migration (1.5.0):** `shapewall migrate` with `--dry-run`, `--board`, `--rollback` and `--json`, its JSON output, and
+  the files it leaves in `.shapewall/` (`backup-1x-<time>/`, `MIGRATING-TO-2`, `MIGRATED-TO-2`, `migrate.lock`)
+  ([moving a local project into the engine](hosted.md#moving-a-local-project-into-the-engine-shapewall-migrate)).
+- **Endpoint agents on the link:** `agent connect --endpoint`.
 - **The sandboxed starter agent:** `shapewall agent sandbox run|watch|doctor|build-image`, the `starterAgent` config key,
   `Dockerfile.agent`, `SHAPEWALL_AGENT_IMAGE`, `SHAPEWALL_AGENT_RUNTIME`, `SHAPEWALL_AGENT_REGISTRY`, `SHAPEWALL_AGENT_EGRESS`,
   `SHAPEWALL_AGENT_KEY_HOSTS`, `SHAPEWALL_SANDBOX` and `SHAPEWALL_EGRESS_*` ([the starter agent](starter-agent.md)).

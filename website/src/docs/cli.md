@@ -220,6 +220,8 @@ start (private files in `.shapewall/.engine/`, a new secret each start), not to 
 Ollama or DeepSeek) as `shapewall agent connect --as local`, on the same link a team server's agents use, with a token it
 made at start; the board's chat and Fix with go through it. `--no-chat` (or `--read-only`) runs without it. The flags that
 reach beyond this machine (`--host`, `--lan`, `--tailscale`, `--tls-cert`, `--accounts`, `--agent-acp`, ...) are refused.
+The engine is the hosted server's code, under its Functional Source License (Apache 2.0 two years after each release), not the
+core's Apache 2.0. An existing `.shapewall/` moves into it with [`shapewall migrate`](#shapewall-migrate).
 Details: [the solo engine](/docs/hosted#the-solo-engine-experimental).
 
 ## shapewall buzz-bridge
@@ -550,6 +552,24 @@ sign-in, `--project` signs in from a tailnet machine without a browser; experime
 history, journeys and comments into a shared project. `--dry-run` reports counts without sending; `--no-comments` omits comments.
 Private diagnostic reports are excluded unless `--include-checks` is explicitly selected. See [the operator guide](/docs/hosted).
 
+## shapewall migrate
+
+**Experimental.** Outside the [stability promise](/docs/stability): it can change, or go, in a minor release.
+
+```text
+shapewall migrate [--dry-run] [--board ID] [--json]
+shapewall migrate --rollback [--dry-run] [--json]
+```
+
+Moves this project's `.shapewall/` into the [solo engine](/docs/hosted#the-solo-engine-experimental) (`.shapewall/.engine/`), so
+`shapewall serve --engine hosted` serves it: captures, versions, environments and journeys as files, comments and chat threads as
+engine rows, and a `serve --accounts` owner with their passkeys. A hard-link backup goes to `.shapewall/backup-1x-<time>/` first,
+and a failed run puts the folder back. `--dry-run` prints the counts and every item that would not come along, and writes nothing.
+It refuses while `serve` (either engine), a capture, `watch` or an agent runs. After a migration the plain `serve` and `watch`
+refuse the boards that moved; `--rollback` restores them from the backup, checked byte for byte. Agent settings and keys stay
+on the machine; sign-in sessions and paired devices do not move. Exit code 0 when done or nothing to do, 1 when refused or failed.
+Details: [moving a local project into the engine](/docs/hosted#moving-a-local-project-into-the-engine-shapewall-migrate).
+
 ## shapewall push, --remote and hosted
 
 ```text
@@ -650,11 +670,19 @@ Every command exits with one of these. A command that has its own meaning for on
 
 ## Deprecated spellings
 
-These 0.x spellings still work through 1.x, each with a one-line warning on stderr, and go away in 2.0: `hosted --setup` (use
-`hosted setup`), `variant rm` (`variant remove`), `export --noindex` (`--no-index`), `audit` (`checks lighthouse`), `audit
---production` (`--build-mode`), `audit BOARD` (`--board BOARD`), `agent run|watch|doctor|build-image` (`agent sandbox run|watch|doctor|build-image`),
-`capture --yes` (capture never prompts; leave it out), `versions`, `notifications.boardUrl` and `github.boardUrl` in the config
-(`keepVersions` and the top-level `boardUrl`), and `SHAPEWALL_USERCONTENT_ORIGIN` (`SHAPEWALL_HOSTED_USERCONTENT_ORIGIN`).
+These still work through 2.x, each with a one-line warning on stderr, and go away in 3.0: `serve --lan` and `serve --accounts`
+(also `SHAPEWALL_ACCOUNTS=1`), the `devices` command (pair through the tailnet with `serve --tailscale`), and
+`starterAgent.testCommand` in the config (set `commands.test`).
+
+## Removed in 2.0
+
+These 0.x and 1.x spellings were deprecated through 1.x and are gone in 2.0. Using one stops with a one-line error that names
+the replacement: `hosted --setup` (use `hosted setup`), `variant rm` (`variant remove`), `export --noindex` (`--no-index`), `audit`
+(`checks lighthouse`), `--production` (`--build-mode`), the board argument of `checks lighthouse BOARD` (`--board BOARD`),
+`agent run|watch|doctor|build-image` (`agent sandbox run|watch|doctor|build-image`), `capture --yes` (capture never prompts; leave
+it out), `versions`, `notifications.boardUrl` and `github.boardUrl` in the config (`keepVersions` and the top-level `boardUrl`),
+`agent.localSession: "own"` (leave it out: the restricted session is the only one), and `SHAPEWALL_USERCONTENT_ORIGIN`
+(`SHAPEWALL_HOSTED_USERCONTENT_ORIGIN`).
 
 Commands and options marked `(experimental)` in the help, and the pages of these docs marked experimental, are outside the
 [stability promise](/docs/stability).
@@ -734,14 +762,15 @@ Commands
       --host ADDR           default 127.0.0.1 (see https://shapewall.com/docs/self-hosting before changing)
       --tailscale[=print]    private HTTPS over Tailscale; =print changes nothing
       --no-identity         pair even devices signed in as the Tailscale owner
-      --lan[=IP|INTERFACE]   pair devices on your network (HTTP cookies can be sniffed)
+      --lan[=IP|INTERFACE]   pair devices on your network (HTTP cookies can be sniffed; deprecated: use --tailscale)
       --tls-cert FILE       with --lan: HTTPS certificate (also --tls-key FILE)
       --no-remote-chat      paired devices cannot use the agent
       --approve-on-host     paired devices cannot approve agent commands
       --open                also open the board in your browser, with agent settings
       --print-owner-link    print the private owner link in full (also $SHAPEWALL_PRINT_OWNER_LINK=1)
       --read-only           no comments or captures from the UI
-      --accounts            require local passkey accounts after owner setup (Node 22.19+)
+      --accounts            require local passkey accounts after owner setup (Node 22.19+; deprecated: the solo
+                            engine signs its owner in by itself)
       --accounts-origin URL fixed HTTPS origin (default: loopback URL or --tailscale URL)
       --no-capture          comments allowed, captures only from the CLI
       --buzz-bridge FILE    owner-only existing Buzz conversation (private operator map; https://shapewall.com/docs/buzz) (experimental)
@@ -760,6 +789,7 @@ Commands
       --engine legacy       the 1.x board server (deprecated, removed in 3.0; also $SHAPEWALL_ENGINE=legacy);
                             --host, --lan, --tailscale, --accounts, --agent-acp and the other 1.x-only flags pick it too
   devices list              paired devices and pending requests for this project [--json]
+                            (deprecated: use the tailnet instead, see shapewall serve --help)
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request
   devices revoke ID|--all   revoke a device or all devices immediately
@@ -843,10 +873,10 @@ Commands
       --agent NAME          which agent: claude, or a saved agent's id that runs Claude Code (default: this
                             project's agent, else Claude Code when found). Codex, goose and Gemini CLI are not
                             offered in this release. Never a command from the server
-      --endpoint            a model endpoint instead (Ollama, DeepSeek, OpenAI-compatible: this project's
-                            agent.baseUrl and agent.model, Settings > Agent or SHAPEWALL_AGENT_BASE_URL and
-                            SHAPEWALL_AGENT_MODEL; the key stays in its variable). Answers only: no edits, no
-                            commands, no tools (experimental)
+      --endpoint            a model endpoint instead (experimental): Ollama, DeepSeek, OpenAI-compatible, from
+                            this project's agent.baseUrl and agent.model, Settings > Agent or SHAPEWALL_AGENT_BASE_URL
+                            and SHAPEWALL_AGENT_MODEL; the key stays in its variable. Answers only: no edits, no
+                            commands, no tools
       --name "Builder"      the name to suggest on the approval page (the approver has the last word)
       --project SLUG        on a server with tailnet sign-in, run on a tailnet machine (experimental)
                             no browser, your tailnet user approves it. --project (and --workspace NAME) pick the
@@ -985,7 +1015,8 @@ Commands
       --no-comments         captures, history and journeys only
   migrate                   move this project's .shapewall/ into the solo engine (.shapewall/.engine/) (experimental)
                             captures, comments, chat and the local account; a backup goes to
-                            .shapewall/backup-1x-<time>/ first. Refuses while serve, capture, watch or an agent runs
+                            .shapewall/backup-1x-<time>/ first; the solo engine serves it after. Refuses while
+                            serve (either engine), capture, watch or an agent runs
       --dry-run             counts, and every item that would not come along; writes nothing
       --board ID            only this board (default: every board)
       --rollback            put every migration back from its backup (checked byte for byte)

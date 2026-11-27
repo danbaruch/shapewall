@@ -772,7 +772,7 @@ export async function migrateCommand(
       printPlan(plan, out, { dryRun: false })
       out('')
       out(`Migrated. Backup: ${rel(config, result.backup)} (undo with shapewall migrate --rollback).`)
-      if (!fromServe) out('Start the board with shapewall serve.')
+      if (!fromServe) out('Start the solo engine with shapewall serve; shapewall migrate --rollback puts the folder back as it was.')
     }
     return 0
   }

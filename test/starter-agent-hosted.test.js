@@ -110,7 +110,7 @@ test('a run with a hosted-style source beats while it holds the claim, and stops
   assert.equal(beats.length, count, 'no beats after the run let go of the claim')
 })
 
-test('agent run on a local board sends its changes to the notification channels', async () => {
+test('agent sandbox run on a local board sends its changes to the notification channels', async () => {
   const requests = []
   const hook = http.createServer((req, res) => {
     let body = ''
@@ -134,7 +134,7 @@ test('agent run on a local board sends its changes to the notification channels'
     fs.writeFileSync(path.join(bin, 'podman'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
     const errors = []
     const code = await agentCommand(
-      ['run'],
+      ['sandbox', 'run'],
       { comment: '1', config: file },
       () => {},
       (line) => errors.push(line),

@@ -6,7 +6,7 @@ import { joinUrl } from '../config.js'
 // Strings from a capture (a broken link, a shot's error) with the capture
 // addresses taken out: the board's and its environments' base URLs become
 // the public URL when there is one, else go.
-function captureHostScrubber(board) {
+export function captureHostScrubber(board) {
   const publicUrl = board.publicUrl ? String(board.publicUrl).replace(/\/+$/, '') : ''
   const bases = new Set()
   for (const value of [board.baseUrl, ...(board.environments || []).map((env) => env?.baseUrl)]) {

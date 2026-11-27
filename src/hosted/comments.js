@@ -13,6 +13,7 @@ import {
   COMMENT_BODY_MAX,
   CommentError,
   cleanFixRef,
+  commentOnOtherEnvironment,
   currentVersion,
   validateCommentInput,
   withMedia,
@@ -88,6 +89,9 @@ export function rowToComment(row) {
       : {}),
     pageId: row.page_id,
     viewport: row.viewport,
+    // The environment it was left on (migration 24; every team board's is
+    // `default`). A variant has none, as on a local board.
+    ...(row.environment && !String(row.page_id).startsWith('variant:') ? { environment: row.environment } : {}),
     x: row.x,
     y: row.y,
     body: row.body,
@@ -185,7 +189,9 @@ export function createCommentStore(t, projectId, boardId) {
   }
 
   // `author` is { name, userId, handle } for a person, { name, tokenId } for
-  // a token, or { name, shareId } for a share link's guest. `media`: {
+  // a token, or { name, shareId } for a share link's guest. The comment is on
+  // the environment it names (compare mode), else on the board's first one,
+  // which on a team board is `default`. `media`: {
   // images (cleaned, src/hosted/comment-files.js cleanImages), drawing
   // (validateDrawing) }; inside the caller's transaction.
   function create(config, board, input, author, now = new Date(), media = null) {
@@ -203,9 +209,9 @@ export function createCommentStore(t, projectId, boardId) {
     const at = now.toISOString()
     t.run(
       `INSERT INTO comments (workspace_id, project_id, board_id, number, page_id, viewport, x, y, body, author, author_handle,
-         author_user_id, author_token_id, author_share_id, anchor, capture_version, status, created_at, updated_at)
+         author_user_id, author_token_id, author_share_id, anchor, capture_version, environment, status, created_at, updated_at)
        VALUES (:ws, :project, :board, :number, :page, :viewport, :x, :y, :body, :author, :handle, :user, :token, :share, :anchor, :version,
-         'open', :at, :at)`,
+         :environment, 'open', :at, :at)`,
       {
         ...key,
         number,
@@ -220,7 +226,13 @@ export function createCommentStore(t, projectId, boardId) {
         token: author.tokenId || null,
         share: author.shareId || null,
         anchor: clean.anchor ? JSON.stringify(clean.anchor) : null,
-        version: clean.pageId.startsWith('variant:') ? null : currentVersion(config, board.id, clean.pageId, clean.viewport),
+        // Only the default environment keeps old captures (versions/), so a
+        // comment on another one records none (as store.js createComment).
+        version:
+          clean.pageId.startsWith('variant:') || commentOnOtherEnvironment(board, clean)
+            ? null
+            : currentVersion(config, board.id, clean.pageId, clean.viewport),
+        environment: clean.environment || board.environments?.[0]?.id || 'default',
         at,
       },
     )
@@ -339,9 +351,11 @@ export function createCommentStore(t, projectId, boardId) {
     const drawing = media?.drawing
       ? {
           ...media.drawing,
-          captureVersion: String(row.page_id).startsWith('variant:')
-            ? null
-            : currentVersion(media.config, boardId, row.page_id, row.viewport) || null,
+          captureVersion:
+            String(row.page_id).startsWith('variant:') ||
+            commentOnOtherEnvironment(media.config?.boards?.[0], { environment: row.environment })
+              ? null
+              : currentVersion(media.config, boardId, row.page_id, row.viewport) || null,
         }
       : null
     const entry = {

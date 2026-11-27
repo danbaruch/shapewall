@@ -127,8 +127,10 @@ Node.js 22.19 or newer and Chromium, on Linux, macOS or Windows; Linux is the pr
 
 ## How is Shapewall licensed?
 
-The local tool is open source under Apache 2.0. The self-hosted team server is source-available under the Functional Source License
-and becomes Apache 2.0 two years after each release. See [licenses and self-hosting](/open-source).
+The local tool is open source under Apache 2.0. The self-hosted team server and the experimental solo engine
+(`shapewall serve --engine hosted`), both in `src/hosted`, are source-available under the Functional Source License: anyone may
+use, change and run them, at work too, but not offer competing hosting, and each release becomes Apache 2.0 two years after it
+ships. See [licenses and self-hosting](/open-source).
 
 ## How do I capture many pages quickly?
 

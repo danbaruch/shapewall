@@ -695,9 +695,8 @@ On a local board, Claude Code (`claude-agent-acp`) runs in the same restricted s
   comes from Shapewall instead, followed by the block that says what this turn may do.
 - **No auto memory:** `autoMemoryEnabled: false` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
 
-`"agent": { "localSession": "own" }` in the config keeps the 1.2.0 session, with Claude Code's own full tool set and settings,
-until 2.0; Shapewall prints a deprecation warning when it is used. Other ACP adapters take no such options and keep their own
-session.
+`"agent": { "localSession": "own" }` (the 1.2.0 session, with Claude Code's own full tool set and settings) was removed in 2.0; the
+config refuses it with a one-line error. Other ACP adapters take no such options and keep their own session.
 
 ### Codex
 

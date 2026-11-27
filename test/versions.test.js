@@ -36,7 +36,7 @@ test('version ids sort by time and match the served-name grammar', () => {
 })
 
 test('archived versions are listed newest first and pruned to the newest N', () => {
-  const config = sampleConfig('versions-prune', { versions: 2 })
+  const config = sampleConfig('versions-prune', { keepVersions: 2 })
   const captures = capturesDir(config, 'sample')
   const ids = ['20260101T000000000Z', '20260102T000000000Z-aaaa', '20260103T000000000Z', '20260104T000000000Z']
   for (const id of ids) {

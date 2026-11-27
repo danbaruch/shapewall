@@ -96,7 +96,7 @@ const envFor = (extra = {}) => ({ SHAPEWALL_GITHUB_API_URL: apiUrl, GITHUB_TOKEN
 
 function githubConfig(name, github = {}) {
   const dir = tempDir(name)
-  const raw = { ...structuredClone(SAMPLE), github: { repo: 'acme/site', boardUrl: 'http://board.test/review/', ...github } }
+  const raw = { ...structuredClone(SAMPLE), boardUrl: 'http://board.test/review/', github: { repo: 'acme/site', ...github } }
   fs.writeFileSync(path.join(dir, 'shapewall.config.json'), JSON.stringify(raw))
   return normalizeConfig(raw, { dir, file: path.join(dir, 'shapewall.config.json') })
 }
@@ -118,12 +118,20 @@ test('config: github takes a repo and URLs; secrets in the file are refused', ()
   const config = githubConfig('gh-config', { labels: ['feedback'] })
   assert.deepEqual(config.github, {
     repo: 'acme/site',
-    boardUrl: 'http://board.test/review/',
+    boardUrl: null,
     apiUrl: null,
     labels: ['feedback'],
     board: null,
   })
   assert.equal(normalizeConfig(structuredClone(SAMPLE)).github, null)
+  // github.boardUrl was removed in 2.0: the config names the top-level key.
+  assert.throws(
+    () => normalizeConfig({ ...structuredClone(SAMPLE), github: { repo: 'acme/site', boardUrl: 'http://board.test/' } }),
+    (error) =>
+      error.problems.includes(
+        'github.boardUrl was removed in Shapewall 2.0; move it to the top-level "boardUrl" (or set SHAPEWALL_BOARD_URL).',
+      ),
+  )
   assert.throws(
     () => normalizeConfig({ ...structuredClone(SAMPLE), github: { repo: 'acme/site', token: 'x' } }),
     /github\.token: never put secrets in the config/,

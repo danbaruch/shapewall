@@ -17,6 +17,7 @@ import { ID_RE } from '../config.js'
 import { createCommentStore } from './comments.js'
 import { NEEDS, ROLE_ACCESS, tokenCreatorOk } from './permissions.js'
 import { projectDir } from './projects.js'
+import { SOLO_BOUND_DELETE_MESSAGE, deletesSoloBinding } from './solo/binding.js'
 import { stepUpSettings } from './step-up-settings.js'
 import { auditAccount } from './tenancy.js'
 import { ZIP_MAX_BYTES, createZip } from './zip.js'
@@ -747,6 +748,9 @@ export function mountAdmin(router, deps) {
     needFresh,
     handle(async (req, res) => {
       const workspace = req.t.get('SELECT id, name FROM workspaces WHERE workspace_id = :ws')
+      // The solo engine's own workspace stays (rev63 R1-L1): a capture or checks run would write back under it.
+      if (deletesSoloBinding(db, { workspaceId: workspace.id }))
+        throw new HttpError(409, 'solo_workspace', SOLO_BOUND_DELETE_MESSAGE.workspace)
       if (typeof req.body?.confirm !== 'string' || req.body.confirm.trim() !== workspace.name) {
         throw new HttpError(400, 'confirm_name', 'Type the workspace name exactly to delete it.')
       }
