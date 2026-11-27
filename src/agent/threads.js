@@ -26,6 +26,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { isLockLive, withFileLock } from '../lock.js'
+import { EngineFolderError, assertMigrationAllows } from '../engine-folder.js'
 import { boardDir, readJson, writeFileAtomic, writeJsonAtomic } from '../store.js'
 import { AgentError } from './errors.js'
 import { sniffImage } from '../image-sniff.js'
@@ -208,10 +209,25 @@ function removeFiles(config, boardId, messages) {
   }
 }
 
+// The 1.x chat of a board refuses writes while `shapewall migrate` runs,
+// after one stopped midway, and once the board moved to the solo engine, as
+// the comment writers do (src/store.js assertBoardWritable).
+export function assertChatWritable(config, boardId) {
+  try {
+    assertMigrationAllows(config, { local: true, boardIds: [boardId] })
+  } catch (error) {
+    if (error instanceof EngineFolderError) throw new AgentError('board_migrated', error.message, 409)
+    throw error
+  }
+}
+
 async function updateThread(config, boardId, threadId, change) {
   const file = threadFile(config, boardId, threadId)
+  assertChatWritable(config, boardId)
   fs.mkdirSync(path.dirname(file), { recursive: true })
   return withFileLock(file, () => {
+    // Again under the lock: migrate takes every thread lock for its whole run.
+    assertChatWritable(config, boardId)
     const thread = readThread(config, boardId, threadId)
     const before = referencedFiles(thread)
     const result = change(thread.messages, thread)

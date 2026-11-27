@@ -29,6 +29,7 @@ import { cleanNetworkSummary } from './capture/network-summary.js'
 import { ID_RE, VIEWPORT_NAMES, boardViewports } from './config.js'
 import { isLockLive, processStartTime, withFileLock } from './lock.js'
 import { readBoardJob } from './board-job.js'
+import { EngineFolderError, assertMigrationAllows } from './engine-folder.js'
 import { writeAll } from './write-all.js'
 import { commentMentions } from './mentions.js'
 import { publicReactions, toggleReaction } from './reactions.js'
@@ -495,7 +496,23 @@ export async function writeMigration(config, boardId, marker, { beforeWrite = ()
     writeJsonAtomic(path.join(boardDir(config, boardId), 'migrated.json'), marker)
   })
 }
+// The 1.x comment files of a board refuse writes while `shapewall migrate`
+// runs, after one stopped midway, and once the board moved to the solo
+// engine (MIGRATED-TO-2): a writer that started before (a long-running
+// `shapewall mcp`, `watch`, the starter agent, a 1.x `serve`) must not start
+// a second copy of the board's comments next to the engine's. Checked inside
+// the comments.json lock, which migrate holds for its whole run.
+export function assertBoardWritable(config, boardId) {
+  try {
+    assertMigrationAllows(config, { local: true, boardIds: [boardId] })
+  } catch (error) {
+    if (error instanceof EngineFolderError) throw new CommentError(409, 'board_migrated', error.message)
+    throw error
+  }
+}
+
 function assertLocalComments(config, boardId) {
+  assertBoardWritable(config, boardId)
   if (readMigration(config, boardId)?.readOnly)
     throw new CommentError(
       403,
@@ -1171,6 +1188,7 @@ export async function sweepAbandonedClaims(config, boardId, { now = new Date() }
   if (readMigration(config, boardId)?.readOnly) return []
   let events = []
   const swept = await withFileLock(file, async () => {
+    assertBoardWritable(config, boardId)
     const store = readCommentStore(config, boardId)
     const ids = []
     for (const comment of store.comments) {
