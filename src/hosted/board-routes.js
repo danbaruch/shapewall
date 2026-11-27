@@ -1,17 +1,21 @@
 // The board client's API (src/hosted/app.js), for members
 // (/w/:ws/p/:pid/api), share link guests (/s/:sid/api) and public projects
 // (/p/:pubid/api). mountBoardRoutes(app, options) mounts all three and
-// returns { approvalApi }, the router src/hosted/agent-approvals.js adds
-// the board's approval routes to.
+// returns { approvalApi, soloBoardApi }: the router src/hosted/agent-approvals.js
+// adds the board's approval routes to, and on a solo server the router
+// mountSolo (src/hosted/solo/index.js) adds its board routes to (null otherwise).
+// Checks, journeys, capture and compare have their own files (board-*.js).
 
 import express from 'express'
 import { boardSummary } from '../server/app.js'
-import { listJourneys } from '../journeys.js'
 import { MENTION_HANDLE_RE } from '../mentions.js'
 import { resolveFile, validateCommentInput, validateCommentMedia } from '../store.js'
 import { avatarUrl } from '../accounts/avatar.js'
-import { checksView, readReport } from '../checks/store.js'
 import { requireNoRunningFix } from './agent-link.js'
+import { mountCaptureRoutes } from './board-capture.js'
+import { mountCheckRoutes } from './board-checks.js'
+import { mountCompareRoutes } from './board-compare.js'
+import { mountJourneyRoutes } from './board-journeys.js'
 import { agentPolicy } from './agent-policy.js'
 import { hostedBoardView, sendPng } from './board-context.js'
 import { mountChatRoutes } from './chat-routes.js'
@@ -66,6 +70,9 @@ export function mountBoardRoutes(
     hub = null,
     links = null,
     chat = null,
+    // The solo profile (src/hosted/solo/index.js): its members-only board
+    // routes answer before this API's catch-all.
+    solo = false,
   },
 ) {
   // ---- Usercontent: live HTML through signed URLs ----
@@ -384,31 +391,11 @@ export function mountBoardRoutes(
   )
   const approvalApi = express.Router({ mergeParams: true })
   boardApi.use(approvalApi)
-  function checkRoutes(router, guest = false) {
-    router.get(
-      '/boards/:bid/checks',
-      handle((req, res) => {
-        if (guest && !req.guest.includeChecks) return fail(res, 404, 'not_found', 'Check report not found.')
-        const ctx = boardContext(req.t, req.project, req.params.bid)
-        const requested = typeof req.query.env === 'string' ? req.query.env : null
-        if (requested && !(ctx.config.checksEnvironments || ctx.board.environments).some((env) => env.id === requested))
-          return fail(res, 404, 'not_found', 'No checks for this environment.')
-        res.json(checksView(ctx.config, ctx.board.id, requested, { imported: true }))
-      }),
-    )
-    router.get(
-      '/boards/:bid/checks/:id',
-      handle((req, res) => {
-        if (guest && !req.guest.includeChecks) return fail(res, 404, 'not_found', 'Check report not found.')
-        const ctx = boardContext(req.t, req.project, req.params.bid)
-        const report = readReport(ctx.config, ctx.board.id, req.params.id)
-        if (!report) return fail(res, 404, 'not_found', 'Check report not found.')
-        res.json({ report })
-      }),
-    )
-  }
-  checkRoutes(boardApi)
-  checkRoutes(shareApi, true)
+  // Filled by mountSolo (src/hosted/solo/index.js); only on a solo server.
+  const soloBoardApi = solo ? express.Router({ mergeParams: true }) : null
+  if (soloBoardApi) boardApi.use(soloBoardApi)
+  mountCheckRoutes(boardApi, { handle, boardContext })
+  mountCheckRoutes(shareApi, { handle, boardContext, guest: true })
   boardRoutes(boardApi)
   boardRoutes(shareApi)
   publicApi.get('/info', (req, res) =>
@@ -531,14 +518,8 @@ export function mountBoardRoutes(
       )
     }
     usercontent.elementRoutes(router, withBoard, fail)
-    router.get(
-      '/boards/:bid/journeys',
-      withBoard((req, res, ctx) => res.json({ journeys: listJourneys(ctx.config, ctx.board) })),
-    )
-    router.all('/boards/:bid/journeys{/*rest}', (req, res) =>
-      fail(res, 403, 'hosted_journeys', 'Journeys come from your config on a hosted board; edit them there and push again.'),
-    )
-    router.all('/boards/:bid/capture', (req, res) => fail(res, 403, 'capture_disabled', 'Hosted boards are updated with shapewall push.'))
+    mountJourneyRoutes(router, { withBoard })
+    mountCaptureRoutes(router)
 
     // An image on a comment or reply of this board: only a file that comment
     // lists, as its stored image type, behind the same rule as the comment
@@ -699,9 +680,9 @@ export function mountBoardRoutes(
         res.json({ ok: true })
       }),
     )
-    router.get('/boards/:bid/compare', (req, res) => fail(res, 404, 'not_found', 'Compare is not on hosted boards yet.'))
+    mountCompareRoutes(router)
     router.use((req, res) => fail(res, 404, 'not_found', 'No such API route.'))
   }
 
-  return { approvalApi }
+  return { approvalApi, soloBoardApi }
 }

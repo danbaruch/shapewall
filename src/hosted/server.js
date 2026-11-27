@@ -109,6 +109,8 @@ export async function startHosted({
   env = process.env,
   out = console.log,
   exitOnStop = true,
+  // The solo profile, passed to createHostedApp (src/hosted/solo/index.js); null: a team server.
+  solo = null,
 }) {
   if (!nodeSupportsSqlite())
     throw new Error(`shapewall hosted needs Node ${MIN_NODE.join('.')} or newer (for node:sqlite); this is ${process.versions.node}`)
@@ -296,6 +298,7 @@ export async function startHosted({
       mailer: mailer.configured ? mailer : null,
       tailnet: gate,
       tailnetPasskeys,
+      solo,
     })
     if (gate) {
       // A WebSocket upgrade does not pass through the handler above: it is
