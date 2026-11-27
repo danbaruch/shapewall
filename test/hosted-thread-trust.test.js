@@ -26,6 +26,11 @@ const rollbackSql = () => {
   const docs = fs.readFileSync(new URL('../docs/hosted.md', import.meta.url), 'utf8')
   return /```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 23 and rollback')))[1]
 }
+// 24 is rolled back before 23 (docs/hosted.md).
+const rollback24 = () => {
+  const docs = fs.readFileSync(new URL('../docs/hosted.md', import.meta.url), 'utf8')
+  return /```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 24 and rollback')))[1]
+}
 
 function seed(db) {
   db.prepare('INSERT INTO workspaces (id, workspace_id, name, created_by, created_at) VALUES (?, ?, ?, NULL, ?)').run(WS, WS, 'W', AT)
@@ -43,8 +48,9 @@ test('migration 23: every thread that exists at upgrade is tainted, a new one st
   const file = path.join(tempDir('migration-23'), 'shapewall.db')
   let db = await openDatabase(file)
   assert.ok(columns(db).includes('tainted') && columns(db).includes('taint_authors'))
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 23)
-  // Back to a version 22 database, as docs/hosted.md gives it, with a thread in it.
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 24)
+  // Back to a version 22 database, as docs/hosted.md gives it (24 first), with a thread in it.
+  db.exec(rollback24())
   db.exec(rollbackSql())
   assert.ok(!columns(db).includes('tainted') && !columns(db).includes('taint_authors') && !columns(db).includes('trust_v'))
   assert.equal(db.prepare('PRAGMA user_version').get().user_version, 22)
@@ -56,7 +62,7 @@ test('migration 23: every thread that exists at upgrade is tainted, a new one st
   db.close()
   // Up again: the old thread fails closed; a thread started now is clean.
   db = await openDatabase(file)
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 23)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 24)
   assert.equal(threadRow(db, 'board').tainted, 1)
   const store = createChatStore(tenant(db, WS))
   assert.equal(store.trust('prj_1', 'sample', 'board').tainted, true)

@@ -1409,7 +1409,7 @@ test('migration 12: the claim tokens of a 0.3.4 database become watcher agents t
   let db = await openDatabase(file)
   // Migrations 13 (connected agents) and 14 (approvals from the board) were applied before and stay;
   // 15 (usage and activity) adds its columns to the usage records again.
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 23)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 24)
   // Migration 21: the legacy "comment" scope became what it always meant.
   assert.deepEqual(JSON.parse(db.prepare("SELECT scopes FROM api_tokens WHERE name = 'Old comment token'").get().scopes), [
     'read',

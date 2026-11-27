@@ -6,7 +6,11 @@
 //   - the newest `keep` older versions (versions/), 2 by default, or the
 //     workspace's own setting (`shapewall hosted admin retention <ws> --keep N`);
 //   - every older version a comment was made on (comments.capture_version),
-//     open or resolved, so before and after keeps working for it.
+//     open or resolved, so before and after keeps working for it. Versions
+//     are per environment: versions/ holds the board's default (first)
+//     environment's, so only that environment's comments (comments.environment,
+//     migration 24) count there. A hosted push keeps one environment,
+//     'default'; a solo board keeps the project's own.
 // Everything else in versions/ goes, and the board's byte count (the storage
 // quota) goes down with it.
 //
@@ -86,20 +90,25 @@ export function runRetention({
 // that was current when it was posted), so its markup keeps rendering.
 // Retention keeps these, and a push that replaces the board carries them
 // over (src/hosted/push.js). Call it inside the caller's transaction.
-export function referencedVersions(t, projectId, boardId) {
+// `environments`: only the comments made on these environment ids
+// (comments.environment); null, the default, counts every comment.
+export function referencedVersions(t, projectId, boardId, { environments = null } = {}) {
+  const params = { project: projectId, board: boardId, ...(environments ? { envs: JSON.stringify([...new Set(environments)]) } : {}) }
+  const ofEnvironments = environments ? 'environment IN (SELECT value FROM json_each(:envs))' : '1'
   const referenced = new Set(
     t
       .all(
         `SELECT DISTINCT page_id, viewport, capture_version FROM comments
-         WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND capture_version IS NOT NULL`,
-        { project: projectId, board: boardId },
+         WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND capture_version IS NOT NULL
+           AND ${ofEnvironments}`,
+        params,
       )
       .map((comment) => `${comment.page_id}\u0000${comment.viewport}\u0000${comment.capture_version}`),
   )
   for (const comment of t.all(
     `SELECT page_id, viewport, replies FROM comments
-     WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND replies LIKE '%"drawing"%'`,
-    { project: projectId, board: boardId },
+     WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND replies LIKE '%"drawing"%' AND ${ofEnvironments}`,
+    params,
   )) {
     let replies = []
     try {
@@ -115,6 +124,15 @@ export function referencedVersions(t, projectId, boardId) {
   return referenced
 }
 
+// The environment ids whose comments point into versions/: the board's
+// default (first) environment, the only one kept as versions (src/store.js).
+// 'default' too, the id every hosted push uses, so a board whose stored
+// definition names its environment otherwise keeps its comments' versions.
+export function versionedEnvironments(config, boardId) {
+  const board = config.boards.find((item) => item.id === boardId)
+  return [...new Set(['default', board?.environments?.[0]?.id].filter(Boolean))]
+}
+
 function pruneBoard(db, t, dataDir, projectId, boardId, keep, dryRun) {
   return transaction(db, () => {
     const row = t.get('SELECT * FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
@@ -123,7 +141,7 @@ function pruneBoard(db, t, dataDir, projectId, boardId, keep, dryRun) {
     })
     if (!row) return { files: 0, bytes: 0 }
     const config = boardConfig(dataDir, t.workspaceId, projectId, row)
-    const referenced = referencedVersions(t, projectId, boardId)
+    const referenced = referencedVersions(t, projectId, boardId, { environments: versionedEnvironments(config, boardId) })
     const names = planBoardRetention(listVersions(config, boardId), referenced, keep)
     const dir = path.join(config.outputDir, boardId, 'versions')
     let bytes = 0

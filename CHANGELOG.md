@@ -11,6 +11,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
   notifications as `serve` does, so `shapewall events`, bots and notification channels keep working. See
   [the event log](docs/notifications.md#the-event-log).
 
+### Changed
+
+- Hosted servers: migration 24 prepares the database for the solo engine. It adds `comments.environment` (every existing comment
+  is on `default`), lets `sessions.via` be `local` (a rebuild of `sessions`, like migration 18) and adds the `solo_binding`
+  table. Nothing changes on a team server. Retention now keeps an older version only for comments on the environment it belongs
+  to. Rollback notes are in docs/hosted.md, "Migration 24 and rollback".
+
 ### Fixed
 
 - Hosted boards: opening Checks no longer gets a 404 for the SEO tab. The board answers with no search previews (they stay on
