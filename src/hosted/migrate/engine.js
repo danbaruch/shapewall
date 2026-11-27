@@ -5,7 +5,7 @@
 // rows, so a change to the engine's schema is a change here only.
 //
 // The engine is the hosted server run for one project. Its data lives in
-// <outputDir>/server/: the SQLite file plus files/<workspace>/<project>/<board>/,
+// <outputDir>/.engine/ (src/engine-folder.js ENGINE_DIR): the SQLite file plus files/<workspace>/<project>/<board>/,
 // the same layout the local board folders use (src/hosted/projects.js).
 //
 // Writes go through the hosted tenancy handles (src/hosted/tenancy.js): one

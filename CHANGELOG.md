@@ -16,7 +16,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `solo` and keep their behaviour.
 - Solo engine (experimental): About and updates can check for and apply an installation update, as on a local board: the
   installer's fixed helper only, for the engine's owner on this machine. See [Installation updates](docs/updates.md#on-the-solo-engine-experimental).
-- `shapewall migrate` (experimental): moves one project's `.shapewall/` into the solo engine (`.shapewall/server/`).
+- `shapewall migrate` (experimental): moves one project's `.shapewall/` into the solo engine (`.shapewall/.engine/`).
   Captures, versions, variants, environments, diffs and journeys move as files; comments (with images, drawings, reactions
   and replies), chat threads and the local `serve --accounts` owner with their passkeys and recovery codes become engine rows.
   `--dry-run` lists the counts and every item that would not come along, with the reason. A hard-link backup goes to

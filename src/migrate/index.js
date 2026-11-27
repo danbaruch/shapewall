@@ -39,6 +39,7 @@ import {
   ENGINE_DIR,
   JOURNAL,
   MARKER,
+  MIGRATE_LOCK,
   classifyBoard,
   engineBoardDir,
   engineDir,
@@ -55,7 +56,7 @@ import {
 
 export class MigrateError extends Error {}
 
-const LOCK = 'migrate.lock'
+const LOCK = MIGRATE_LOCK
 const rel = (config, file) => path.relative(config.dir || process.cwd(), file) || '.'
 const loadEngine = () => import('../hosted/migrate/engine.js')
 
@@ -107,7 +108,9 @@ export function holders(config) {
                 ? 'shapewall watch'
                 : entry.name === 'starter-watch.lock'
                   ? 'the starter agent'
-                  : `a Shapewall process (${entry.name})`
+                  : entry.name === 'serve.lock' && path.basename(dir) === ENGINE_DIR
+                    ? 'the solo engine (shapewall serve --engine hosted)'
+                    : `a Shapewall process (${entry.name})`
           out.push(`${what} is running (pid ${lock.pid}, ${rel(config, full)}); let it finish or stop it first`)
         }
       }
