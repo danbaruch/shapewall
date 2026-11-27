@@ -101,6 +101,7 @@ import { BatchConfirm, useBatchFixes } from './BatchFixes'
 import { captureBlocked } from '../lib/boardJob'
 import { motionDuration } from '../lib/motion'
 import { AnimatePresence } from '../lib/animate'
+import { hostedOrSolo } from './solo'
 
 const noop = () => {}
 const NO_IDS = new Set()
@@ -129,7 +130,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // A static export is read-only, unless it keeps comments in the browser.
   const [shareOpen, setShareOpen] = useState(false)
   const canAct = !info?.readOnly && (!STATIC || BROWSER_COMMENTS)
-  const canEditJourneys = canAct && !STATIC && !info?.hosted
+  // Local-only features: on a local board, or on the solo engine once it serves them (solo.js).
+  const canEditJourneys = canAct && !STATIC && hostedOrSolo(info, 'journeys')
   const canCapture = canAct && info?.allowCapture
   // Hosted servers say what this person may do (a share link guest comments
   // and replies but never resolves, edits or deletes); missing means allowed.
@@ -918,7 +920,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     commentMode,
     canComment,
     wide,
-    hosted: info?.hosted,
+    domFallback: hostedOrSolo(info, 'domFallback'),
     imageVersion,
     pinsByTarget,
     me,
@@ -1309,7 +1311,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     : null
   // Batch fixes: offered only when Fix with agent is, and turned on in Agents.
   const fixAvailable = Boolean(
-    chatAvailable && !data?.migratedTo?.readOnly && info?.agent?.fixWithAgent && info?.agent?.configured && (!info?.hosted || DEMO),
+    chatAvailable &&
+    !data?.migratedTo?.readOnly &&
+    info?.agent?.fixWithAgent &&
+    info?.agent?.configured &&
+    (DEMO || hostedOrSolo(info, 'batchFixes')),
   )
   const batchFixes = useBatchFixes({
     boardId,
@@ -1777,7 +1783,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     onRefresh: checksQuery.refetch,
     onEnvironment: (id) => updateParams({ ce: id }),
     canComment,
-    local: !STATIC && !info?.hosted,
+    local: !STATIC && hostedOrSolo(info, 'checksRun'),
     onView: (pageId, viewport) => {
       closeChecks()
       updateParams({ vp: viewport, page: pageId })
@@ -1977,6 +1983,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               setSheetOpen={setSheetOpen}
               sidebarTitled={wide && sidebarOpen}
             />
+            {/* The local board's 2.0 move banner: never on a hosted board, the solo engine included (it is the 2.0 side). */}
             {!info?.hosted && data?.migratedTo ? (
               <Suspense fallback={null}>
                 <MigrationBanner
