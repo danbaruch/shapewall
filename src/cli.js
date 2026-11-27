@@ -7,9 +7,10 @@ import { HELP, SECTIONS, SHORT_HELP, VERSION, commandHelp } from './cli/help.js'
 import { parseArgs } from './cli/args.js'
 import { pinSoloLoopback, soloHttpRemote } from './remote/loopback-pin.js'
 import { ENGINE_COMMANDS, engineMode } from './cli/engine-mode.js'
-import { deprecated, setDeprecationSink } from './deprecation.js'
+import { removed, setDeprecationSink } from './deprecation.js'
 import { init, initCi, sitemap } from './cli/init.js'
 import { serve } from './cli/serve.js'
+import { warnDevicesDeprecated, warnServeDeprecations } from './cli/serve-deprecations.js'
 import { notify } from './cli/notify.js'
 import { comments } from './cli/comments.js'
 import { variant } from './cli/variant.js'
@@ -28,9 +29,9 @@ export { commandHelp, parseArgs }
 // Re-exported for the tests and older imports; it lives in net.js.
 export { isLoopback } from './net.js'
 
-// Old command spellings, kept through 1.x with a deprecation warning: the
-// words that replace them (`audit` became `checks lighthouse` before 1.0).
-export const COMMAND_ALIASES = { audit: ['checks', 'lighthouse'] }
+// Command spellings removed in 2.0 (deprecated through 1.x): what to use
+// instead. Using one is a one-line error that names the replacement.
+export const REMOVED_COMMANDS = { audit: 'use checks lighthouse' }
 
 // Each command: ({ positional, flags, out, err, fetch }) => its exit code
 // (null: it keeps running, e.g. a server).
@@ -58,6 +59,7 @@ const COMMANDS = {
   },
   links: ({ flags, out }) => links(flags, out),
   serve: async ({ flags, out }) => {
+    warnServeDeprecations(flags)
     // --engine hosted (experimental): the solo engine, in src/hosted (src/hosted/solo/serve.js).
     if (flags.engine !== undefined) {
       const { serveEngine } = await import('./hosted/ops-cli.js')
@@ -68,6 +70,7 @@ const COMMANDS = {
     return null
   },
   devices: ({ positional, flags, out }) => {
+    warnDevicesDeprecated()
     devicesCommand(loadConfig(flags.config), positional, flags, out)
     return 0
   },
@@ -146,7 +149,7 @@ export async function main(
   // "shapewall capture --help" is that command's help, whatever else is on the line.
   const wantsHelp = argv.includes('--help') || argv.includes('-h')
   setDeprecationSink(err)
-  // An old command spelling becomes the new one before its flags are checked.
+  // A command spelling removed in 2.0 says what replaced it, even with --help.
   // (A line that does not parse is left to the strict parse below, which says why.)
   let invoked = null
   try {
@@ -154,23 +157,16 @@ export async function main(
   } catch {
     invoked = argv.find((arg) => !arg.startsWith('-')) || null
   }
-  if (invoked && Object.hasOwn(COMMAND_ALIASES, invoked)) {
-    const at = argv.indexOf(invoked)
-    argv = [...argv.slice(0, at), ...COMMAND_ALIASES[invoked], ...argv.slice(at + 1)]
-    if (!wantsHelp) deprecated(invoked, `use ${COMMAND_ALIASES[invoked].join(' ')}`)
-  }
-  const { command, positional, flags, deprecations } = wantsHelp ? parseArgs(argv) : parseArgs(argv, { strict: true })
-  for (const [old, now] of deprecations || []) {
-    if (now) deprecated(`${invoked || command} --${old}`, `use --${now}`)
-    else deprecated(`${invoked || command} --${old}`, 'it does nothing, so leave it out')
-  }
+  if (invoked && Object.hasOwn(REMOVED_COMMANDS, invoked)) throw removed(invoked, REMOVED_COMMANDS[invoked])
+  const { command, positional, flags } = wantsHelp ? parseArgs(argv) : parseArgs(argv, { strict: true })
   if (flags.version && !wantsHelp) {
     out(VERSION)
     return 0
   }
   // `shapewall --help` (and a bare `shapewall`) is the short list; `--help all` every command in full.
   if (command === 'help') {
-    const topic = COMMAND_ALIASES[positional[0]]?.[0] || positional[0]
+    const topic = positional[0]
+    if (topic && Object.hasOwn(REMOVED_COMMANDS, topic)) throw removed(topic, REMOVED_COMMANDS[topic])
     out(topic === 'all' ? HELP : topic ? commandHelp(topic) : SHORT_HELP)
     return 0
   }

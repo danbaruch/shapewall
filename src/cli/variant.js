@@ -5,7 +5,7 @@ import { ID_RE, boardViewports, getBoard, joinUrl, loadConfig } from '../config.
 import { captureVariant } from '../capture/capture.js'
 import { readVariants, removeVariant, saveVariant, variantsWithFiles } from '../store.js'
 import { suggestFlag } from './args.js'
-import { deprecated } from '../deprecation.js'
+import { removed } from '../deprecation.js'
 
 function slugify(textValue) {
   return (
@@ -34,8 +34,8 @@ export async function variant(positional, flags, out) {
       )
     return
   }
-  if (action === 'remove' || action === 'rm') {
-    if (action === 'rm') deprecated('variant rm', 'use variant remove')
+  if (action === 'rm') throw removed('variant rm', 'use variant remove')
+  if (action === 'remove') {
     const id = positional[1]
     if (!id) throw new Error('usage: shapewall variant remove ID')
     if (!(await removeVariant(config, board.id, id))) throw new Error(`No variant "${id}"`)

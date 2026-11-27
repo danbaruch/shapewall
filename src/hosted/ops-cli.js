@@ -5,7 +5,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { deprecated } from '../deprecation.js'
+import { removed } from '../deprecation.js'
 
 const DEFAULT_DATA = 'shapewall-hosted-data'
 // eslint-disable-next-line no-control-regex
@@ -33,10 +33,7 @@ export async function serveEngine(flags, out) {
 export async function hostedCommand(positional, flags, out, err = out) {
   const [sub, ...rest] = positional
   if (sub === 'setup') return setup(flags, out)
-  if (!sub && flags.setup) {
-    deprecated('hosted --setup', 'use hosted setup')
-    return setup(flags, out)
-  }
+  if (!sub && flags.setup) throw removed('hosted --setup', 'use hosted setup')
   if (!sub) return serve(flags, out)
   if (sub === 'setup-link' || sub === 'move-origin') {
     const { operatorCommand } = await import('./access-cli.js')
@@ -121,15 +118,13 @@ async function serve(flags, out) {
   return null
 }
 
-// SHAPEWALL_HOSTED_USERCONTENT_ORIGIN, like the other hosted settings; the
-// older SHAPEWALL_USERCONTENT_ORIGIN (written by 0.x setup) still works, with
-// a warning.
+// SHAPEWALL_HOSTED_USERCONTENT_ORIGIN, like the other hosted settings. The
+// older SHAPEWALL_USERCONTENT_ORIGIN (written by 0.x setup) was removed in
+// 2.0: set alone, it stops the server with the new name rather than being
+// silently ignored.
 export function usercontentOriginFromEnv(env = process.env) {
   if (env.SHAPEWALL_HOSTED_USERCONTENT_ORIGIN) return env.SHAPEWALL_HOSTED_USERCONTENT_ORIGIN
-  if (env.SHAPEWALL_USERCONTENT_ORIGIN) {
-    deprecated('SHAPEWALL_USERCONTENT_ORIGIN', 'rename it to SHAPEWALL_HOSTED_USERCONTENT_ORIGIN')
-    return env.SHAPEWALL_USERCONTENT_ORIGIN
-  }
+  if (env.SHAPEWALL_USERCONTENT_ORIGIN) throw removed('SHAPEWALL_USERCONTENT_ORIGIN', 'rename it to SHAPEWALL_HOSTED_USERCONTENT_ORIGIN')
   return null
 }
 

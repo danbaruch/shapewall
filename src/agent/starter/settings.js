@@ -18,6 +18,7 @@ import { ID_RE } from '../../config.js'
 import { parseAllowEntry } from './egress-proxy.js'
 import { DEFAULT_LIMITS, checkLimits } from './runtime.js'
 import { sizeBytes } from './disk.js'
+import { deprecated } from '../../deprecation.js'
 import { durationFlag } from '../../cli/duration.js'
 
 // The one profile this release has. Others (an agent CLI with its own login
@@ -178,6 +179,9 @@ export function validateStarterAgent(raw, problems, { boardIds = [] } = {}) {
   const timeoutOk = modelTimeout === undefined || modelTimeoutValid(modelTimeout)
   if (!timeoutOk)
     problems.push(`starterAgent.modelTimeoutSeconds: 1 to ${MODEL_TIMEOUT_MAX_S} (seconds to the first answer of a model call)`)
+  // Deprecated in 2.0 (removed in 3.0): `commands.test` names the test command for every agent path.
+  if (raw.testCommand !== undefined)
+    deprecated('starterAgent.testCommand', 'set "commands": { "test": "npm test" } (your test command) in the config instead')
   return {
     modelTimeoutSeconds: timeoutOk && modelTimeout !== undefined ? modelTimeout : null,
     trusted,

@@ -11,7 +11,7 @@ import { createRuntime, detectRuntime, agentImage } from './runtime.js'
 import { starterSettings } from './settings.js'
 import { localSource, remoteSource } from './source.js'
 import { git, workRoot } from './worktree.js'
-import { deprecated } from '../../deprecation.js'
+import { removed } from '../../deprecation.js'
 
 const SANDBOX_ACTIONS = ['run', 'watch', 'doctor', 'build-image']
 const USAGE =
@@ -84,7 +84,7 @@ export async function agentCommand(positional, flags, out, err, { env = process.
     if (!SANDBOX_ACTIONS.includes(positional[1])) throw new Error(USAGE)
     action = positional[1]
   } else if (SANDBOX_ACTIONS.includes(action)) {
-    deprecated(`agent ${action}`, `use agent sandbox ${action}`)
+    throw removed(`agent ${action}`, `use agent sandbox ${action}`)
   }
   if (action === 'setup' || action === 'docs') {
     // How a coding agent opened in the project finds the board (src/agent-setup.js, src/agent-docs.js).
