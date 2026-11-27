@@ -5,6 +5,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Fixed
+
+- Hosted boards: opening Checks no longer gets a 404 for the SEO tab. The board answers with no search previews (they stay on
+  the machine that ran the checks), so the tab shows the pushed reports' SEO issues.
+
 ## 1.4.0 - 2026-11-26
 
 One capability model for every agent path: who wrote a turn decides its tier (solo, team or open), the machine sets the

@@ -73,6 +73,7 @@ import { createPasskeyPolicy } from './passkey-policy.js'
 import { createTailnetAccounts } from './tailnet.js'
 import { mountTailnetAdmin } from './tailnet-routes.js'
 import { cspWithErrors, reportServerError } from '../error-tracking.js'
+import { mountSolo } from './solo/index.js'
 
 export { changeEventType, publicBoardView, TOKEN_SCOPES, INVITE_DAYS }
 
@@ -150,6 +151,10 @@ export function createHostedApp({
   // (src/hosted/passkey-policy.js). Without tailnet sign-in passkeys are
   // always the sign-in.
   tailnetPasskeys = false,
+  // The solo profile (shapewall serve --engine hosted, experimental): an
+  // object turns it on and mountSolo (src/hosted/solo/index.js) mounts its
+  // surfaces once; null, the default, is a team server and mounts nothing.
+  solo = null,
 }) {
   if (guestOnly) tailnet = null
   const passkeys = createPasskeyPolicy({ db, tailnet, flag: tailnetPasskeys })
@@ -512,7 +517,7 @@ export function createHostedApp({
   mountShareAdmin(consoleApi, deps)
   mountPublicAdmin(consoleApi, deps)
 
-  const { approvalApi } = mountBoardRoutes(app, {
+  const { approvalApi, soloBoardApi } = mountBoardRoutes(app, {
     agentPresence,
     db,
     dataDir,
@@ -544,7 +549,38 @@ export function createHostedApp({
     hub: turnHub,
     links,
     chat,
+    solo: Boolean(solo),
   })
+
+  // Solo-only surfaces (src/hosted/solo/): mounted once, here, before the
+  // device, token and console APIs and the pages.
+  const soloSurfaces = solo
+    ? mountSolo(app, {
+        solo,
+        db,
+        dataDir,
+        auth,
+        publicOrigin,
+        secure,
+        events,
+        now,
+        iso,
+        log,
+        q,
+        fail,
+        handle,
+        auditOf,
+        guardWrites,
+        needSession,
+        inWorkspace,
+        inProject,
+        setCookie,
+        SESSION_COOKIE,
+        boardContext,
+        agentsFor,
+        boardApi: soloBoardApi,
+      })
+    : null
 
   mountDeviceApi(app, consoleDeps)
 
@@ -690,6 +726,8 @@ export function createHostedApp({
   app.locals.agentsFor = agentsFor
   app.locals.chat = { hub: turnHub, links, service: chat, storeFor: chatFor }
   app.locals.sweep = sweep
+  // The solo profile's board router (src/hosted/solo/index.js); null on a team server.
+  app.locals.soloBoardApi = soloBoardApi
   app.locals.close = async () => {
     presence.close()
     if (ownsPresence) hub.close()
@@ -700,6 +738,7 @@ export function createHostedApp({
     if (claimTimer) clearInterval(claimTimer)
     chat.close()
     links.closeAll()
+    await soloSurfaces?.close?.()
     await cleaner.close()
   }
   return app

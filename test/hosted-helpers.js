@@ -167,6 +167,8 @@ export async function startHostedServer(name, options = {}) {
     ...(options.tailnetPasskeys ? { tailnetPasskeys: true } : {}),
     // Agent claim heartbeats with the test's own limits (src/hosted/claim-sweep.js).
     ...(options.claimHeartbeat ? { claimHeartbeat: options.claimHeartbeat } : {}),
+    // The solo profile (src/hosted/solo/index.js).
+    ...(options.solo ? { solo: options.solo } : {}),
   })
   holder.app.locals.presence.attach(server)
   return {
