@@ -206,8 +206,8 @@ export function readOnlySession(kind, { exec = false, denyRead = [] } = {}) {
 // the adapter) and the environment variable (connectedEnv).
 const NO_AUTO_MEMORY = Object.freeze({ autoMemoryEnabled: false })
 // The session's flag settings: auto memory off, and Read deny rules for the
-// folders the sandbox never reads (sandbox.js denyRead: the solo engine's
-// keys and tokens). Claude Code reads files itself (Read, Grep, Glob), not
+// folders the sandbox never reads (sandbox.js denyRead: the store's
+// accounts and tokens, the recorded logins). Claude Code reads files itself (Read, Grep, Glob), not
 // only through Shapewall, so the rule has to be its own too. `//` starts an
 // absolute path in a Claude Code rule.
 export function sessionSettings(denyRead = []) {

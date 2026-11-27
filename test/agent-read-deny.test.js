@@ -1,5 +1,5 @@
 // No agent reads Shapewall's own data or the recorded logins (rev57, the 1.4.0 question): the store folder (accounts,
-// sessions, tokens, notification settings, the solo engine's keys), `.shapewall-auth` and the config's storageState.
+// sessions, tokens, notification settings), `.shapewall-auth` and the config's storageState.
 // Captures and comments reach an agent through Shapewall's tools; the store is never read as files. Shapewall's own
 // reads (ACP fs/read_text_file) refuse it, and a Claude Code agent, which reads files itself, gets Read deny rules.
 
@@ -23,7 +23,7 @@ function project() {
   write('src/app.js', 'export const hi = 1\n')
   write('.shapewall/.accounts/accounts.sqlite', 'not a real database\n')
   write('.shapewall/serve.json', '{}\n')
-  write('.shapewall/.engine/cli.token', 'swp_not-a-real-token\n')
+  write('.shapewall/.tokens/cli.token', 'swp_not-a-real-token\n')
   write('.shapewall/main/captures/home.html', '<h1>capture</h1>\n')
   write('.shapewall-auth/staging.auth.json', '{"cookies":[]}\n')
   write('auth/state.json', '{"cookies":[]}\n')
@@ -38,7 +38,7 @@ test("an agent's file reads never reach the store, the recorded logins or the co
   for (const rel of [
     '.shapewall/.accounts/accounts.sqlite',
     '.shapewall/serve.json',
-    '.shapewall/.engine/cli.token',
+    '.shapewall/.tokens/cli.token',
     '.shapewall/main/captures/home.html',
     '.shapewall-auth/staging.auth.json',
     'auth/state.json',

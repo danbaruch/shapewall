@@ -127,9 +127,9 @@ function realTarget(target) {
 
 // createSandbox({ root, protect }) -> { root, resolve, sensitive, read, write, denyRead }.
 // `protect` lists the Shapewall store folders (inside the root): neither read
-// nor written. They hold accounts, sessions, tokens, notification settings and
-// the solo engine's keys (`.engine`); captures and comments reach an agent
-// through Shapewall's tools, never as files. `.shapewall-auth` in the root (the
+// nor written. They hold accounts, sessions, tokens and notification
+// settings; captures and comments reach an agent through Shapewall's tools,
+// never as files. `.shapewall-auth` in the root (the
 // recorded logins) is never read either, and `denyRead` lists more folders or
 // files no read reaches (the config's auth.storageState). The list in effect
 // is `denyRead` on the result, for the agent's own controls (acp.js).
