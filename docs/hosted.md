@@ -713,7 +713,16 @@ shapewall serve --engine hosted --open
   as a team server's.
 - **Flags it takes.** `--port`, `--open`, `--print-owner-link`, `--skip-git-check`, `--read-only` (the board in the browser makes no changes; the
   command line still pushes and replies, as on a local board), `--no-chat` (the board chat is off; connected agents still take
-  comments), `--no-capture`.
+  comments), `--no-capture` (no captures from the board or from agents).
+- **Capturing.** "Capture now" on the board, and `recapture_pages` for an agent on the engine's `/mcp`, capture the pages
+  in the engine itself from the board's `baseUrl` in `shapewall.config.json` (pages, auth, actions and setup as the file
+  says now), straight into the board: no `shapewall push`. The default environment only, for now. Only the owner starts one:
+  from the board in a signed-in browser on this machine, or with a project token the owner made that has the `push` scope,
+  used on this machine on the engine's name. One capture runs at a time, and a push of the board waits until it ends. The
+  capture browser reaches the app's origin (scheme, host and port of `baseUrl`) and nothing else, through a proxy that also
+  sees redirects and WebSockets: never the engine's own name or port, its live HTML name, or this machine's LAN or tailnet
+  addresses (capture your dev server on `localhost`). Fonts, images or scripts the app loads from other origins do not load
+  in these captures. A team server never captures.
 - **A migration.** While `shapewall migrate` runs, or after one stopped midway, the engine, `shapewall serve` and
   `shapewall watch` do not start. After a migration, the local `serve` and `watch` refuse the boards that moved to the engine.
 - **Updates.** With `SHAPEWALL_UPDATE_RESTART=1` (set by a managed install), a finished update stops the engine with exit code

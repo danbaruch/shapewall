@@ -8,8 +8,8 @@
 //                 writes (the token API: push, comments, agents).
 //   --no-chat     no board chat: the chat routes (threads, permissions)
 //                 answer 403 chat_off. Connected agents still take comments.
-//   --no-capture  kept in solo.allowCapture = false for in-process capture
-//                 (G3); nothing to stop before that lands.
+//   --no-capture  solo.allowCapture = false: capture.js mounts nothing (no
+//                 capture from the board, no recapture_pages on /mcp).
 //
 // solo: { readOnly, chat } from src/hosted/solo/serve.js.
 const BOARD_API = /^\/w\/[^/]+\/p\/[^/]+\/api(\/.*)?$/
