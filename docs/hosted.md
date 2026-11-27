@@ -1284,7 +1284,7 @@ API, `more` counts the rest; a current capture's URL answers `409 capture_moved`
 with `read` can list and fetch every kept version of every page: old captures are as readable as the current ones, so give a
 read token only to someone who may see the board's history. A claim token (a connected agent's) is the exception: it lists and
 fetches only the current captures and the versions the comments dispatched to it were made on,
-`GET /api/v1/boards/:board/comments?status=open|resolved|all&page=&mention=&environment=&guests=1`, `GET /api/v1/boards/:board/comments/:id`, `GET /api/v1/boards/:board/export/comments` (scope `read`, the solo engine only: every comment as a public viewer of the board sees it, in the board's comment shape, for `shapewall export`),
+`GET /api/v1/boards/:board/comments?status=open|resolved|all&page=&mention=&environment=&guests=1`, `GET /api/v1/boards/:board/comments/:id`, `GET /api/v1/boards/:board/export/comments` (scope `read`, the solo engine only: every comment as a public viewer of the board sees it, in the board's comment shape, for `shapewall export`; share link guests only with `?guests=1`),
 `GET /api/v1/boards/:board/files/:kind/:file` (and `files/envs/:env/:file` for another environment's screenshot or element map), `POST /api/v1/boards/:board/comments` (scope `reply`: `{ page, body, viewport?, x?, y?,
 anchor? }`, the pin in percent of the page, near the top-left corner by default; no images, drawing or author name; audited as
 `token_commented`), `POST .../comments/:id/replies`, `POST .../comments/:id/agent-status`

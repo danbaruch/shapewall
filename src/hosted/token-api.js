@@ -670,7 +670,13 @@ export function mountTokenApi({
     v1Board((req, res, ctx) => {
       // The solo engine only: a team server's guests stay behind ?guests=1 on /comments.
       if (!solo) return fail(res, 404, 'not_found', 'Not on this server.')
-      res.json({ board: boardRef(ctx.board), comments: ctx.comments.list({}).map((comment) => publicView(comment)) })
+      // Share link guests' text (untrusted, from outside) only with ?guests=1, as on /comments.
+      const guests = req.query.guests === '1'
+      const comments = ctx.comments
+        .list({})
+        .filter((comment) => guests || !comment.authorGuest)
+        .map((comment) => publicView(guests ? comment : { ...comment, replies: comment.replies.filter((reply) => !reply.guest) }))
+      res.json({ board: boardRef(ctx.board), comments })
     }),
   )
   // Another environment's capture (a comment left there in compare mode):
