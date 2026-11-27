@@ -57,6 +57,7 @@ import { LINK_LIMITS } from './agent-link.js'
 import { LINK_TURNS_MAX } from './agents.js'
 import { CARD_HASH_RE, CARD_ID_RE, cardSubjectHash } from '../agent/card-hash.js'
 import { permissionView } from './chat-permissions.js'
+import { BatchError, createBatchQueue } from '../agent/batch-queue.js'
 import { CHAT_LIMITS, threadRespond } from './chat-store.js'
 import { checkStorageQuota } from './comment-files.js'
 import { transaction } from './db.js'
@@ -975,30 +976,34 @@ export function mountChatRoutes(
       if (!live) return res.json({ ok: true, running: false })
       if (!mayStop(req, live))
         throw new HttpError(403, 'forbidden', 'Only the person who asked, the person who connected the agent, or an admin stops an answer.')
-      const row = at.store.turn(live.id)
-      const agent = agentsFor(req.t).get(req.project.id, live.agentId)
-      if (!live.cancel) {
-        live.cancel = true
-        said(req)('agent_turn_stopped', live.id, {
-          project: req.project.id,
-          agent: live.agentId,
-          agentName: agent?.name || null,
-          board: at.ctx.board.id,
-          thread: CHAT_RE.test(at.threadId) ? 'chat' : at.threadId,
-        })
-        live.cancelAt = Date.now()
-        hub.push(live, 'status', { text: 'Stopping' })
-        // Stop cancels what waits for an answer: no card of a stopped turn is answered.
-        if (row) transaction(db, () => chat.cancelCards(req.t, row, live))
-        // With no machine to hear it, the turn ends here. A machine that
-        // does not let go in time is not waited for either (the sweep in
-        // agent-link.js ends it as stopped).
-        if (!links.send(req.t.workspaceId, live.agentId, 'cancel', { turn: live.id }) && row)
-          chat.interrupt(req.t, row, { state: 'stopped', agentName: agent?.name || null })
-      }
+      const row = stopTurn(req, at, live)
       res.json({ ok: true, running: Boolean(hub.get(live.id)), turn: row?.id || live.id })
     }),
   )
+  // Stop a running turn (the Stop button, a cancelled batch): -> its row.
+  function stopTurn(req, at, live) {
+    const row = at.store.turn(live.id)
+    const agent = agentsFor(req.t).get(req.project.id, live.agentId)
+    if (live.cancel) return row
+    live.cancel = true
+    said(req)('agent_turn_stopped', live.id, {
+      project: req.project.id,
+      agent: live.agentId,
+      agentName: agent?.name || null,
+      board: at.ctx.board.id,
+      thread: CHAT_RE.test(at.threadId) ? 'chat' : at.threadId,
+    })
+    live.cancelAt = Date.now()
+    hub.push(live, 'status', { text: 'Stopping' })
+    // Stop cancels what waits for an answer: no card of a stopped turn is answered.
+    if (row) transaction(db, () => chat.cancelCards(req.t, row, live))
+    // With no machine to hear it, the turn ends here. A machine that
+    // does not let go in time is not waited for either (the sweep in
+    // agent-link.js ends it as stopped).
+    if (!links.send(req.t.workspaceId, live.agentId, 'cancel', { turn: live.id }) && row)
+      chat.interrupt(req.t, row, { state: 'stopped', agentName: agent?.name || null })
+    return row
+  }
 
   // ---- A thread's agent, name and removal ----
 
@@ -1220,8 +1225,269 @@ export function mountChatRoutes(
       res.json({ permissions: waiting })
     }),
   )
+  // ---- Batch fixes (the solo engine only, G14a) ----
+  //
+  // "Fix these N comments" in one go, as on a local board (src/agent/
+  // batch-fixes.js): one ordinary Fix with <agent> after the other, each its
+  // own fix turn through startFix above. So each turn's trust block is that
+  // comment's own (agent-link.js turnAuthorship: its author, its replies),
+  // each edit is a card answered as any other, and each fix ends on its own
+  // branch. A batch never widens a turn: a comment someone else wrote (an
+  // imported comment, one made with a token) runs at the tier its author
+  // gives it, whoever pressed the button, and only its own turn does.
+  //
+  // Off on every server until batchFixes.enable(gate), which only
+  // src/hosted/solo/batch.js calls: on a team server these routes do not
+  // exist (the 404 below). `gate`: { owner(req): the solo owner in a local
+  // session on this machine, settings(): batchFixSettings of the project }.
+  //
+  //   GET    agent/boards/:bid/batch          { settings, batch }
+  //   POST   agent/boards/:bid/batch          { commentIds }  -> { batch }
+  //   POST   agent/boards/:bid/batch/cancel   -> { batch }
+  //   DELETE agent/boards/:bid/batch          -> { batch: null }
+  //
+  // The batch keeps the owner's ids and session key, not the request: before
+  // each fix the session must still be there and local, and the person still
+  // the solo owner (gate.owner again), or the batch stops. The card a fix
+  // waits on carries its hash, and is answered on the thread's permissions
+  // route like any other (answerCheck, the hash, once).
+  let batchGate = null
+  const batchKey = (workspaceId, projectId, boardId) => [workspaceId, projectId, boardId].join('\n')
+  const batchQueue = createBatchQueue({ log: () => {} })
+  const batchView = (view, boardId) => (view ? { ...view, boardId } : null)
+  const BATCH_BUSY = new Set(['agent_running', 'agent_busy', 'rate_limited'])
+  const BATCH_SKIP = new Set(['comment_busy', 'comment_changed', 'unknown_thread', 'unknown_comment'])
+  const OWNER_ONLY = 'Batch fixes are for the owner of this engine, on this machine.'
+  const batchOwnerOnly = (req) => {
+    if (!batchGate) throw new HttpError(404, 'not_found', 'Not on a hosted board.')
+    if (!batchGate.owner(req, { request: true })) throw new HttpError(403, 'batch_owner', OWNER_ONLY)
+  }
+  const batchError = (error) => (error instanceof BatchError ? new HttpError(error.status, error.code, error.message) : error)
+  // The owner as a request of its own for one fix, from what the batch kept:
+  // the person, the session, the role and the project read again now.
+  // null when any of it no longer holds.
+  function batchRequest(owner, commentId) {
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(owner.userId)
+    const session = db
+      .prepare('SELECT token_hash, user_id, via, expires_at FROM sessions WHERE token_hash = ? AND user_id = ?')
+      .get(owner.session, owner.userId)
+    if (!user || !session || session.via !== 'local' || session.expires_at <= now().toISOString()) return null
+    const project = owner.projects.get(owner.projectId)
+    if (!project) return null
+    const person = { ...owner.user, ...user }
+    const req = {
+      ...owner.base,
+      user: person,
+      role: roleIn(db, owner.userId, owner.workspaceId),
+      t: tenant(db, owner.workspaceId),
+      project,
+      projects: owner.projects,
+      auth: { ...owner.auth, session: { ...owner.auth.session, ...session }, user: person },
+      params: { bid: owner.boardId, thread: 'comment-' + commentId },
+      body: { fix: true },
+      query: {},
+    }
+    return batchGate?.owner(req, { request: false }) ? req : null
+  }
+  // One fix of the batch: { done, cancel } for the queue (batch-queue.js).
+  const runBatchItem =
+    (owner) =>
+    (key, commentId, { onApproval }) => {
+      let cancelled = false
+      let stop = () => {}
+      const cancel = () => {
+        cancelled = true
+        stop()
+      }
+      const startOne = () => {
+        const req = batchRequest(owner, commentId)
+        if (!req) return { error: { code: 'owner_inactive', message: 'The owner session is no longer active.' }, inactive: true }
+        try {
+          const at = open(req)
+          return { started: { req, at, live: startFix(req, at) } }
+        } catch (error) {
+          return { error: { code: error.code || 'server_error', message: error.message || 'The fix did not start.' } }
+        }
+      }
+      // Until the turn ends; the card it waits on goes to the batch's view.
+      const follow = ({ req, at, live }) =>
+        new Promise((resolve) => {
+          const cards = new Map()
+          stop = () => {
+            if (hub.get(live.id)) stopTurn(req, at, live)
+          }
+          if (cancelled) stop()
+          const unsubscribe = hub.subscribe(live, 0, (event) => {
+            if (event.name === 'end') return resolve()
+            if (event.name !== 'tool' || event.data?.kind !== 'permission' || !event.data.id) return
+            cards.set(event.data.id, event.data)
+            const pending = [...cards.values()].find((card) => card.state === 'pending' && card.answerable)
+            onApproval(
+              pending
+                ? {
+                    id: pending.id,
+                    label: pending.label,
+                    name: pending.name,
+                    detail: pending.detail || null,
+                    diff: pending.diff || null,
+                    options: pending.options || [],
+                    expiresAt: pending.expiresAt || null,
+                    hash: pending.hash,
+                  }
+                : null,
+            )
+          })
+          // Too many listeners on it: the batch still waits for the turn's end.
+          if (!unsubscribe) {
+            const timer = setInterval(() => {
+              if (hub.get(live.id)) return
+              clearInterval(timer)
+              resolve()
+            }, 500)
+            timer.unref?.()
+          } else if (!hub.get(live.id)) resolve()
+        })
+      const done = (async () => {
+        for (let attempt = 0; ; attempt++) {
+          if (cancelled) return { skipped: true, message: 'Stopped when the batch was cancelled.' }
+          const result = startOne()
+          if (result.inactive) {
+            // Nobody to act for any more: the rest of the batch is skipped too.
+            batchQueue.cancel(key)
+            return { skipped: true, message: result.error.message }
+          }
+          if (result.error) {
+            if (BATCH_BUSY.has(result.error.code) && attempt < 30 && !cancelled) {
+              await new Promise((resolve) => setTimeout(resolve, 2000).unref?.())
+              continue
+            }
+            return { fixed: false, skipped: BATCH_SKIP.has(result.error.code), message: result.error.message }
+          }
+          await follow(result.started)
+          let comment
+          try {
+            comment = result.started.at.ctx.comments.get(commentId)
+          } catch {
+            return { skipped: true, message: 'The comment was deleted.' }
+          }
+          const fixed = ['done', 'branch-ready'].includes(comment.agent_status)
+          return {
+            fixed,
+            message: fixed
+              ? null
+              : cancelled
+                ? 'Stopped when the batch was cancelled.'
+                : 'The agent did not finish a fix for this comment.',
+          }
+        }
+      })()
+      return { done, cancel }
+    }
+
+  router.get(
+    '/boards/:bid/batch',
+    handle((req, res) => {
+      batchOwnerOnly(req)
+      const ctx = boardContext(req.t, req.project, req.params.bid)
+      const view = batchQueue.state(batchKey(req.t.workspaceId, req.project.id, ctx.board.id))
+      res.json({ settings: batchGate.settings(), batch: batchView(view, ctx.board.id) })
+    }),
+  )
+  router.post(
+    '/boards/:bid/batch',
+    handle((req, res) => {
+      batchOwnerOnly(req)
+      const ctx = boardContext(req.t, req.project, req.params.bid)
+      const key = batchKey(req.t.workspaceId, req.project.id, ctx.board.id)
+      const options = batchGate.settings()
+      if (!options.enabled) throw new HttpError(403, 'batch_off', 'Batch fixes are off. Turn them on in the agent settings first.')
+      if (batchQueue.running(key))
+        throw new HttpError(409, 'batch_running', 'A batch of fixes is already running on this board. Wait for it or cancel it first.')
+      const given = req.body?.commentIds
+      if (!Array.isArray(given) || !given.length || given.length > 500)
+        throw new HttpError(400, 'bad_batch', 'commentIds: the ids of the open comments to fix, in order.')
+      if (given.some((id) => !Number.isSafeInteger(id) || id < 1)) throw new HttpError(400, 'bad_batch', 'commentIds: whole numbers.')
+      const comments = new Map(ctx.comments.list({}).map((comment) => [comment.id, comment]))
+      const ids = [...new Set(given)]
+      for (const id of ids) {
+        const comment = comments.get(id)
+        if (!comment) throw new HttpError(404, 'unknown_comment', 'No comment #' + id + ' on this board.')
+        // A share link guest's text never reaches an agent (cleanMentions above).
+        if (comment.authorGuest)
+          throw new HttpError(400, 'guest_comment', 'Comment #' + id + " is a share link guest's: it is not sent to an agent.")
+        if (comment.status !== 'open') throw new HttpError(409, 'comment_busy', 'Comment #' + id + ' is resolved.')
+        if (['queued', 'working', 'branch-ready'].includes(comment.agentStatus))
+          throw new HttpError(409, 'comment_busy', 'Comment #' + id + ' is already with an agent.')
+      }
+      // The agent the fixes go to must take fixes from this person now, or nothing starts.
+      const agent = defaultOf(chatAgents(req, ctx.board.id))
+      if (!agent || agent.edits.mode === 'none' || !agent.edits.fix.ok)
+        throw new HttpError(409, 'fix_needs_agent', agent?.edits?.fix?.reason || 'No connected agent of this project can make a fix.')
+      const session = req.auth?.session?.token_hash
+      if (!session || req.auth.session.via !== 'local') throw new HttpError(403, 'batch_owner', OWNER_ONLY)
+      const owner = {
+        workspaceId: req.t.workspaceId,
+        projectId: req.project.id,
+        boardId: ctx.board.id,
+        userId: req.user.id,
+        user: req.user,
+        projects: req.projects,
+        session,
+        auth: { session: req.auth.session, user: req.user },
+        // What the audit log reads of a request (guards.js auditOf, clientIp).
+        base: { headers: { ...req.headers }, socket: { remoteAddress: req.socket?.remoteAddress }, ip: req.ip, token: null, guest: null },
+      }
+      let batch
+      try {
+        batch = batchQueue.start({ run: runBatchItem(owner), boardId: key, commentIds: ids, max: options.max, agent: agent.name })
+      } catch (error) {
+        throw batchError(error)
+      }
+      said(req)('agent_batch_started', ctx.board.id, { project: req.project.id, agent: agent.id, comments: batch.items.length })
+      res.json({ batch: batchView(batch, ctx.board.id) })
+    }),
+  )
+  router.post(
+    '/boards/:bid/batch/cancel',
+    handle((req, res) => {
+      batchOwnerOnly(req)
+      const ctx = boardContext(req.t, req.project, req.params.bid)
+      try {
+        res.json({ batch: batchView(batchQueue.cancel(batchKey(req.t.workspaceId, req.project.id, ctx.board.id)), ctx.board.id) })
+      } catch (error) {
+        throw batchError(error)
+      }
+    }),
+  )
+  router.delete(
+    '/boards/:bid/batch',
+    handle((req, res) => {
+      batchOwnerOnly(req)
+      const ctx = boardContext(req.t, req.project, req.params.bid)
+      try {
+        batchQueue.clear(batchKey(req.t.workspaceId, req.project.id, ctx.board.id))
+      } catch (error) {
+        throw batchError(error)
+      }
+      res.json({ batch: null })
+    }),
+  )
+  const batchFixes = {
+    // The solo engine turns them on (src/hosted/solo/batch.js); nothing else does.
+    enable(gate) {
+      if (typeof gate?.owner !== 'function' || typeof gate?.settings !== 'function')
+        throw new Error('batch fixes: enable({ owner, settings })')
+      batchGate = gate
+    },
+    enabled: () => Boolean(batchGate),
+    // Shutdown: running batches are cancelled, their running fix stopped the normal way.
+    close: () => batchQueue.close(),
+    settled: (workspaceId, projectId, boardId) => batchQueue.settled(batchKey(workspaceId, projectId, boardId)),
+    state: (workspaceId, projectId, boardId) => batchView(batchQueue.state(batchKey(workspaceId, projectId, boardId)), boardId),
+  }
+
   router.use((req, res) => fail(res, 404, 'not_found', 'Not on a hosted board.'))
 
   boardApi.use('/agent', router)
-  return { chatAgents, defaultOf, agentInfo }
+  return { chatAgents, defaultOf, agentInfo, batchFixes }
 }

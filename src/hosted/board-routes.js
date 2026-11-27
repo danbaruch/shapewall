@@ -394,6 +394,8 @@ export function mountBoardRoutes(
   // Filled by mountSolo (src/hosted/solo/index.js); only on a solo server.
   const soloBoardApi = solo ? express.Router({ mergeParams: true }) : null
   if (soloBoardApi) boardApi.use(soloBoardApi)
+  // Batch fixes on the chat (G14a): off until the solo engine turns them on (src/hosted/solo/batch.js).
+  if (soloBoardApi && chatApi) soloBoardApi.chatBatch = chatApi.batchFixes
   mountCheckRoutes(boardApi, { handle, boardContext })
   mountCheckRoutes(shareApi, { handle, boardContext, guest: true })
   boardRoutes(boardApi)
