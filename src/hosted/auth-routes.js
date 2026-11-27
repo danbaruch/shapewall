@@ -319,6 +319,8 @@ export function mountAuthRoutes(authRouter, deps) {
             ...tailnet.anonInfo(req),
             // Tailscale is the only sign-in here: no passkey is asked for or offered.
             ...(passkeys.on() ? {} : { passkeysOff: true }),
+            // The solo engine: the owner signs in from the terminal (src/hosted/solo/signin.js).
+            ...(passkeys.solo ? { soloSignIn: true } : {}),
           }),
     needSession,
     handle(async (req, res) => {
@@ -333,11 +335,12 @@ export function mountAuthRoutes(authRouter, deps) {
         recoveryCodesLeft: auth.recoveryRemaining(req.user.id),
         fresh: auth.isFresh(req.auth.session),
         viaRecovery: req.auth.session.via === 'recovery',
-        // How this session came in: passkey, recovery or tailnet.
+        // How this session came in: passkey, recovery, tailnet or local (src/hosted/session-via.js).
         via: req.auth.session.via,
         ...tailnet.memberInfo(req),
         securityNotice: securityNoticeFor(req),
         ...(passkeys.on() ? {} : { passkeysOff: true }),
+        ...(passkeys.solo ? { soloSignIn: true } : {}),
         // Passkeys a tailnet session added that are still on hold: shown on every page ("Not you? Remove it").
         heldPasskeys: auth
           .heldPasskeys(req.user.id, passkeys.holdsAt?.() || null)

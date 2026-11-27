@@ -25,6 +25,7 @@ import { transaction } from './db.js'
 import { HttpError } from './http.js'
 import { accounts } from './tenancy.js'
 import { cleanTailnetLogin } from './tailnet-identity.js'
+import { viaCounts } from './session-via.js'
 
 export const TAILNET_VISITORS_MAX = 200
 export const TAILNET_VISITOR_DAYS = 30
@@ -40,12 +41,16 @@ export const tailnetOutCookie = (secure) => (secure ? '__Host-sw_tailnet_out' : 
 // `passkeys` ({ on() }, src/hosted/passkey-policy.js): on a server where
 // passkeys are off, a session that a passkey or a recovery code started
 // (from before they were switched off) does not count.
-export function sessionReader({ auth, tailnet = null, passkeys = null }) {
+// `local` ({ admits(req) }, the solo engine's local sign-in, src/hosted/solo/
+// signin.js) or null: a local session counts only where it admits the
+// request; on every other server never. What counts is decided by the one
+// table in src/hosted/session-via.js.
+export function sessionReader({ auth, tailnet = null, passkeys = null, local = null }) {
   return (req, token) => {
     const found = auth.readSession(token)
     if (!found) return null
     const bound = found.session.tailnet_login
-    if (!bound) return passkeys && !passkeys.on() ? null : found
+    if (!bound) return viaCounts(found.session.via, { passkeysOn: !passkeys || passkeys.on(), req, local }) ? found : null
     const identity = tailnet ? tailnet.identityOf(req) : null
     if (!identity || identity.login !== bound || found.user.tailnet_login !== bound) return null
     // And the same tailnet user as the one the account is held to, not only the same login string.

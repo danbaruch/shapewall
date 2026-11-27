@@ -71,6 +71,15 @@ import { ACP_TEST_TIMEOUT_MS } from './test-timing.js'
 const TEST_TIMEOUT_MS = 15000
 const VISION_PROBE_MS = 3000
 const LOOPBACK_NAMES = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
+// The solo engine's own host names (shapewall serve --engine hosted):
+// <label>.shapewall.localhost. Browsers resolve every *.localhost name to
+// loopback themselves (RFC 6761), and its cookies stay off every other
+// localhost port and name, so it is as local as `localhost`.
+export const SOLO_HOST_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.shapewall\.localhost$/
+export const loopbackHostName = (name) => {
+  const value = String(name || '').toLowerCase()
+  return LOOPBACK_NAMES.has(value) || SOLO_HOST_RE.test(value)
+}
 // Any of these means a proxy or tunnel stands between the person and us.
 export const PROXY_HEADERS = [
   'x-forwarded-for',
@@ -126,13 +135,13 @@ function loopbackAddress(address) {
 }
 
 // From this machine, straight to this server: a loopback peer, a loopback
-// Host, no proxy headers (a proxy on this machine would make every visitor
+// Host (or the solo engine's *.shapewall.localhost name), no proxy headers (a proxy on this machine would make every visitor
 // look local), and no other site's Origin.
 export function localRequest(req) {
   if (!loopbackAddress(req.socket?.remoteAddress)) return false
   if (PROXY_HEADERS.some((name) => req.headers[name] !== undefined)) return false
   const host = String(req.headers.host || '')
-  if (!LOOPBACK_NAMES.has(host.replace(/:\d+$/, '').toLowerCase())) return false
+  if (!loopbackHostName(host.replace(/:\d+$/, ''))) return false
   const origin = req.headers.origin
   if (origin !== undefined) {
     try {

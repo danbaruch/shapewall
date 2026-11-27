@@ -445,6 +445,15 @@ export function createAuth({
 
   // ---- Sessions ----
 
+  // How long a session lasts: SESSION_DAYS from its last use, SESSION_MAX_DAYS
+  // at most. A sessions store may give a kind of session a shorter life
+  // (sessions.lifetime(row) -> { idleMs, maxMs }; the solo engine's local
+  // sessions, src/hosted/auth.js).
+  const lifetimeOf = (row) => {
+    const own = sessions.lifetime?.(row) || null
+    return { idleMs: own?.idleMs ?? SESSION_DAYS * DAY, maxMs: own?.maxMs ?? SESSION_MAX_DAYS * DAY }
+  }
+
   function createSession(userId, { verified = true, via = 'passkey', device = null, ip = null, tailnetLogin = null } = {}) {
     const token = randomToken(32)
     sessions.insert(
@@ -454,7 +463,7 @@ export function createAuth({
         id: newId('se'),
         user: userId,
         at: iso(),
-        expires: iso(SESSION_DAYS * DAY),
+        expires: iso(lifetimeOf({ via }).idleMs),
         verified: verified && via === 'passkey' ? iso() : NEVER_VERIFIED,
         via,
         device: device ? String(device).slice(0, 80) : null,
@@ -469,7 +478,7 @@ export function createAuth({
   function listSessions(userId, currentHash) {
     return q
       .all('SELECT * FROM sessions WHERE user_id = :user AND expires_at > :now ORDER BY last_seen_at DESC', { user: userId, now: iso() })
-      .filter((row) => Date.parse(row.created_at) + SESSION_MAX_DAYS * DAY > now().getTime())
+      .filter((row) => Date.parse(row.created_at) + lifetimeOf(row).maxMs > now().getTime())
       .map((row) => ({
         id: row.id,
         current: row.token_hash === currentHash,
@@ -497,7 +506,8 @@ export function createAuth({
     const session = sessions.find(q, token)
     if (!session) return null
     const hash = session.token_hash
-    if (session.expires_at <= iso() || Date.parse(session.created_at) + SESSION_MAX_DAYS * DAY <= now().getTime()) {
+    const life = lifetimeOf(session)
+    if (session.expires_at <= iso() || Date.parse(session.created_at) + life.maxMs <= now().getTime()) {
       q.run('DELETE FROM sessions WHERE token_hash = :hash', { hash })
       return null
     }
@@ -506,8 +516,8 @@ export function createAuth({
     // renewedUntil: when it slid, the new expiry (ms), for the browser cookie (src/hosted/guards.js sessionOf).
     let renewedUntil = null
     if (now().getTime() - Date.parse(session.last_seen_at) > 3_600_000) {
-      const cap = Date.parse(session.created_at) + SESSION_MAX_DAYS * DAY
-      renewedUntil = Math.min(now().getTime() + SESSION_DAYS * DAY, cap)
+      const cap = Date.parse(session.created_at) + life.maxMs
+      renewedUntil = Math.min(now().getTime() + life.idleMs, cap)
       q.run('UPDATE sessions SET last_seen_at = :at, expires_at = :expires WHERE token_hash = :hash', {
         at: iso(),
         expires: new Date(renewedUntil).toISOString(),

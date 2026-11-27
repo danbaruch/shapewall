@@ -47,9 +47,17 @@ export const setTailnetPasskeys = (db, on, at) => {
 }
 export const tailnetPasskeysOffAt = (db) => serverSetting(db, OFF_AT)
 
+// The solo engine with local sign-in (shapewall serve --engine hosted): one
+// owner on this machine, signed in by a one-time link from the terminal.
+// Passkeys are off there, always (nothing to switch).
+export const SOLO_PASSKEYS_OFF_MESSAGE =
+  'Passkeys are off on this board: it runs on your machine and you sign in from its terminal (shapewall serve --engine hosted --open).'
+
 // tailnet: the tailnet gate of this server, or null (no tailnet sign-in).
-export function createPasskeyPolicy({ db, tailnet = null, flag = false }) {
+// soloLocal: true on a solo engine with local sign-in (passkeys off).
+export function createPasskeyPolicy({ db, tailnet = null, flag = false, soloLocal = false }) {
   const on = () => {
+    if (soloLocal) return false
     if (!tailnet) return true
     const set = tailnetPasskeysSetting(db)
     return set === null ? Boolean(flag) : set
@@ -62,7 +70,7 @@ export function createPasskeyPolicy({ db, tailnet = null, flag = false }) {
     const at = tailnetPasskeysOffAt(db)
     return at && Number.isFinite(Date.parse(at)) ? new Date(at) : null
   }
-  return { on, holdsAt, tailnetSignIn: Boolean(tailnet) }
+  return { on, holdsAt, tailnetSignIn: Boolean(tailnet), ...(soloLocal ? { offMessage: SOLO_PASSKEYS_OFF_MESSAGE, solo: true } : {}) }
 }
 
 // Every route that makes, uses or manages a passkey or a recovery code, or

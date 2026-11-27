@@ -85,12 +85,14 @@ export function presenceAuthorizer({
   guestOnly = false,
   tailnet = null,
   passkeys = null,
+  // The solo engine's local sign-in ({ admits(req) }), or null.
+  local = null,
 }) {
   const url = new URL(origin)
   const secure = url.protocol === 'https:'
   const iso = () => now().toISOString()
   // A tailnet session counts only with its identity, here as on every request.
-  const readSession = sessionReader({ auth, tailnet, passkeys })
+  const readSession = sessionReader({ auth, tailnet, passkeys, local })
   return (req) => {
     if (
       req.headers.origin !== url.origin ||
