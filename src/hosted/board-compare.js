@@ -15,6 +15,7 @@
 import { compareEnvironments } from '../diff.js'
 import { captureFailures, captureFiles, resolveFile } from '../store.js'
 import { sendPng } from './board-context.js'
+import { captureHostScrubber } from './board-view.js'
 import { fail } from './http.js'
 
 export function mountCompareRoutes(router, { withBoard }) {
@@ -64,6 +65,15 @@ export function mountCompareRoutes(router, { withBoard }) {
       if (!ids.includes(a) || !ids.includes(b) || a === b)
         return fail(res, 400, 'invalid_environments', `Pick two different environments of ${ids.join(', ')}.`)
       const result = await compareEnvironments(ctx.config, board, a, b)
+      // Capture errors without the environments' capture addresses, as the board view (board-view.js).
+      const scrub = captureHostScrubber(board)
+      const failures = (env) =>
+        Object.fromEntries(
+          Object.entries(captureFailures(ctx.config, board, env)).map(([page, viewports]) => [
+            page,
+            Object.fromEntries(Object.entries(viewports).map(([viewport, error]) => [viewport, scrub(error)])),
+          ]),
+        )
       res.json({
         ...result,
         files: {
@@ -71,7 +81,7 @@ export function mountCompareRoutes(router, { withBoard }) {
           [b]: captureFiles(ctx.config, board, b, { current: true }),
         },
         // Why a frame has no picture: "HTTP 404" says more than "not captured".
-        failures: { [a]: captureFailures(ctx.config, board, a), [b]: captureFailures(ctx.config, board, b) },
+        failures: { [a]: failures(a), [b]: failures(b) },
       })
     }),
   )
