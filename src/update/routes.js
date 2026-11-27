@@ -71,7 +71,19 @@ function result(value) {
 // reach it), server shutdown waits for it (router.lifecycle), and its time
 // limit reports it as stuck instead of killing it. A `check` is harmless to
 // stop and is stopped on shutdown or when it runs too long.
-export function appUpdateRouter({ env = process.env, settingsToken = null, shared = false, readOnly = false, appUpdate = {} } = {}) {
+// `owner` (optional): who is the installation owner, for a server whose
+// owner proves it another way than the local settings token (the solo engine,
+// src/hosted/solo/update.js: its signed-in owner on this machine). Without it,
+// the owner is the local settings token holder on this machine, as before.
+// The fixed update token passes either way.
+export function appUpdateRouter({
+  env = process.env,
+  settingsToken = null,
+  shared = false,
+  readOnly = false,
+  appUpdate = {},
+  owner = null,
+} = {}) {
   // The proxy capability can replace app code: a guessable one is refused at startup.
   const updateToken = env.SHAPEWALL_UPDATE_TOKEN || null
   if (updateToken !== null && updateToken.length < UPDATE_TOKEN_MIN) {
@@ -108,7 +120,11 @@ export function appUpdateRouter({ env = process.env, settingsToken = null, share
   let restartPending = false
   // The running helper: { action, child, closed } (closed: a promise).
   let helperRun = null
-  const authorized = (req) => tokenOk(req, updateToken) || (settingsTokenOk(req, settingsToken) && !settingsRefusal(req, { shared }))
+  const isOwner =
+    typeof owner === 'function'
+      ? (req) => owner(req) === true
+      : (req) => settingsTokenOk(req, settingsToken) && !settingsRefusal(req, { shared })
+  const authorized = (req) => tokenOk(req, updateToken) || isOwner(req)
   const status = (req) => ({
     current,
     latest,

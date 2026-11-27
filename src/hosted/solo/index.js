@@ -20,10 +20,12 @@
 // a surface that subscribes to the event bus or holds a lease lets go.
 //
 // Mounted so far: info.js (`solo` and `soloFeatures` on the board's /info,
-// G16), events.js (events.jsonl and notifications, G8). A surface the board
-// turns on (client/src/board/solo.js) sets its flag in `features`.
+// G16), events.js (events.jsonl and notifications, G8), update.js (self-update,
+// G10). A surface the board turns on (client/src/board/solo.js) sets its flag
+// in `features`.
 import { mountSoloEvents } from './events.js'
 import { mountSoloInfo } from './info.js'
+import { mountSoloUpdate } from './update.js'
 
 export function mountSolo(app, deps) {
   const closers = []
@@ -31,6 +33,11 @@ export function mountSolo(app, deps) {
   mountSoloInfo(deps, features)
   const events = mountSoloEvents(app, deps)
   if (events) closers.push(() => events.close())
+  const update = mountSoloUpdate(app, deps)
+  if (update) {
+    features.appUpdates = true
+    closers.push(() => update.close())
+  }
   return {
     async close() {
       for (const close of closers.reverse()) await close()
