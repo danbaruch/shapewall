@@ -24,15 +24,23 @@
 // - G13, the local agent settings as the connected agent's config: its name,
 //   icon and tint (the agent row, machine-tokens.js), its backend and
 //   endpoint (above), and branch mode: with branch mode on for a coding
-//   agent, the machine policy for this connection starts at approvals
-//   "owner" (each edit asked of the owner on the board, fixes made on a
-//   branch in a copy outside the project), as `agent set --approvals owner`
-//   would set it. Only when nothing is saved for this connection yet: what
-//   the owner sets with `shapewall agent set --as local` afterwards stays,
-//   also on another --port (agent-policy-file.js policyKey: the engine's host
-//   name, not its port).
+//   agent, the connection reads approvals "owner" (each edit asked of the
+//   owner on the board, fixes made on a branch in a copy outside the
+//   project) as long as the machine policy saves no approvals for it. It is
+//   read in memory by the child each time (agent-connect.js
+//   localAgentDefaults), never written, so branch mode off in the config
+//   takes it away (rev57 R57-5). What the owner sets with `shapewall agent
+//   set --as local` wins, also on another --port (agent-policy-file.js
+//   policyKey: the engine's host name, not its port).
 // - A child that exits is started again after a pause that grows; one that
-//   keeps failing is left stopped, and said. A stop of the engine stops it.
+//   keeps failing is left stopped, and said. A stop of the engine stops it,
+//   from a signal too (serve.js), and a child whose engine went without
+//   stopping it (killed) stops by itself: its stdin is a pipe the engine
+//   holds, and it watches its parent (agent-connect.js ENGINE_PARENT_VAR).
+// - Neither the child nor anything it runs gets the engine's command-line
+//   or watch tokens: only agent.token, by path; what it runs carries
+//   SHAPEWALL_NO_ENGINE (engine-target.js), and its sandbox never reads the
+//   store (sandbox.js).
 
 import { spawn } from 'node:child_process'
 import path from 'node:path'
@@ -40,10 +48,11 @@ import { fileURLToPath } from 'node:url'
 import { acpAgentKind } from '../agent/acp/command.js'
 import { agentSettings } from '../agent/config.js'
 import { branchModeSettings } from '../agent/branch-mode.js'
-import { connectSettings } from './agent-connect.js'
+import { ENGINE_PARENT_VAR, connectSettings, localAgentDefaults } from './agent-connect.js'
+import { NO_ENGINE_VAR } from '../engine-target.js'
 import { endpointSettings } from './endpoint-backend.js'
 import { fixRoot } from './agent-fix.js'
-import { hasMachinePolicy, saveMachinePolicy } from './agent-policy-file.js'
+import { hasMachinePolicy } from './agent-policy-file.js'
 import { terminalSafe } from './terminal.js'
 
 export const LOCAL_AGENT_SLUG = 'local'
@@ -89,21 +98,24 @@ export function planLocalAgent(config, env = process.env) {
   }
 }
 
-// This machine's settings as the connection's policy, once (G13). -> a line to say, or null.
-function seedPolicy(origin, plan, config, env) {
-  if (plan.endpoint || !plan.edits || hasMachinePolicy(origin, LOCAL_AGENT_SLUG, env)) return null
+// What branch mode means for this run (G13), said: nothing is saved (the child reads it, agent-connect.js
+// localAgentDefaults). -> a line to say, or null.
+function branchModeLine(origin, plan, config, env) {
+  if (plan.endpoint || !plan.edits || hasMachinePolicy(origin, LOCAL_AGENT_SLUG, env, 'approvals')) return null
   try {
     fixRoot(config.dir, env)
   } catch (error) {
     return `branch mode is on, but fixes cannot be made here: ${error.message}`
   }
-  saveMachinePolicy(origin, LOCAL_AGENT_SLUG, { approvals: 'owner' }, env)
-  return 'branch mode is on: it may ask the owner on the board to edit files, each edit on a branch in a copy outside the project (shapewall agent set --as local --approvals none to turn that off).'
+  return localAgentDefaults(config, env)
+    ? 'branch mode is on: it may ask the owner on the board to edit files, each edit on a branch in a copy outside the project (shapewall agent set --as local --approvals none to turn that off).'
+    : null
 }
 
-// The child's environment: the caller's, with the engine's address and without any token of another server.
-function childEnv(env, origin) {
-  const next = { ...env, SHAPEWALL_REMOTE: origin }
+// The child's environment: the caller's, with the engine's address and pid, without any token of another server,
+// and marked so that nothing it starts reaches the engine with this machine's tokens.
+export function childEnv(env, origin, parent = process.pid) {
+  const next = { ...env, SHAPEWALL_REMOTE: origin, [ENGINE_PARENT_VAR]: String(parent), [NO_ENGINE_VAR]: '1' }
   delete next.SHAPEWALL_TOKEN
   return next
 }
@@ -115,13 +127,13 @@ export function startLocalAgent({ config, origin, tokenFile, plan, env = process
     say(`off (${terminalSafe(plan?.off || 'no agent set up')}). Settings > Agent sets one up; restart the engine after.`)
     return null
   }
-  // A policy file that cannot be read or written (another user's, a link): the agent starts with what the file
-  // says, as `agent connect` would read it, and the reason is said. The engine is never stopped by it.
+  // A policy file that cannot be read (another user's, a link): the agent starts with what `agent connect` reads,
+  // and the reason is said. The engine is never stopped by it.
   try {
-    const seeded = seedPolicy(origin, plan, config, env)
-    if (seeded) say(terminalSafe(seeded))
+    const line = branchModeLine(origin, plan, config, env)
+    if (line) say(terminalSafe(line))
   } catch (error) {
-    say(`its settings were not saved for this connection: ${terminalSafe(error.message)}`)
+    say(`its settings could not be read: ${terminalSafe(error.message)}`)
   }
   const args = [BIN, 'agent', 'connect', '--as', LOCAL_AGENT_SLUG, '--token-file', tokenFile]
   if (config.file) args.push('--config', config.file)
@@ -150,8 +162,10 @@ export function startLocalAgent({ config, origin, tokenFile, plan, env = process
     child = spawnImpl(process.execPath, args, {
       cwd: config.dir,
       env: childEnv(env, origin),
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // stdin: a pipe nothing is written to. It ends when this process goes, however it goes, and the child stops.
+      stdio: ['pipe', 'pipe', 'pipe'],
     })
+    child.stdin?.on('error', () => {})
     if (child.stdout) prefix(child.stdout)
     if (child.stderr) prefix(child.stderr)
     child.once('error', (error) => say(`could not start: ${terminalSafe(error.message)}`))

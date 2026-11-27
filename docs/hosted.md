@@ -735,12 +735,16 @@ shapewall serve --engine hosted --open
   (`agent.token`, the scopes an approved `agent connect` gets) is made at start, 0600 in `.shapewall/.engine/`, rotated every
   start and retired at stop; the child reads it by path and gets the engine's address in its environment, so neither is on
   a command line. It is read and answer only, as a fresh `agent connect` is, unless branch mode is on for a coding agent:
-  then the connection starts at `--approvals owner` (you allow each edit on the board; fixes are made on a branch in a copy
-  outside the project). That is set once, when nothing is saved for the connection yet; `shapewall agent set --as local`
-  (with `SHAPEWALL_REMOTE` set to the engine's address) changes it afterwards. This machine keeps those settings by the
+  then the connection reads as `--approvals owner` (you allow each edit on the board; fixes are made on a branch in a copy
+  outside the project). That is read from the settings at each start and never saved, so turning branch mode off takes it
+  away; `shapewall agent set --as local --approvals none` (with `SHAPEWALL_REMOTE` set to the engine's address) saves a
+  choice that wins over it. This machine keeps those settings by the
   engine's host name, not its port, so they stay when the engine starts on another `--port`. No agent that can run: the start says why and the engine runs
-  without one. A child that exits is started again, after a growing pause, five times in a row at most. `--no-chat` (or
-  `--read-only`) runs the engine without it.
+  without one. A child that exits is started again, after a growing pause, five times in a row at most. Stopping the
+  engine stops it, also by Ctrl+C or SIGTERM, and when the engine is killed the child stops by itself (its standard input
+  is a pipe the engine holds, and it watches its parent). It gets only `agent.token`, never the command line's or watch's;
+  what it runs is marked so that a `shapewall` command there gets no engine token, and no agent reads `.shapewall/`.
+  `--no-chat` (or `--read-only`) runs the engine without it.
 - **Data** lives in `.shapewall/.engine/` (a name no board id can take): the database, the captures, the host name's random
   part, the sign-in keys. The folder is made private (0700) with a `.gitignore` of `*`. The engine refuses to start if git
   tracks anything in it, whichever repository could: the project's, a repository or submodule that `.shapewall` is itself,

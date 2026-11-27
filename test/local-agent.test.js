@@ -270,7 +270,7 @@ const fixWith = (user, made) =>
   })
 
 test(
-  'G13: branch mode on makes the local coding agent take fixes (each edit asked of the owner); a later agent set stays',
+  'G13: branch mode on makes the local coding agent take fixes (each edit asked of the owner), never saved; a later agent set stays',
   { skip: !POSIX },
   async (t) => {
     const config = project('local-agent-branch', { agent: { branchMode: true } })
@@ -280,7 +280,10 @@ test(
     t.after(() => engine.handle.stop())
     assert.match(engine.text(), /Local agent: branch mode is on/)
     const origin = engine.handle.origin
-    assert.equal(readMachinePolicy(origin, 'local', env).approvals, 'owner')
+    // Read in memory by the child, never written (rev57 R57-5).
+    assert.equal(fs.existsSync(path.join(env.XDG_CONFIG_HOME, 'shapewall', 'agent-policy.json')), false)
+    assert.equal(readMachinePolicy(origin, 'local', env).approvals, 'none')
+    assert.equal(readMachinePolicy(origin, 'local', env, { defaults: { approvals: 'owner' } }).approvals, 'owner')
     const user = await owner(engine.handle)
     const agent = await onlineAgent(engine.handle, user, engine)
     // Fix with goes to the machine through the link: the fix turn runs there and ends on the board.
@@ -290,18 +293,22 @@ test(
     assert.match(fixed.text, /event: done/)
     assert.ok(agent.id)
 
-    // What the owner sets afterwards is not put back by the next start.
+    // What the owner sets afterwards wins over branch mode.
     const { saveMachinePolicy } = await import('../src/remote/agent-policy-file.js')
     saveMachinePolicy(origin, 'local', { approvals: 'none' }, env)
     await engine.handle.stop()
-    // Another port: the same engine host name, so what the owner set stays and nothing is seeded again
-    // (agent-policy-file.js policyKey).
+    // Another port: the same engine host name, so what the owner set stays (agent-policy-file.js policyKey).
     const again = await start(config, env)
     t.after(() => again.handle.stop())
     assert.notEqual(new URL(again.handle.origin).port, new URL(origin).port)
     assert.equal(new URL(again.handle.origin).hostname, new URL(origin).hostname)
-    assert.equal(readMachinePolicy(again.handle.origin, 'local', env).approvals, 'none')
+    assert.equal(readMachinePolicy(again.handle.origin, 'local', env, { defaults: { approvals: 'owner' } }).approvals, 'none')
     assert.doesNotMatch(again.text(), /branch mode is on/)
+    const user2 = await owner(again.handle)
+    await onlineAgent(again.handle, user2, again)
+    const refused = await fixWith(user2, await comment(again.handle, user2, 'Make the heading smaller'))
+    assert.equal(refused.status, 409, refused.text)
+    assert.equal(refused.json.error.code, 'read_only_agent')
     const saved = JSON.parse(fs.readFileSync(path.join(env.XDG_CONFIG_HOME, 'shapewall', 'agent-policy.json'), 'utf8'))
     assert.deepEqual(Object.keys(saved.connections), [`http://${new URL(origin).hostname}#local`])
   },
@@ -385,3 +392,147 @@ test('the machine policy key: a solo engine by its host name (any port), every o
   assert.equal(policyKey('http://127.0.0.1:4600', 'default'), 'http://127.0.0.1:4600#default')
   assert.equal(policyKey('https://lumen.shapewall.localhost:4600', 'x'), 'https://lumen.shapewall.localhost:4600#x')
 })
+
+test(
+  "rev57 R57-5: branch mode taken out of the config takes the local agent's fixes away at the next start",
+  { skip: !POSIX },
+  async (t) => {
+    const config = project('local-agent-branch-off', { agent: { branchMode: true } })
+    gitRepo(config.dir, { 'index.html': '<h1>Hello</h1>\n', 'shapewall.config.json': fs.readFileSync(config.file, 'utf8') })
+    const env = acpEnv('local-agent-branch-off')
+    const first = await start(config, env)
+    const user = await owner(first.handle)
+    await onlineAgent(first.handle, user, first)
+    const fixed = await fixWith(user, await comment(first.handle, user, 'Make the heading bigger'))
+    assert.equal(fixed.status, 200, fixed.text)
+    await first.handle.stop()
+
+    // The config line goes: nothing saved brings it back.
+    const plain = JSON.parse(fs.readFileSync(config.file, 'utf8'))
+    delete plain.agent
+    fs.writeFileSync(config.file, JSON.stringify(plain, null, 2))
+    const again = await start(loadConfig(config.file), env)
+    t.after(() => again.handle.stop())
+    assert.doesNotMatch(again.text(), /branch mode is on/)
+    const user2 = await owner(again.handle)
+    await onlineAgent(again.handle, user2, again)
+    const refused = await fixWith(user2, await comment(again.handle, user2, 'Make the heading smaller'))
+    assert.equal(refused.status, 409, refused.text)
+    assert.equal(refused.json.error.code, 'read_only_agent')
+  },
+)
+
+// /proc helpers (Linux): a process's children and environment.
+const childrenOf = (pid) => {
+  try {
+    return fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number)
+  } catch {
+    return []
+  }
+}
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+const environOf = (pid) => fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').filter(Boolean)
+
+// The engine as the command line runs it, with the ACP stub as its agent: -> { child, pid, agentPid, out() }.
+async function cliEngine(name) {
+  const { spawn } = await import('node:child_process')
+  const config = project(name)
+  const env = acpEnv(name)
+  const bin = fileURLToPath(new URL('../bin/shapewall.js', import.meta.url))
+  const child = spawn(process.execPath, [bin, 'serve', '--engine', 'hosted', '--port', '0'], {
+    cwd: config.dir,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let text = ''
+  child.stdout.on('data', (chunk) => (text += chunk))
+  child.stderr.on('data', (chunk) => (text += chunk))
+  const exited = new Promise((resolve) => child.once('exit', (code, signal) => resolve({ code, signal })))
+  let agentPid = null
+  await until(() => {
+    agentPid = childrenOf(child.pid)[0] || null
+    return Boolean(agentPid) && /Local agent: Connected/.test(text)
+  }, 'the engine and its agent to connect')
+  return { config, env, child, exited, agentPid, out: () => text }
+}
+
+test(
+  "rev57 R57-1: SIGTERM to the engine stops its agent; a killed engine's agent stops by itself",
+  { skip: process.platform !== 'linux' },
+  async () => {
+    const term = await cliEngine('local-agent-sigterm')
+    try {
+      assert.ok(alive(term.agentPid))
+      term.child.kill('SIGTERM')
+      const ended = await term.exited
+      assert.equal(ended.code, 0, term.out())
+      await until(() => !alive(term.agentPid), 'the agent to be gone after SIGTERM', 10_000)
+      assert.equal(fs.existsSync(path.join(engineDir(term.config.outputDir), 'serve.json')), false)
+    } finally {
+      if (alive(term.child.pid)) term.child.kill('SIGKILL')
+      if (alive(term.agentPid)) process.kill(term.agentPid, 'SIGKILL')
+    }
+
+    const killed = await cliEngine('local-agent-sigkill')
+    try {
+      killed.child.kill('SIGKILL')
+      await killed.exited
+      // Its stdin was a pipe the engine held: it ends, and the agent (with the ACP process it started) stops.
+      await until(() => !alive(killed.agentPid), 'the agent to stop once its engine was killed', 15_000)
+    } finally {
+      if (alive(killed.agentPid)) process.kill(killed.agentPid, 'SIGKILL')
+    }
+  },
+)
+
+test(
+  "rev58: the local agent, and what it runs, never see the command line's or watch's token",
+  { skip: process.platform !== 'linux' },
+  async () => {
+    const run = await cliEngine('local-agent-no-cli-token')
+    try {
+      const dir = engineDir(run.config.outputDir)
+      const secrets = ['cli.token', 'watch.token'].map((file) => fs.readFileSync(path.join(dir, file), 'utf8').trim())
+      const agentToken = fs.readFileSync(path.join(dir, 'agent.token'), 'utf8').trim()
+      // The agent's environment and its ACP process's: no token at all, and the marker that keeps the engine's away.
+      // (An ACP process it keeps, if one runs now, is checked the same way.)
+      for (const pid of [run.agentPid, ...childrenOf(run.agentPid)]) {
+        const vars = environOf(pid)
+        for (const value of [...secrets, agentToken]) assert.ok(!vars.some((line) => line.includes(value)), `pid ${pid}`)
+        assert.ok(!vars.some((line) => line.startsWith('SHAPEWALL_TOKEN=')), `pid ${pid}`)
+        assert.ok(vars.includes('SHAPEWALL_NO_ENGINE=1'), `pid ${pid}`)
+        // Nor on a command line.
+        const argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8')
+        for (const value of [...secrets, agentToken]) assert.ok(!argv.includes(value), `pid ${pid}`)
+      }
+      // A shapewall command run with that environment in the folder gets no engine token.
+      const { engineMode } = await import('../src/cli/engine-mode.js')
+      const agentEnv = Object.fromEntries(
+        environOf(run.agentPid).map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]),
+      )
+      // With the engine's address in it (SHAPEWALL_REMOTE) the folder is not read for a token at all; without, refused.
+      const { ENGINE_TOKEN } = await import('../src/engine-target.js')
+      const flags = { config: run.config.file }
+      assert.equal(await engineMode('mcp', flags, { env: agentEnv }), null)
+      assert.equal(flags[ENGINE_TOKEN], undefined)
+      const bare = { ...agentEnv }
+      delete bare.SHAPEWALL_REMOTE
+      await assert.rejects(engineMode('mcp', { config: run.config.file }, { env: bare }), /started by an agent/)
+      // Its sandbox, built as agent connect builds it, never reads the engine's folder.
+      const { createSandbox } = await import('../src/agent/acp/sandbox.js')
+      const sandbox = createSandbox({ root: run.config.dir, protect: [run.config.outputDir] })
+      for (const file of ['cli.token', 'watch.token', 'agent.token', 'serve.json'])
+        assert.throws(() => sandbox.read({ path: path.join(dir, file) }), /agents may not read/, file)
+    } finally {
+      run.child.kill('SIGTERM')
+      await run.exited
+    }
+  },
+)

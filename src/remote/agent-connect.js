@@ -28,6 +28,7 @@ import { DEFAULT_OUTPUT_DIR, authFiles, findConfigFile, loadConfig, storageState
 import { closeSandbox } from '../agent/sandbox-exec.js'
 import { AGENT_SLUG_RE, forgetAgentCredential, pinAgentOwner, readAgentCredential, saveAgentCredential } from './credentials.js'
 import { fixRoot, sweepFixes } from './agent-fix.js'
+import { branchModeSettings } from '../agent/branch-mode.js'
 import { fatalLinkError, runAgentLink } from './agent-link.js'
 import { createEndpointBackend, endpointHost, endpointSettings } from './endpoint-backend.js'
 import {
@@ -359,11 +360,55 @@ export function askedOf(policy, kind = null) {
   return { approvals, auto: approvals !== 'none' && auto.includes('edits'), base: approvals !== 'none' ? policy?.base || null : null }
 }
 
+// Set by the solo engine in its own agent's environment (local-agent.js): the engine's pid. A child that sees it
+// (with --as local) stops when that process goes, even when it was killed and never stopped the child (rev57 R57-1).
+export const ENGINE_PARENT_VAR = 'SHAPEWALL_ENGINE_PARENT'
+const isEngineChild = (slug, env) => slug === 'local' && /^[1-9]\d*$/.test(String(env[ENGINE_PARENT_VAR] || ''))
+
+// The solo engine's own coding agent with branch mode on (G13): approvals "owner" for as long as nothing is saved
+// for that key, read in memory each time and never written, so turning branch mode off in the config takes it away
+// (rev57 R57-5). `shapewall agent set --as local --approvals none` (a saved key) always wins. -> defaults or null.
+export function localAgentDefaults(config, env = process.env) {
+  if (!branchModeSettings(config, env).enabled) return null
+  try {
+    fixRoot(config.dir, env)
+  } catch {
+    return null
+  }
+  return { approvals: 'owner' }
+}
+
+// Stops `stop` when the engine that started this child goes: its stdin (a pipe the engine holds) ends, or this
+// process is given another parent. -> a function that ends the watch.
+function watchEngineParent(env, stop, { stdin = process.stdin, ppid = () => process.ppid, everyMs = 1000 } = {}) {
+  const parent = Number(env[ENGINE_PARENT_VAR])
+  if (ppid() !== parent) {
+    stop()
+    return () => {}
+  }
+  const gone = () => stop()
+  stdin.on('end', gone)
+  stdin.on('close', gone)
+  stdin.on('error', gone)
+  stdin.resume()
+  const timer = setInterval(() => {
+    if (ppid() !== parent) stop()
+  }, everyMs)
+  timer.unref?.()
+  return () => {
+    clearInterval(timer)
+    stdin.off('end', gone)
+    stdin.off('close', gone)
+    stdin.off('error', gone)
+    stdin.pause()
+  }
+}
+
 export async function agentConnect(
   flags,
   print,
   err,
-  { env = process.env, cwd = process.cwd(), fetchImpl = fetch, signal = null, sleep } = {},
+  { env = process.env, cwd = process.cwd(), fetchImpl = fetch, signal = null, sleep, parentWatch = null } = {},
 ) {
   const out = safeOut(print)
   const log = safeOut(err)
@@ -385,8 +430,10 @@ export async function agentConnect(
   const label = terminalSafe(settings.label || (endpoint ? 'Model endpoint' : 'Agent'))
   // Checked before anything is asked of anyone: a wrong flag changes nothing.
   // A value in the file that is not understood reads as the narrowest setting, and is said.
+  const defaults = !endpoint && isEngineChild(slug, env) ? localAgentDefaults(config, env) : null
   const policyNow = readMachinePolicy(origin, slug, env, {
     warn: (text) => log(`Not understood, so read as the narrowest setting: ${text}`),
+    defaults,
   })
   const changes = policyChanges(flags, policyNow, kind, { cwd, env })
   // The agent config folder is checked before the policy file is written: a refused folder is never saved.
@@ -460,7 +507,11 @@ export async function agentConnect(
   const agentEnv = { ...env, [NO_ENGINE_VAR]: '1' }
 
   // ---- This machine's own rules ----
-  const saved = Object.keys(changes).length ? saveMachinePolicy(origin, slug, changes, env) : policyNow
+  const saved = Object.keys(changes).length
+    ? defaults
+      ? (saveMachinePolicy(origin, slug, changes, env), readMachinePolicy(origin, slug, env, { defaults }))
+      : saveMachinePolicy(origin, slug, changes, env)
+    : policyNow
   // Commands in the file (written by hand, or for another agent) are not in effect for an agent they were not proven with.
   // A model endpoint answers only, whatever the file says (written by hand, or for this name's coding agent before).
   // Its capability keys go to the narrowest too: it gets no tool host, so the board is never told it may run or browse.
@@ -624,6 +675,7 @@ export async function agentConnect(
   signal?.addEventListener('abort', stop, { once: true })
   process.once('SIGINT', stop)
   process.once('SIGTERM', stop)
+  const unwatchParent = isEngineChild(slug, env) ? watchEngineParent(env, stop, parentWatch || {}) : () => {}
   const remote = createRemote({ origin, token, source, fetchImpl })
   // What the policy file said that was not understood, said once while this runs.
   const warnedAgain = new Set()
@@ -654,6 +706,7 @@ export async function agentConnect(
       // a narrower value applies before the next connect (agent-link.js).
       reloadPolicy: () => {
         const read = readMachinePolicy(origin, slug, env, {
+          defaults,
           warn: (text) => {
             if (warnedAgain.has(text)) return
             warnedAgain.add(text)
@@ -696,6 +749,7 @@ export async function agentConnect(
   } finally {
     process.removeListener('SIGINT', stop)
     process.removeListener('SIGTERM', stop)
+    unwatchParent()
     signal?.removeEventListener('abort', stop)
     backend.close?.()
     editBackend?.close?.()

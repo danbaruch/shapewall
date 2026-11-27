@@ -20,8 +20,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `shapewall agent connect --as local` with a token the engine makes at start (0600 in `.shapewall/.engine/`, rotated each
   start, retired at stop; the address goes in the environment, never on a command line). The board's chat, Fix with and
   comments sent to the agent go through it, with the same trust tiers and machine policy as on a team server. The agent's
-  backend, endpoint, name, icon and tint come from Settings > Agent, and branch mode on a coding agent starts the
-  connection at `--approvals owner`. `--no-chat` runs without it. See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
+  backend, endpoint, name, icon and tint come from Settings > Agent, and branch mode on a coding agent reads as
+  `--approvals owner` while no approvals are saved for the connection (never written, so turning branch mode off takes it
+  away). It acts only when asked (the chat, Fix with, Send to agent, an @mention). A stop, by SIGINT or SIGTERM too, stops
+  it, and it stops by itself when the engine is killed. Neither it nor what it runs gets the engine's command-line or watch
+  tokens. `--no-chat` runs without it. See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
 - `shapewall agent connect --endpoint` (experimental): a model endpoint (Ollama, DeepSeek, OpenAI or any OpenAI-compatible
   server) as a connected agent, read and answer only: no edits, commands, tools, browser or extensions. The key stays in
   its variable and is never printed, logged, saved or sent to the server.

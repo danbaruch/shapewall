@@ -187,6 +187,8 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
       env,
       out,
       solo,
+      // Every stop, a signal's too (rev57 R57-1): serve.json first, then the engine's own agent.
+      beforeStop: () => holder.beforeStop?.(),
     })
   } catch (error) {
     release()
@@ -194,18 +196,24 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
     if (error?.code === 'EADDRINUSE') throw new Error(`Port ${port} is in use. Pick another with --port.`, { cause: error })
     throw error
   }
-  // A stop from this process (a test, an update restart): serve.json goes first, so a command in the folder says
-  // "stopping" rather than reaching for a token being retired, and the lock goes once the engine is down.
+  // Every stop (this process's, an update restart, SIGINT or SIGTERM through startHosted's beforeStop): serve.json
+  // goes first, so a command in the folder says "stopping" rather than reaching for a token being retired, then the
+  // engine's own agent; the lock goes once the engine is down. Once, whichever way the stop came.
   const stopEngine = handle.stop
   let localAgent = null
+  let before = null
+  holder.beforeStop = () =>
+    (before ||= (async () => {
+      fs.rmSync(stateFile(dir), { force: true })
+      try {
+        await localAgent?.stop()
+      } catch {
+        /* gone already */
+      }
+    })())
   handle.stop = async (code) => {
-    fs.rmSync(stateFile(dir), { force: true })
     try {
-      await localAgent?.stop()
-    } catch {
-      /* gone already */
-    }
-    try {
+      await holder.beforeStop()
       return await stopEngine(code)
     } finally {
       release()

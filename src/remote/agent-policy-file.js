@@ -326,18 +326,24 @@ export function upgradeV1Entry(entry) {
 
 // The policy for one connection (defaults when nothing is saved).
 // `warn(text)`: told about every value in the file that was not understood.
-export function readMachinePolicy(origin, slug = 'default', env = process.env, { warn = () => {} } = {}) {
+// `defaults`: values for keys the saved entry does not set, read as if saved but never written (the solo engine's
+// own agent with branch mode on, agent-connect.js localAgentDefaults). A saved key always wins.
+export function readMachinePolicy(origin, slug = 'default', env = process.env, { warn = () => {}, defaults = null } = {}) {
   const file = policyFile(env)
   const data = readAll(file)
-  const entry = data.connections[policyKey(origin, slug)]
-  return clean(fileVersion(data) === 1 ? upgradeV1Entry(entry) : entry, (text) => warn(`${file}: ${text}`), env)
+  let entry = data.connections[policyKey(origin, slug)]
+  if (fileVersion(data) === 1) entry = upgradeV1Entry(entry)
+  const plain = entry === undefined || entry === null || (typeof entry === 'object' && !Array.isArray(entry))
+  if (defaults && plain) entry = { ...defaults, ...(entry || {}) }
+  return clean(entry, (text) => warn(`${file}: ${text}`), env)
 }
 
 // Whether anything is saved for one connection (the solo engine's own agent
 // is given this machine's settings once, never over what was set after).
-export function hasMachinePolicy(origin, slug = 'default', env = process.env) {
+export function hasMachinePolicy(origin, slug = 'default', env = process.env, key = null) {
   const entry = readAll(policyFile(env)).connections[policyKey(origin, slug)]
-  return Boolean(entry && typeof entry === 'object' && !Array.isArray(entry))
+  const plain = Boolean(entry && typeof entry === 'object' && !Array.isArray(entry))
+  return key === null ? plain : plain && Object.hasOwn(entry, key)
 }
 
 // Saves what was chosen for one connection; returns the policy in effect.
