@@ -177,9 +177,21 @@ export async function main(
   }
   if (!Object.hasOwn(COMMANDS, command)) throw new Error(`unknown command "${command}" (try shapewall --help)`)
   // In a project folder whose solo engine runs, comments, watch and mcp go to it (G15, src/cli/engine-mode.js).
-  if (ENGINE_COMMANDS.includes(command)) await engineMode(command, flags, { err })
+  // With no engine running in a project it holds, comments, watch and mcp start one for themselves (R5c), through
+  // the engine's own start (the one place core loads src/hosted, as serve does), and stop it when they end.
+  const engine = ENGINE_COMMANDS.includes(command)
+    ? await engineMode(command, flags, {
+        err,
+        startEngine: async (config) => (await import('./hosted/ops-cli.js')).startEngineHeadless(config),
+      })
+    : null
   // http to the solo engine's own name: every connection of this process to it goes to 127.0.0.1 (src/remote/loopback-pin.js).
   const remote = typeof flags.remote === 'string' ? flags.remote : process.env.SHAPEWALL_REMOTE
   if (remote && soloHttpRemote(remote)) await pinSoloLoopback()
-  return COMMANDS[command]({ positional, flags, out, err, fetch })
+  if (!engine?.stop) return COMMANDS[command]({ positional, flags, out, err, fetch })
+  try {
+    return await COMMANDS[command]({ positional, flags, out, err, fetch })
+  } finally {
+    await engine.stop()
+  }
 }
