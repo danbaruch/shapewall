@@ -5,7 +5,10 @@
 import assert from 'node:assert/strict'
 import dns from 'node:dns'
 import http from 'node:http'
+import { execFile } from 'node:child_process'
+import path from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 import { remoteOrigin } from '../src/remote/remote.js'
 import { pinSoloLoopback, pinnedLookup, soloHttpRemote, soloLoopbackPinned } from '../src/remote/loopback-pin.js'
 
@@ -61,4 +64,63 @@ test('the solo name is refused until connections to it are pinned; then they rea
     dns.lookup = real
     server.close()
   }
+})
+
+// rev54 N2: with Node's env proxy on (NODE_USE_ENV_PROXY + HTTP_PROXY), solo and loopback names still go
+// straight to this machine; the proxy never sees them (no CONNECT, no token). Other names keep the proxy.
+// A child process, so its fetch pool starts as the env proxy agent.
+test('the pin never sends a solo or loopback name through an env proxy', async () => {
+  const proxied = []
+  const proxy = http.createServer((req, res) => {
+    proxied.push({ url: req.url, auth: req.headers.authorization || null })
+    res.end('proxy')
+  })
+  proxy.on('connect', (req, socket) => {
+    proxied.push({ connect: req.url })
+    socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+    socket.on('data', (chunk) => {
+      const auth = /authorization: ([^\r\n]+)/i.exec(chunk.toString('latin1'))
+      proxied.push({ tunnelled: true, auth: auth ? auth[1] : null })
+      socket.end('HTTP/1.1 200 OK\r\ncontent-length: 5\r\nconnection: close\r\n\r\nproxy')
+    })
+  })
+  const engine = http.createServer((req, res) => res.end('engine'))
+  await new Promise((resolve) => proxy.listen(0, '127.0.0.1', resolve))
+  await new Promise((resolve) => engine.listen(0, '127.0.0.1', resolve))
+  const port = engine.address().port
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const code = [
+    "const { pinSoloLoopback } = await import('./src/remote/loopback-pin.js')",
+    'const pinned = await pinSoloLoopback()',
+    "const get = (url) => fetch(url, { headers: { Authorization: 'Bearer swp_secret' }, signal: AbortSignal.timeout(3000) }).then((r) => r.text(), (e) => 'fail ' + (e.cause?.code || e.name))",
+    `console.log(JSON.stringify({ pinned, solo: await get('http://${SOLO}:${port}/api/x'), loop: await get('http://127.0.0.1:${port}/api/x'), name: await get('http://localhost:${port}/api/x'), other: await get('http://elsewhere.example/') }))`,
+  ].join('\n')
+  const out = await new Promise((resolve) =>
+    execFile(
+      process.execPath,
+      ['--no-warnings', '--input-type=module', '-e', code],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: 20_000,
+        env: { PATH: process.env.PATH, NODE_USE_ENV_PROXY: '1', HTTP_PROXY: `http://127.0.0.1:${proxy.address().port}`, NO_PROXY: '' },
+      },
+      (error, stdout, stderr) => resolve(String(stdout || '') + String(stderr || '')),
+    ),
+  )
+  proxy.close()
+  engine.close()
+  const result = JSON.parse(out.trim().split('\n').pop())
+  assert.equal(result.pinned, true, out)
+  assert.equal(result.solo, 'engine', out)
+  assert.equal(result.loop, 'engine', out)
+  assert.equal(result.name, 'engine', out)
+  assert.equal(result.other, 'proxy', 'other names still use the env proxy')
+  // undici tunnels plain http through the proxy with CONNECT: one tunnel, for the other name only.
+  assert.deepEqual(proxied, [{ connect: 'elsewhere.example:80' }, { tunnelled: true, auth: 'Bearer swp_secret' }], JSON.stringify(proxied))
+  assert.equal(
+    proxied.some((entry) => String(entry.connect || entry.url || '').match(/shapewall\.localhost|127\.0\.0\.1|localhost:/)),
+    false,
+    JSON.stringify(proxied),
+  )
 })

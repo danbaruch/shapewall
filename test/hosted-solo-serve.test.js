@@ -8,6 +8,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
@@ -194,6 +195,12 @@ test('serve --engine hosted: its own random host, no sign-in off a terminal; --o
       ),
     )
     assert.ok(first.lines.some((line) => /Sign in: run shapewall serve --engine hosted --open/.test(line)))
+    // rev54 N3: the agent line gives the address in the environment, never as an argument other users can read.
+    assert.ok(first.lines.includes(`Agents: SHAPEWALL_REMOTE=${handle.origin} shapewall agent connect`), first.lines.join('\n'))
+    assert.equal(
+      first.lines.some((line) => /--remote/.test(line)),
+      false,
+    )
     assert.equal(
       fs.readdirSync(dir).some((name) => name.startsWith('open-')),
       false,
@@ -308,6 +315,25 @@ test('the git check fails closed and sees nested repositories, an outside reposi
   // No repository at all: nothing to check.
   const e = tempDir('solo-serve-git-none')
   assert.equal(prepareEngineFolder(configAt(e, path.join(e, '.shapewall'))), path.join(e, '.shapewall', ENGINE_DIR))
+})
+
+test('a stray .git above the project that git does not see is no repository; other git errors still refuse (rev54 N4)', () => {
+  // Outside this checkout, so git has no real repository to fall through to.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-n4-'))
+  try {
+    fs.mkdirSync(path.join(root, '.git'))
+    const project = path.join(root, 'code', 'my-app')
+    fs.mkdirSync(project, { recursive: true })
+    const out = path.join(project, '.shapewall')
+    assert.equal(prepareEngineFolder({ dir: project, outputDir: out }), path.join(out, ENGINE_DIR))
+    // git missing, while a .git is above: still refused, with the override named.
+    assert.throws(
+      () => prepareEngineFolder({ dir: project, outputDir: out }, { git: path.join(root, 'no-such-git') }),
+      /could not check whether git tracks.*git is not installed.*--skip-git-check/,
+    )
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('SHAPEWALL_UPDATE_RESTART=1: a finished update apply stops the engine with the restart code (PR #53 review, F3)', async () => {

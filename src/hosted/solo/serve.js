@@ -50,7 +50,7 @@ const REFUSED = {
   accounts: 'the solo engine has one owner; shapewall migrate moves local passkey accounts (experimental)',
   'accounts-origin': 'the solo engine has one owner',
   'buzz-bridge': 'not on the solo engine yet',
-  'agent-acp': 'agents connect to the solo engine with shapewall agent connect --remote <its address>',
+  'agent-acp': 'agents connect to the solo engine with SHAPEWALL_REMOTE=<its address> shapewall agent connect',
   'allow-remote-agent': 'agents connect to the solo engine with shapewall agent connect',
   'trust-proxy': 'no proxy in front of the solo engine',
 }
@@ -198,7 +198,9 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
     `Shapewall solo engine (experimental) is serving ${config.boards.length} board${config.boards.length === 1 ? '' : 's'} at ${boardUrl}`,
   )
   out(`Data: ${dir} (never commit it)`)
-  out(`Agents: shapewall agent connect --remote ${handle.origin}`)
+  // The address goes in the environment, not on the agent's command line: any local user can read a process's
+  // arguments (ps), and the name's random part is one of the layers that keep the cookie in (rev54 N3).
+  out(`Agents: SHAPEWALL_REMOTE=${handle.origin} shapewall agent connect`)
   if (flags.open) {
     const file = handle.app.locals.soloOpenFile()
     signIn(file, out, { open: true, spawnImpl, keep: () => handle.app.locals.soloKeepOpenFile(file) })

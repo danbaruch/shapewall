@@ -17,7 +17,7 @@ import { FIXED_CORE, STEP_UP_GROUP_BEFORE, stepUpWindowLabel } from './step-up.j
 import { stepUpSettings } from './step-up-settings.js'
 import { sessionReader } from './tailnet.js'
 import { PASSKEYS_OFF_MESSAGE, isPasskeyRoute } from './passkey-policy.js'
-import { passkeylessVia } from './session-via.js'
+import { passkeylessVia, viaCookieSameSite } from './session-via.js'
 
 const ACTIVE_EVERY_MS = 5 * 60_000
 
@@ -71,9 +71,12 @@ export function createGuards({
     // local link signs anyone in: a session a passkey or a recovery code started, from before they were
     // switched off, does not count (sessionReader decides by the table; this says it again).
     if (req.auth && !passkeyless(req.auth.session) && !passkeys.on()) req.auth = null
-    // The session slid (at most once an hour): the browser cookie slides with it, same attributes.
+    // The session slid (at most once an hour): the browser cookie slides with it, same attributes,
+    // SameSite included (Strict for a local session: src/hosted/session-via.js).
     if (req.auth?.renewedUntil && req.res && !req.res.headersSent)
-      setCookie(req.res, SESSION_COOKIE, token, Math.max(0, Math.floor((req.auth.renewedUntil - now().getTime()) / 1000)))
+      setCookie(req.res, SESSION_COOKIE, token, Math.max(0, Math.floor((req.auth.renewedUntil - now().getTime()) / 1000)), {
+        sameSite: viaCookieSameSite(req.auth.session?.via),
+      })
     return req.auth
   }
   // Whether the session a long request (a live stream) was admitted with

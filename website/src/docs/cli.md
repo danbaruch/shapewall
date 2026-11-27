@@ -205,9 +205,10 @@ its data in `.shapewall/.engine/` (never commit it: the engine refuses to start 
 `--skip-git-check` starts anyway once you have checked). There is one account, yours, with no passkey: `--open` opens a
 one-time sign-in page, a private file in the data folder, so the one-time code never shows on a command line or in the
 output. It works once, from this machine and your own OS user, on that address only. `--print-owner-link` prints the page's
-address instead; run either again while the engine runs to get a fresh one. `shapewall push`, `comments --remote`,
-`login --remote` and `agent connect --remote` take the engine's address as they take a team server's, and always connect to
-127.0.0.1 for it. The flags that reach beyond this machine (`--host`, `--lan`, `--tailscale`, `--tls-cert`, `--accounts`,
+address instead; run either again while the engine runs to get a fresh one. `shapewall push`, `comments`, `login` and
+`agent connect` take the engine's address in `SHAPEWALL_REMOTE` (or `--remote`) as they take a team server's, and always
+connect straight to 127.0.0.1 for it, never through a proxy. Prefer `SHAPEWALL_REMOTE`: other users of the machine can read
+a command line. The start prints `SHAPEWALL_REMOTE=http://<name>:<port> shapewall agent connect` for agents. The flags that reach beyond this machine (`--host`, `--lan`, `--tailscale`, `--tls-cert`, `--accounts`,
 `--agent-acp`, ...) are refused. Details: [the solo engine](/docs/hosted#the-solo-engine-experimental).
 
 ## shapewall buzz-bridge

@@ -674,9 +674,11 @@ shapewall serve --engine hosted --open
 - **Where it listens.** On 127.0.0.1 only, at `http://<project>-<random>.shapewall.localhost:<port>`: the project's title in
   lowercase and a random part made on the first start and kept in `.shapewall/.engine/host.key`, for example
   `http://lumen-notes-k3x7q2mvw9a4bd.shapewall.localhost:4600`. Browsers send every `*.localhost` name to this machine.
-  Cookies are kept per name, not per port, so the random part keeps any other server on this machine from ever being sent
-  the engine's cookie: nobody who cannot read the data folder can point a browser at that name. Live HTML is served from a
-  separate name, `uc.<that name>`.
+  Cookies are kept per name, not per port. The random part keeps web pages from guessing the name, and the cookie is
+  `SameSite=Strict` (at sign-in and every time it is renewed), so a link from another site never carries it to any port. The
+  name is not secret from other users of this machine: it is printed at start, and a command given it on its command line
+  shows it to anyone who lists processes. Give it to commands in `SHAPEWALL_REMOTE` instead of `--remote`. On Linux the
+  engine also refuses every connection from another OS user. Live HTML is served from a separate name, `uc.<that name>`.
 - **Signing in.** There is one account, the owner, made on the first start with your name (`SHAPEWALL_USER_NAME`, else
   `git config user.name`). There is no passkey and no sign-up. `--open` opens a one-time sign-in page: a private file
   (0600) in `.shapewall/.engine/` that posts a one-time code to the engine, so the code never appears on a command line,
@@ -692,10 +694,12 @@ shapewall serve --engine hosted --open
   request; the account's Sessions list shows it as "Signed in from the terminal". With no passkeys, the console asks you to
   type the name of what you remove or delete.
 - **The boards** are the ones `shapewall.config.json` declares; the engine reads it again when it changes. `shapewall push`,
-  `shapewall comments --remote`, `shapewall login --remote` and `shapewall agent connect --remote` take the engine's address,
-  as with a team server (approve them on `/device` in the signed-in browser). Plain `http` under `--remote` is accepted for
-  loopback addresses and for a name of the engine's shape only, and the command line then connects to 127.0.0.1 whatever the
-  system resolver says, so the token never leaves the machine.
+  `shapewall comments`, `shapewall login` and `shapewall agent connect` take the engine's address in `SHAPEWALL_REMOTE` (or
+  `--remote`), as with a team server (approve them on `/device` in the signed-in browser). The start prints the line for
+  agents: `SHAPEWALL_REMOTE=http://<name>:<port> shapewall agent connect`. Plain `http` is accepted for loopback addresses
+  and for a name of the engine's shape only, and the command line then connects straight to 127.0.0.1 for it, whatever the
+  system resolver says and never through a proxy (`HTTP_PROXY` with `NODE_USE_ENV_PROXY`), so the token never leaves the
+  machine.
 - **Data** lives in `.shapewall/.engine/` (a name no board id can take): the database, the captures, the host name's random
   part, the sign-in keys. The folder is made private (0700) with a `.gitignore` of `*`. The engine refuses to start if git
   tracks anything in it, whichever repository could: the project's, a repository or submodule that `.shapewall` is itself,

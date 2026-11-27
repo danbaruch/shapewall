@@ -26,10 +26,14 @@
 //   (browsers resolve *.localhost to loopback). Cookies are kept per host
 //   name, not per port: the browser sends the session cookie to that name on
 //   any port. So the name carries a random part (70 bits, made once and kept
-//   in <data>/host.key, 0600): nobody outside the data folder can point a
-//   browser at it, so no other server on this machine ever gets the cookie.
-//   The cookie is SameSite=Strict, so a link on another site never carries
-//   it, and host-only, so 127.0.0.1, localhost and other names never get it.
+//   in <data>/host.key, 0600). The name is secret from web pages, not from
+//   other users of this machine: it is printed, and a command that is given
+//   it on its command line shows it to anyone who can list processes (the
+//   engine suggests SHAPEWALL_REMOTE instead). So it is not the only layer:
+//   the cookie is SameSite=Strict at sign-in and on every slide
+//   (src/hosted/session-via.js), so a link on another site, to any port,
+//   never carries it, and host-only, so 127.0.0.1, localhost and other names
+//   never get it; and on Linux the uid check below refuses other users.
 // - The redeem and every session read (src/hosted/tailnet.js sessionReader)
 //   admit a request only from a loopback peer, to exactly the engine's host
 //   and port, with no proxy headers, and on Linux only from a socket owned
@@ -58,6 +62,7 @@ import { createProjectStore } from '../projects.js'
 import { audit, tenant } from '../tenancy.js'
 import { bindSoloProject, readSoloBinding } from './binding.js'
 import { sameUserPeer } from './peer-uid.js'
+import { viaCookieSameSite } from '../session-via.js'
 
 export const OPEN_TTL_MS = 60_000
 export const OPEN_KEEP_MS = 5 * 60_000
@@ -290,7 +295,7 @@ export function mountSoloSignIn(app, { auth, db, setCookie, SESSION_COOKIE, now,
     if (!current) return gone(res)
     const device = deviceLabel(req.headers['user-agent'])
     const token = auth.createSession(owner.userId, { via: 'local', device, ip: req.socket.remoteAddress })
-    setCookie(res, SESSION_COOKIE, token, Math.floor(LOCAL_SESSION_IDLE_MS / 1000), { sameSite: 'Strict' })
+    setCookie(res, SESSION_COOKIE, token, Math.floor(LOCAL_SESSION_IDLE_MS / 1000), { sameSite: viaCookieSameSite('local') })
     auditAccount(db, {
       userId: owner.userId,
       action: 'signed_in',

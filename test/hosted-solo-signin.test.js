@@ -278,7 +278,14 @@ test('the session counts only from this machine on the engine’s host, and expi
   assert.equal((await me({ 'X-Forwarded-For': '203.0.113.9' })).json.user, null)
   // Kept alive by use, gone a day after the last.
   clock += 20 * 3_600_000
-  assert.equal((await me()).json.user.handle, 'robin-tester')
+  const slid = await me()
+  assert.equal(slid.json.user.handle, 'robin-tester')
+  // rev54 N1: the slide sets the cookie again with the same attributes, Strict included (never Lax).
+  const again = [].concat(slid.headers['set-cookie'] || [])
+  assert.equal(again.length, 1, 'the session slid')
+  assert.match(again[0], /^sw_session=/)
+  assert.match(again[0], /SameSite=Strict/)
+  assert.doesNotMatch(again[0], /SameSite=Lax/)
   clock += 25 * 3_600_000
   assert.equal((await me()).json.user, null)
   // Never longer than a week in all.

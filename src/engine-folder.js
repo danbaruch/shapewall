@@ -119,7 +119,8 @@ function enclosingRepo(start) {
 // so the repository that could track it answers, whatever it is: the
 // project's, a nested repository or submodule the output folder is, or one
 // the output folder sits in outside the project. [] only when no repository
-// holds the folder; anything git cannot answer there refuses (fails closed).
+// holds the folder (no `.git` above it, or git sees none there); anything
+// else git cannot answer there refuses (fails closed).
 export function gitTracked(dir, { git = 'git' } = {}) {
   let existing = path.dirname(path.resolve(dir))
   while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing)
@@ -129,7 +130,8 @@ export function gitTracked(dir, { git = 'git' } = {}) {
     spawnSync(git, ['-C', existing, ...args], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+      // LC_ALL=C: the "not a git repository" answer below is read from git's own words.
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' },
       timeout: 15_000,
     })
   const failed = (run) =>
@@ -141,6 +143,9 @@ export function gitTracked(dir, { git = 'git' } = {}) {
   let why = null
   // The repository git answers for must be the nearest one: a damaged nearer .git makes git skip to an outer one.
   const top = gitIn('rev-parse', '--show-toplevel')
+  // git sees no repository here (a stray `.git` above the project, such as an empty folder): nothing is tracked,
+  // since git can neither commit nor push from a repository it does not see (rev54 N4). Any other error refuses.
+  if (top.status !== 0 && !top.error && /^fatal: not a git repository\b/m.test(String(top.stderr || ''))) return []
   if (top.status !== 0) why = failed(top)
   else if (repo && realpath(top.stdout.trim()) !== realpath(repo)) why = `git answers for ${top.stdout.trim()}, not ${repo}`
   if (!why) {
