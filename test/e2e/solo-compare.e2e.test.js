@@ -12,7 +12,7 @@ import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { chromium } from 'playwright'
 import { startDemoSite } from '../../examples/demo-site/server.js'
 import { tempDir } from '../helpers.js'
@@ -56,10 +56,18 @@ async function until(check, label, ms = 30_000) {
 }
 
 // The command line in the project folder (it targets the running engine).
-function cli(args) {
-  const result = spawnSync(process.execPath, [CLI, ...args], { cwd: projectDir, env: ENV, encoding: 'utf8', timeout: 180_000 })
-  assert.equal(result.status, 0, `shapewall ${args.join(' ')}\n${result.stdout}\n${result.stderr}`)
-  return result.stdout
+// Asynchronous: the demo site runs in this process and must keep answering.
+async function cli(args) {
+  const child = spawn(process.execPath, [CLI, ...args], { cwd: projectDir, env: ENV, stdio: ['ignore', 'pipe', 'pipe'] })
+  let out = ''
+  let err = ''
+  child.stdout.on('data', (chunk) => (out += chunk))
+  child.stderr.on('data', (chunk) => (err += chunk))
+  const timer = setTimeout(() => child.kill('SIGKILL'), 180_000)
+  const status = await new Promise((resolve) => child.on('exit', (code) => resolve(code)))
+  clearTimeout(timer)
+  assert.equal(status, 0, 'shapewall ' + args.join(' ') + '\n' + out + '\n' + err)
+  return out
 }
 
 const api = (pathname, init) =>
@@ -140,9 +148,9 @@ async function settle(target) {
 }
 
 test('push from the folder keeps both environments; compare shows them, and a comment on Production stays there', async () => {
-  cli(['capture'])
-  cli(['capture', '--env', 'production'])
-  const pushed = cli(['push'])
+  await cli(['capture'])
+  await cli(['capture', '--env', 'production'])
+  const pushed = await cli(['push'])
   assert.match(pushed, /Pushed \d+ files/)
 
   const view = await api('boards/demo')
