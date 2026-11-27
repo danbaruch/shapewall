@@ -78,6 +78,20 @@ const call = (method, url, body) =>
     { method, url, body },
   )
 
+// The board at 390x844 with its Comments sheet open (the batch strip is at its top).
+async function phoneSheet() {
+  const phone = await context.newPage()
+  phone.on('pageerror', (error) => errors.push(error.message))
+  await phone.setViewportSize({ width: 390, height: 844 })
+  await phone.goto(boardUrl)
+  await phone.waitForSelector('[data-sw-toolbar="compact"] [data-sw-panel-toggle]')
+  await phone.click('[data-sw-toolbar="compact"] [data-sw-panel-toggle]')
+  await phone.locator('[data-sw-batch-strip]').waitFor()
+  // The sheet slides up: shoot it once it is in place.
+  await phone.waitForTimeout(600)
+  return phone
+}
+
 before(async () => {
   assert.ok(fs.existsSync(path.join(ROOT_DIR, 'dist', 'client', 'index.html')), 'run "npm run build" before the solo engine e2e test')
   if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true })
@@ -161,12 +175,8 @@ test('the owner fixes two comments in one batch: Select, confirm, each edit allo
     await waiting.waitFor({ timeout: 60_000 })
     if (index === 0) {
       await shot(page, 'waiting-1440')
-      const phone = await context.newPage()
-      await phone.setViewportSize({ width: 390, height: 844 })
-      await phone.goto(boardUrl)
-      await phone.waitForSelector('[data-sw-node="home"]')
-      await phone.click('[data-sw-chat-toggle]')
-      await phone.locator('[data-sw-chat-batch] [data-sw-batch-headline]').waitFor()
+      const phone = await phoneSheet()
+      await phone.locator('[data-sw-batch-strip] [data-sw-batch-waiting]').waitFor()
       await shot(phone, 'waiting-390')
       await phone.close()
     }
@@ -193,12 +203,8 @@ test('the owner fixes two comments in one batch: Select, confirm, each edit allo
   assert.equal(fs.readFileSync(path.join(projectDir, 'index.html'), 'utf8'), '<h1>Hello</h1>\n')
   assert.equal(git('status', '--porcelain'), '')
 
-  const phone = await context.newPage()
-  await phone.setViewportSize({ width: 390, height: 844 })
-  await phone.goto(boardUrl)
-  await phone.waitForSelector('[data-sw-node="home"]')
-  await phone.click('[data-sw-chat-toggle]')
-  await phone.locator('[data-sw-chat-batch] [data-sw-batch="done"]').waitFor()
+  const phone = await phoneSheet()
+  await phone.locator('[data-sw-batch-strip] [data-sw-batch="done"]').waitFor()
   await shot(phone, 'done-390')
   await phone.close()
   assert.deepEqual(realErrors(), [])
