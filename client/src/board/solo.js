@@ -12,7 +12,7 @@
 // the engine serves that feature. A control never shows before its route.
 
 // Features the engine may list (one per local-only surface):
-//   journeys    journey editing (writes the project's config)
+//   journeys    journey editing (the board's journeys.json in the engine folder)
 //   checksRun   starting a checks run from the board
 //   batchFixes  batch fixes with the agent
 //   domFallback reading old captures' DOM (needs a separate usercontent origin)

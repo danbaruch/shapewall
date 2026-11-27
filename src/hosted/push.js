@@ -1036,7 +1036,11 @@ export function createPushStore(
         // Read in the transaction: no comment can pin a version between this
         // and the swap. Their bytes count once, with the board's.
         const plan = existing ? planCarry(referencedVersions(t, projectId, board.id), target, staging, nextManifest) : []
-        const bytes = push.bytes + checkBytes + plan.reduce((n, item) => n + item.bytes, 0)
+        // Files the board keeps that no push sends (the solo engine's board
+        // journeys), read now, in the lock, and carried over whole.
+        const local = boardLocalFiles(target)
+        const bytes =
+          push.bytes + checkBytes + plan.reduce((n, item) => n + item.bytes, 0) + local.reduce((n, item) => n + item.data.length, 0)
         checkQuota(projectId, board.id, bytes)
         if (plan.length) fs.mkdirSync(path.join(staging, 'versions'), { recursive: true })
         // Each under a temporary name, renamed when whole: a crash mid-copy
@@ -1047,6 +1051,14 @@ export function createPushStore(
           carried.push(temp)
           fs.renameSync(temp, item.to)
           carried.push(item.to)
+        }
+        for (const item of local) {
+          const to = path.join(staging, item.name)
+          const temp = `${to}${CARRYING}`
+          fs.writeFileSync(temp, item.data, { flag: 'wx', mode: 0o600 })
+          carried.push(temp)
+          fs.renameSync(temp, to)
+          carried.push(to)
         }
         const definition = JSON.stringify(push.definition)
         if (existing) {
@@ -1085,6 +1097,39 @@ export function createPushStore(
 const swapsDir = (dataDir) => path.join(dataDir, 'swaps')
 // A carried version file while it is copied (push.js commit).
 const CARRYING = '.carrying'
+
+// Files in a board's folder that belong to the board, not to a push: no push
+// uploads them (only captures/, variants/, versions/ and checks/), so a whole
+// push carries them over from the folder it replaces, or they would be lost.
+// journeys.json: the journeys made on the board on the solo engine
+// (src/hosted/solo/journeys.js, src/journeys.js). A team server never writes
+// one, so there is nothing to carry there. A page push keeps them anyway
+// (it copies everything outside captures/).
+export const BOARD_LOCAL_FILES = Object.freeze(['journeys.json'])
+const BOARD_LOCAL_MAX = 4 * 1024 * 1024
+
+// -> [{ name, data }] of the board-local files in `dir`: regular files only,
+// opened without following a link, at most BOARD_LOCAL_MAX bytes each.
+function boardLocalFiles(dir) {
+  const found = []
+  for (const name of BOARD_LOCAL_FILES) {
+    let fd
+    try {
+      fd = fs.openSync(path.join(dir, name), fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
+    } catch (error) {
+      if (['ENOENT', 'ELOOP', 'ENOTDIR'].includes(error.code)) continue
+      throw error
+    }
+    try {
+      const stat = fs.fstatSync(fd)
+      if (!stat.isFile() || stat.size > BOARD_LOCAL_MAX) continue
+      found.push({ name, data: fs.readFileSync(fd) })
+    } finally {
+      fs.closeSync(fd)
+    }
+  }
+  return found
+}
 const swapFile = (dataDir, pushId) => {
   if (!ID_PATTERNS.push.test(pushId)) throw new Error('invalid push id')
   return path.join(swapsDir(dataDir), `${pushId}.json`)
