@@ -12,7 +12,7 @@ import path from 'node:path'
 import { soloHost, soloLoopbackPinned } from './loopback-pin.js'
 import { isLoopback } from '../net.js'
 import { boardViewports } from '../config.js'
-import { boardDir } from '../store.js'
+import { boardDir, capturesDir } from '../store.js'
 import { readCredential } from './credentials.js'
 import { ENGINE_TARGET, ENGINE_TOKEN, guardEngineFetch } from '../engine-target.js'
 import { terminalSafe } from './terminal.js'
@@ -181,9 +181,10 @@ export function createRemote({
     pageVersions: (boardId, pageId, { viewport = null, signal } = {}) =>
       call('GET', `${board(boardId)}/pages/${enc(pageId)}/versions${viewport ? `?viewport=${enc(viewport)}` : ''}`, { signal }),
     // Guest comments (share links) only with `guests: true`.
-    comments: (boardId, { status = 'open', page = null, mention = null, guests = false, signal } = {}) => {
+    comments: (boardId, { status = 'open', page = null, mention = null, guests = false, environment = null, signal } = {}) => {
       const query = new URLSearchParams({ status })
       if (page) query.set('page', page)
+      if (environment) query.set('environment', environment)
       if (mention) query.set('mention', mention)
       if (guests) query.set('guests', '1')
       return call('GET', `${board(boardId)}/comments?${query}`, { signal })
@@ -210,8 +211,10 @@ export function createRemote({
         body: bytes,
         contentType: name.endsWith('.html') ? 'text/html' : name.endsWith('.json') ? 'application/json' : 'image/png',
       }),
-    commitPush: (pushId, { manifest, variants, checks }) =>
-      call('POST', `/api/v1/pushes/${enc(pushId)}/commit`, { json: { manifest, variants, ...(checks !== undefined ? { checks } : {}) } }),
+    commitPush: (pushId, { manifest, variants, checks, environments }) =>
+      call('POST', `/api/v1/pushes/${enc(pushId)}/commit`, {
+        json: { manifest, variants, ...(checks !== undefined ? { checks } : {}), ...(environments ? { environments } : {}) },
+      }),
     requestApproval: (boardId, id, { command, reason, signal }) =>
       call('POST', one(boardId, id, '/approvals', false), { json: { command, reason }, signal }),
     approval: (boardId, id, { signal } = {}) => call('GET', `${board(boardId)}/approvals/${enc(id)}`, { signal }),
@@ -284,7 +287,10 @@ export function createRemote({
 // The board definition a push sends: what the board shows, nothing else.
 // Never auth settings, storage states, login scripts, actions (fill values
 // can be passwords), waitFor selectors, or local paths.
-export function pushDefinition(config, board) {
+// `environments`: also send the board's environments (ids, titles and their
+// addresses, cleaned the same way). Only to the solo engine of this folder:
+// a team server keeps one environment, so it never needs their addresses.
+export function pushDefinition(config, board, { environments = false } = {}) {
   const address = (raw) => {
     const url = new URL(raw)
     url.username = ''
@@ -303,6 +309,16 @@ export function pushDefinition(config, board) {
       title: board.title,
       baseUrl: address(board.baseUrl),
       ...(board.publicUrl ? { publicUrl: address(board.publicUrl) } : {}),
+      ...(environments
+        ? {
+            environments: board.environments.map((env) => ({
+              id: env.id,
+              title: env.title,
+              baseUrl: address(env.baseUrl),
+              ...(env.publicUrl ? { publicUrl: address(env.publicUrl) } : {}),
+            })),
+          }
+        : {}),
       groups: board.groups,
       pages: board.pages.map((page) => ({
         id: page.id,
@@ -340,6 +356,22 @@ export function pushFiles(config, board) {
     for (const name of names.sort()) if (wanted.test(name)) files.push([area, name, path.join(dir, area, name)])
   }
   return files
+}
+
+// The files of another environment's latest capture (envs/<id>/captures/),
+// as [area, name, absolute path] with area `env:<id>` (a push to the solo engine).
+export function pushEnvironmentFiles(config, board, envId) {
+  const dir = capturesDir(config, board.id, envId)
+  let names = []
+  try {
+    names = fs.readdirSync(dir)
+  } catch {
+    return []
+  }
+  return names
+    .sort()
+    .filter((name) => /\.(png|html|elements\.json)$/.test(name))
+    .map((name) => [`env:${envId}`, name, path.join(dir, name)])
 }
 
 // One capture file's bytes, for push and share. The file and every folder

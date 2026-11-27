@@ -15,16 +15,22 @@ import {
   untrustedJson,
 } from '../feedback.js'
 import { AGENT_STATUSES, boardDir, readManifest, readVariants } from '../store.js'
-import { createRemote, pushDefinition, pushFiles, readCaptureFile, remoteSettings } from './remote.js'
+import { createRemote, pushDefinition, pushEnvironmentFiles, pushFiles, readCaptureFile, remoteSettings } from './remote.js'
+import { soloHost } from './loopback-pin.js'
 import { safeOut, terminalSafe } from './terminal.js'
 
 export async function push(flags, print) {
   // Names and URLs here come from the server: cleaned before printing.
   const out = safeOut(print)
   const config = loadConfig(flags.config)
-  const remote = createRemote(remoteSettings(flags))
+  const settings = remoteSettings(flags)
+  const remote = createRemote(settings)
   const boards = flags.board ? [getBoard(config, flags.board)] : config.boards
   const project = await remote.project()
+  // The solo engine keeps a board's environments (compare); a team server keeps one. The other environments'
+  // addresses go only to an engine on this machine: this folder's, or one named by its own host name
+  // (<label>-<key>.shapewall.localhost, pinned to 127.0.0.1), and the server asks for their files only on solo.
+  const environments = settings.source === 'engine' || soloHost(new URL(settings.origin).hostname)
   if (flags.page !== undefined) {
     if (boards.length !== 1) throw new Error('push --page needs --board ID (this config has more than one board).')
     if (flags['include-checks']) throw new Error('push --page sends captures only; push the whole board for --include-checks.')
@@ -37,18 +43,31 @@ export async function push(flags, print) {
     if (result.skipped.length) out(`Not pushed (no ok capture here): ${result.skipped.join(', ')}`)
     return
   }
-  for (const board of boards) await pushBoard({ config, board, remote, project, includeChecks: !!flags['include-checks'], out })
+  for (const board of boards)
+    await pushBoard({ config, board, remote, project, includeChecks: !!flags['include-checks'], environments, out })
 }
 
 // Uploads one board's latest captures and returns the commit's answer
 // ({ files, url, ... }). The hosted server swaps a board in whole on commit
 // (src/hosted/push.js), so this sends the whole board. `shapewall push` uses it.
-export async function pushBoard({ config, board, remote, project = null, includeChecks = false, out = () => {} }) {
+// `environments`: send the board's environments too (the solo engine); the
+// other environments' captures go when the server says it takes them
+// (`environments` in its answer), each with its manifest.
+export async function pushBoard({ config, board, remote, project = null, includeChecks = false, environments = false, out = () => {} }) {
   const manifest = readManifest(config, board.id)
   if (!manifest) throw new Error(`Board "${board.id}" has no captures yet. Run "shapewall capture --board ${board.id}" first.`)
   const checks = portableChecks(config, board, { includeChecks })
   const files = pushFiles(config, board)
-  const started = await remote.startPush(pushDefinition(config, board))
+  const started = await remote.startPush(pushDefinition(config, board, { environments }))
+  // Another environment's captures: only those the server takes and this board has.
+  const envManifests = {}
+  for (const id of Array.isArray(started.environments) ? started.environments : []) {
+    const env = board.environments.slice(1).find((item) => item.id === id)
+    const envManifest = env ? readManifest(config, board.id, env.id) : null
+    if (!envManifest) continue
+    envManifests[env.id] = portableManifest(config, board, envManifest)
+    files.push(...pushEnvironmentFiles(config, board, env.id))
+  }
   if (checks && !started.limits.checks)
     throw new Error('This server does not support checks. Update it before explicitly including diagnostics.')
   const where = project ? ` to ${project.workspace.name} / ${project.project.name}` : ''
@@ -82,6 +101,7 @@ export async function pushBoard({ config, board, remote, project = null, include
     manifest: portableManifest(config, board, manifest),
     variants: portableVariants(readVariants(config, board.id)),
     checks,
+    ...(Object.keys(envManifests).length ? { environments: envManifests } : {}),
   })
   if (checks && result.checks !== checks.reports.length) throw new Error('The server did not confirm all included check reports.')
   out(`Pushed ${result.files} files (${(bytes / 1048576).toFixed(1)} MB). Board: ${result.url}`)

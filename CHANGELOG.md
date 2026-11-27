@@ -39,6 +39,12 @@ capture, the local board and the migration's planner, backup and rollback stay A
   or a `push` token the owner made, used on this machine); the capture browser reaches the app's origin only, never the
   engine, its live HTML origin or this machine's LAN and tailnet addresses. `--no-capture` and `--read-only` turn it off.
   Team servers never capture. See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
+- Solo engine (experimental): environments and compare. The engine's boards keep the config's `environments`, the board
+  compares them as a local board does, `shapewall push` to the engine sends and keeps every environment's
+  captures, "Capture now" takes an environment (`env`), and a comment placed on a compare card's side is stored on that
+  environment (the `comments.environment` column of migration 24). The token API (`?environment=`) and the hosted MCP
+  `list_comments` (`environment`) filter by it, and a vouch for "Send to agent" covers it. Team servers keep one environment
+  per board (`default`) and no compare. See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
 - Solo engine (experimental): **Run checks** in the board's Checks panel runs the page checks in the engine itself, from the
   live `shapewall.config.json`, and the SEO tab shows that run's search previews, as on a local board. Owner only, on this
   machine; the check browser reaches the app's origin only, like the capture browser. One job at a time on the engine
