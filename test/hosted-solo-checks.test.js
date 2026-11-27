@@ -183,6 +183,17 @@ test('the engine owner runs checks from the board: in process, the egress browse
   const checks = await browser.get(`${base}/boards/sample/checks`)
   assert.equal(checks.status, 200)
   assert.equal(checks.json.views.filter((view) => view.report).length, 5)
+  // The engine ran them: the owner's view is a local one (sign-in and page setup checked against the live config).
+  assert.equal(checks.json.imported, false)
+  // A changed page setup in the file makes that page's report stale, as on a local board.
+  const raw = JSON.parse(fs.readFileSync(call.config.file, 'utf8'))
+  raw.pages[0].waitFor = '#changed'
+  fs.writeFileSync(call.config.file, JSON.stringify(raw, null, 2))
+  const later = await browser.get(`${base}/boards/sample/checks`)
+  assert.ok(
+    later.json.views.some((view) => view.pageId === 'home' && view.state === 'stale'),
+    JSON.stringify(later.json.views.map((view) => [view.pageId, view.state])),
+  )
 })
 
 test('checks.seo in the config stays in charge when SEO is on; a page subset checks those pages only', async () => {

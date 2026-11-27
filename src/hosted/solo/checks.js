@@ -197,25 +197,43 @@ export function mountSoloChecks(app, deps, features) {
     }),
   )
 
-  // The SEO tab's search previews, for the owner here: the engine ran the
-  // checks, so it keeps them (in the board folder) as a local board does.
-  // Anyone else gets the hosted answer (no previews) from board-checks.js.
-  router.get('/boards/:bid/checks/seo', (req, res, next) => {
-    if (!inBound(req) || !ownerHere(req)) return next()
+  // The owner's view of the board's checks, as a local board shows it: from
+  // the live config, so a report whose sign-in or page setup changed since
+  // reads as stale (the engine ran these checks; they were not imported).
+  // Anyone else gets the hosted answer from board-checks.js. -> { config,
+  // board, view }, null to fall through, or false after answering 404.
+  function ownerView(req, res) {
+    if (!inBound(req) || !ownerHere(req)) return null
     let config
     try {
       config = soloChecksConfig(deps.db, deps.dataDir).config
     } catch {
-      return next()
+      return null
     }
     const board = config.boards.find((item) => item.id === req.params.bid)
-    if (!board) return next()
-    let view
+    if (!board) return null
     try {
-      view = checksView(config, board.id, typeof req.query.env === 'string' ? req.query.env : null, { imported: true })
+      return { config, board, view: checksView(config, board.id, typeof req.query.env === 'string' ? req.query.env : null) }
     } catch {
-      return fail(res, 404, 'not_found', 'No checks for this environment.')
+      fail(res, 404, 'not_found', 'No checks for this environment.')
+      return false
     }
+  }
+  router.get('/boards/:bid/checks', (req, res, next) => {
+    const found = ownerView(req, res)
+    if (found === false) return
+    if (!found) return next()
+    res.set('Cache-Control', 'no-store').json(found.view)
+  })
+
+  // The SEO tab's search previews, for the owner here: the engine ran the
+  // checks, so it keeps them (in the board folder) as a local board does.
+  // Anyone else gets the hosted answer (no previews) from board-checks.js.
+  router.get('/boards/:bid/checks/seo', (req, res, next) => {
+    const found = ownerView(req, res)
+    if (found === false) return
+    if (!found) return next()
+    const { config, board, view } = found
     const snapshots = {}
     const reports = latestSeoReports(
       view.views,
