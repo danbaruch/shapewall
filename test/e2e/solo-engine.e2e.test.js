@@ -236,6 +236,19 @@ test('shapewall login --remote, approved on /device; push; a comment, a reply an
     stored.replies.map((reply) => reply.body),
     ['Done in the header component', 'Looks right, thanks'],
   )
+
+  // G15: in the project folder, with no --remote and no SHAPEWALL_REMOTE, comments go to the running engine with its own
+  // 0600 token, not to the 1.x JSON files.
+  const tokenFile = path.join(config.outputDir, '.engine', 'cli.token')
+  assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600)
+  const local = JSON.parse(await finished(run(['comments', 'list', '--json', '--all']), 'comments list in the folder'))
+  assert.ok(
+    local.comments.some((item) => String(item.id) === String(id) && item.status === 'resolved'),
+    'the engine comment, from the folder',
+  )
+  await finished(run(['comments', 'reply', id, '--body', 'From the folder']), 'comments reply in the folder')
+  const got = JSON.parse(await finished(run(['comments', 'get', id, '--remote', origin, '--board', 'sample', '--json']), 'get'))
+  assert.equal(got.comment.replies.at(-1).body, 'From the folder')
   assert.deepEqual(realErrors(), [])
 })
 

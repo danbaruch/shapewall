@@ -38,6 +38,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Solo engine (experimental): while `shapewall serve --engine hosted` runs, `shapewall comments`, `watch` and `mcp` in the
+  project folder go to the engine instead of the 1.x files in `.shapewall/<board>/`, which before showed comments that were
+  not the board's. The engine makes their project tokens at each start (owned by you, private files in `.shapewall/.engine/`,
+  a new secret each start, retired at stop); `serve.json` there names the address and the files, never a token. `watch` is
+  an agent of its own there, as `watch --remote` is. `comments get` and `comments add` work against a hosted board too.
+  `export` is refused while the engine runs unless `--no-comments`. With the engine stopped, the commands say on stderr when
+  the engine has kept comments, and refuse a board `shapewall migrate` moved. An explicit `--remote` wins.
 - `shapewall serve` and `shapewall watch` do not start while `shapewall migrate` runs or after one stopped midway, and refuse
   the boards a migration moved to the solo engine.
 - `--remote` accepts plain `http` to the solo engine's own name (`<project>-<random>.shapewall.localhost`) as it does to

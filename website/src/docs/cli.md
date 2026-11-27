@@ -208,7 +208,10 @@ output. It works once, from this machine and your own OS user, on that address o
 address instead; run either again while the engine runs to get a fresh one. `shapewall push`, `comments`, `login` and
 `agent connect` take the engine's address in `SHAPEWALL_REMOTE` (or `--remote`) as they take a team server's, and always
 connect straight to 127.0.0.1 for it, never through a proxy. Prefer `SHAPEWALL_REMOTE`: other users of the machine can read
-a command line. The start prints `SHAPEWALL_REMOTE=http://<name>:<port> shapewall agent connect` for agents. The flags that reach beyond this machine (`--host`, `--lan`, `--tailscale`, `--tls-cert`, `--accounts`,
+a command line. The start prints `SHAPEWALL_REMOTE=http://<name>:<port> shapewall agent connect` for agents. While it runs,
+`shapewall comments`, `watch` and `mcp` in the project folder go to the engine with tokens it made for this machine at
+start (private files in `.shapewall/.engine/`, a new secret each start), not to the 1.x files; `export` is refused unless
+`--no-comments`. The flags that reach beyond this machine (`--host`, `--lan`, `--tailscale`, `--tls-cert`, `--accounts`,
 `--agent-acp`, ...) are refused. Details: [the solo engine](/docs/hosted#the-solo-engine-experimental).
 
 ## shapewall buzz-bridge
@@ -734,7 +737,8 @@ Commands
       --engine hosted       run the hosted engine for this project, on this machine only: one owner, signed in by a
                             one-time page (--open), data in .shapewall/.engine/; takes --port, --open,
                             --print-owner-link, --read-only, --no-chat, --no-capture, --skip-git-check
-                            (start even when git cannot say whether it tracks .engine/) (experimental)
+                            (start even when git cannot say whether it tracks .engine/); while it runs,
+                            comments, watch and mcp in this folder go to it (experimental)
   devices list              paired devices and pending requests for this project [--json]
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request
