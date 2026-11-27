@@ -1,0 +1,12 @@
+{
+  "variants": [
+    {
+      "id": "alt-hero",
+      "pageId": "home",
+      "title": "Alt hero",
+      "note": "",
+      "source": "http://127.0.0.1:4891/pricing",
+      "createdAt": "2026-11-27T01:07:11.953Z"
+    }
+  ]
+}

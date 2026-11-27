@@ -1,0 +1,11 @@
+{
+  "state": "done",
+  "startedAt": "2026-11-27T01:07:22.718Z",
+  "finishedAt": "2026-11-27T01:07:27.151Z",
+  "done": 4,
+  "total": 4,
+  "failed": 0,
+  "error": null,
+  "env": "staging",
+  "pid": 277749
+}

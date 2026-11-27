@@ -931,6 +931,14 @@ Commands
       --board ID            move only this board (default all)
       --dry-run             show counts; sends nothing
       --no-comments         captures, history and journeys only
+  migrate                   move this project's .shapewall/ into the solo engine (.shapewall/server/) (experimental)
+                            captures, comments, chat and the local account; a backup goes to
+                            .shapewall/backup-1x-<time>/ first. Refuses while serve, capture, watch or an agent runs
+      --dry-run             counts, and every item that would not come along; writes nothing
+      --board ID            only this board (default: every board)
+      --rollback            put every migration back from its backup (checked byte for byte)
+      --json                machine-readable result
+                            exit code: 0 done or nothing to do, 1 refused or failed (the folder is put back)
   buzz-bridge               run a private foreground gateway to existing Buzz agents (experimental)
       --bridge-config FILE  private operator map outside project/capture data; Ctrl-C stops it
                             no new agent, session, model, or automatic completion (https://shapewall.com/docs/buzz)
