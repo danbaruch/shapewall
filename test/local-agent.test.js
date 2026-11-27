@@ -256,6 +256,13 @@ async function comment(handle, user, body) {
   assert.equal(made.status, 201, made.text)
   return made.json.comment
 }
+// The comment's own state on the board: its agent status and replies.
+async function seenComment(handle, user, id) {
+  const { workspaceId, projectId } = handle.app.locals.solo.owner
+  const list = await user.browser.get('/w/' + workspaceId + '/p/' + projectId + '/api/boards/sample/comments')
+  return list.json.comments.find((item) => item.id === id)
+}
+
 const fixWith = (user, made) =>
   user.browser.post(user.base + '/boards/sample/threads/comment-' + made.id + '/messages', {
     fix: true,
@@ -287,12 +294,16 @@ test(
     const { saveMachinePolicy } = await import('../src/remote/agent-policy-file.js')
     saveMachinePolicy(origin, 'local', { approvals: 'none' }, env)
     await engine.handle.stop()
-    // The same port, so the same address: the policy is kept per address (agent-policy.json).
-    const again = await start(config, env, Number(new URL(origin).port))
+    // Another port: the same engine host name, so what the owner set stays and nothing is seeded again
+    // (agent-policy-file.js policyKey).
+    const again = await start(config, env)
     t.after(() => again.handle.stop())
-    assert.equal(again.handle.origin, origin)
-    assert.equal(readMachinePolicy(origin, 'local', env).approvals, 'none')
+    assert.notEqual(new URL(again.handle.origin).port, new URL(origin).port)
+    assert.equal(new URL(again.handle.origin).hostname, new URL(origin).hostname)
+    assert.equal(readMachinePolicy(again.handle.origin, 'local', env).approvals, 'none')
     assert.doesNotMatch(again.text(), /branch mode is on/)
+    const saved = JSON.parse(fs.readFileSync(path.join(env.XDG_CONFIG_HOME, 'shapewall', 'agent-policy.json'), 'utf8'))
+    assert.deepEqual(Object.keys(saved.connections), [`http://${new URL(origin).hostname}#local`])
   },
 )
 
@@ -338,4 +349,39 @@ test('agent connect --endpoint answers only: edits, commands and --agent with it
     ),
     /No model endpoint is set up/,
   )
+})
+
+test('a comment nobody sent to the agent waits, as on a 1.x board; @agent in its text sends it', { skip: !POSIX }, async (t) => {
+  const config = project('local-agent-asked')
+  const env = acpEnv('local-agent-asked')
+  const engine = await start(config, env)
+  t.after(() => engine.handle.stop())
+  const user = await owner(engine.handle)
+  await onlineAgent(engine.handle, user, engine)
+  const quiet = await comment(engine.handle, user, 'Tighten the header spacing')
+  const asked = await comment(engine.handle, user, '@agent what is on the home page?')
+  await until(
+    async () =>
+      ((await seenComment(engine.handle, user, asked.id))?.replies || []).some((reply) => /Hello from the ACP stub/.test(reply.body)),
+    `the agent to answer the @agent comment\n${engine.text()}`,
+  )
+  // By the time the asked one is answered, the agent has scanned the board: the other one was never taken.
+  const left = await seenComment(engine.handle, user, quiet.id)
+  assert.equal(left.agentStatus ?? null, null)
+  assert.deepEqual(left.replies || [], [])
+})
+
+test('the machine policy key: a solo engine by its host name (any port), every other server by its origin', async () => {
+  const { policyKey } = await import('../src/remote/agent-policy-file.js')
+  assert.equal(
+    policyKey('http://lumen-notes-abcdefghijklmn.shapewall.localhost:4600', 'local'),
+    'http://lumen-notes-abcdefghijklmn.shapewall.localhost#local',
+  )
+  assert.equal(
+    policyKey('http://lumen-notes-abcdefghijklmn.shapewall.localhost:4711', 'local'),
+    'http://lumen-notes-abcdefghijklmn.shapewall.localhost#local',
+  )
+  assert.equal(policyKey('https://board.example.test', 'default'), 'https://board.example.test#default')
+  assert.equal(policyKey('http://127.0.0.1:4600', 'default'), 'http://127.0.0.1:4600#default')
+  assert.equal(policyKey('https://lumen.shapewall.localhost:4600', 'x'), 'https://lumen.shapewall.localhost:4600#x')
 })

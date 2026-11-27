@@ -275,10 +275,9 @@ test('shapewall login --remote, approved on /device; push; a comment, a reply an
   )
   const stored = (after.comments || after).find((item) => String(item.id) === String(id))
   assert.equal(stored.status, 'resolved')
-  // The engine's own agent takes the owner's comment as a team server's agent would, and answers on it (the stub's
-  // words); the people's replies are in order around it.
+  // The engine's own agent is connected, but a comment nobody sent to it waits, as on a 1.x board: no reply of its.
   assert.deepEqual(
-    stored.replies.map((reply) => reply.body).filter((body) => body !== 'Hello from the ACP stub.'),
+    stored.replies.map((reply) => reply.body),
     ['Done in the header component', 'Looks right, thanks'],
   )
 

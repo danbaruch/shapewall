@@ -566,9 +566,26 @@ export function mountBoardRoutes(
             policyFor(req.t).autoVouch(req.project.id, ctx.board.id, ctx.comments.get(made.id), req.user.id, req.role)
             // Vouched for as it was written: it goes to the project's default
             // agent when its author may use that agent, to any agent otherwise.
+            // On the solo engine, as on a 1.x board, a comment goes to the
+            // board's own agent (the default) only when its text asks for an
+            // agent (@agent, or an agent's own handle): otherwise to "any
+            // agent", which only a `watch` takes; a connected agent takes
+            // only what was sent to it by name (agent-link.js), so it never
+            // answers every comment unasked. Fix with and Send to agent name it.
             const vouched = ctx.comments.get(made.id)
-            if (vouched.dispatch_hash)
-              agentsFor(req.t).address(req.project.id, ctx.board.id, vouched, { userId: req.user.id, role: req.role }, undefined)
+            if (vouched.dispatch_hash) {
+              const agents = agentsFor(req.t)
+              const asked = solo ? agents.mentionedAgent(req.project.id, made.body) : null
+              const wanted = !asked ? undefined : asked.asked ? asked.agentId : null
+              const who = { userId: req.user.id, role: req.role }
+              try {
+                agents.address(req.project.id, ctx.board.id, vouched, who, wanted)
+              } catch (error) {
+                // An agent the author may not use, named in the text: it goes where an unnamed comment goes.
+                if (!wanted || !(error instanceof HttpError)) throw error
+                agents.address(req.project.id, ctx.board.id, vouched, who, null)
+              }
+            }
           }
           if (req.guest) auditOf(req, 'guest_commented', `${ctx.board.id}#${made.id}`, { project: req.project.id, guest: req.guest.name })
           return made

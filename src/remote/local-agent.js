@@ -28,7 +28,9 @@
 //   "owner" (each edit asked of the owner on the board, fixes made on a
 //   branch in a copy outside the project), as `agent set --approvals owner`
 //   would set it. Only when nothing is saved for this connection yet: what
-//   the owner sets with `shapewall agent set --as local` afterwards stays.
+//   the owner sets with `shapewall agent set --as local` afterwards stays,
+//   also on another --port (agent-policy-file.js policyKey: the engine's host
+//   name, not its port).
 // - A child that exits is started again after a pause that grows; one that
 //   keeps failing is left stopped, and said. A stop of the engine stops it.
 
