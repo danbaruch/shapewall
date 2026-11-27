@@ -58,8 +58,8 @@ const REFUSED = {
 
 export function engineFlagProblem(flags) {
   if (!ENGINES.includes(flags.engine))
-    return `--engine: "hosted" (experimental) is the only engine; leave --engine out for the local board server.`
-  for (const [flag, why] of Object.entries(REFUSED)) if (flags[flag] !== undefined) return `--${flag} is not for --engine hosted: ${why}.`
+    return `--engine: "hosted" (the solo engine, the default) or "legacy" (the 1.x board server, deprecated).`
+  for (const [flag, why] of Object.entries(REFUSED)) if (flags[flag] !== undefined) return `--${flag} is not for the solo engine: ${why}. The 1.x board server still takes it (shapewall serve --engine legacy, deprecated).`
   return null
 }
 
@@ -136,7 +136,7 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
     return null
   }
   if (!acquireLock(lockFile(dir), { kind: 'serve-engine', mode: 0o600 }))
-    throw new Error('Another shapewall serve --engine hosted is starting for this project.')
+    throw new Error('Another shapewall serve is starting the solo engine for this project.')
   const release = () => {
     releaseLock(lockFile(dir))
     fs.rmSync(stateFile(dir), { force: true })
@@ -239,7 +239,7 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
     { mode: 0o600 },
   )
   out(
-    `Shapewall solo engine (experimental) is serving ${config.boards.length} board${config.boards.length === 1 ? '' : 's'} at ${boardUrl}`,
+    `Shapewall is serving ${config.boards.length} board${config.boards.length === 1 ? '' : 's'} at ${boardUrl} (the solo engine)`,
   )
   out(`Data: ${dir} (never commit it)`)
   // The address goes in the environment, not on the agent's command line: any local user can read a process's
@@ -262,7 +262,7 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
   } else if (showLink(flags, env)) {
     signIn(handle.app.locals.soloOpenFile({ keep: true }), out, { open: false })
   } else {
-    out('Sign in: run shapewall serve --engine hosted --open (a one-time sign-in page; this output is not a terminal, so none is made).')
+    out('Sign in: run shapewall serve --open (a one-time sign-in page; this output is not a terminal, so none is made).')
   }
   return handle
 }

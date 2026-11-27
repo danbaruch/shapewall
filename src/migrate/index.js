@@ -123,7 +123,7 @@ export function holders(config) {
                 : entry.name === 'starter-watch.lock'
                   ? 'the starter agent'
                   : entry.name === 'serve.lock' && path.basename(dir) === ENGINE_DIR
-                    ? 'the solo engine (shapewall serve --engine hosted)'
+                    ? 'the solo engine (shapewall serve)'
                     : `a Shapewall process (${entry.name})`
           out.push(`${what} is running (pid ${lock.pid}, ${rel(config, full)}); let it finish or stop it first`)
         }
@@ -353,7 +353,7 @@ const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`
 const size = (bytes) => (bytes > 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`)
 
 export function printPlan(plan, out, { dryRun }) {
-  out(`shapewall migrate (experimental)${dryRun ? ': dry run, nothing is written' : ''}`)
+  out(`shapewall migrate${dryRun ? ': dry run, nothing is written' : ''}`)
   out(`  into ${path.basename(plan.outputDir)}/${ENGINE_DIR}/ (the solo engine)`)
   const by = plan.owner.source === 'account' ? 'the local account' : 'the name this machine signs comments with'
   out(`  owner: ${plan.owner.name} (${by})`)
@@ -648,7 +648,13 @@ async function withBoardLocks(config, boardIds, work) {
 }
 
 // The command. Exit code: 0 done (or nothing to do), 1 refused or failed.
-export async function migrateCommand(config, flags, out, { env = process.env, version = 'dev', now = () => new Date(), fault } = {}) {
+// fromServe: the first start of `shapewall serve` in a 1.x project runs it (src/cli/serve-command.js).
+export async function migrateCommand(
+  config,
+  flags,
+  out,
+  { env = process.env, version = 'dev', now = () => new Date(), fault, fromServe = false } = {},
+) {
   const json = flags.json === true
   const say = json ? () => {} : out
   if (!fs.existsSync(config.outputDir)) {
@@ -743,7 +749,7 @@ export async function migrateCommand(config, flags, out, { env = process.env, ve
       printPlan(plan, out, { dryRun: false })
       out('')
       out(`Migrated. Backup: ${rel(config, result.backup)} (undo with shapewall migrate --rollback).`)
-      out('This build cannot serve the solo engine yet; shapewall migrate --rollback puts the folder back as it was.')
+      if (!fromServe) out('Start the board with shapewall serve.')
     }
     return 0
   }

@@ -291,7 +291,7 @@ export function mountSoloSignIn(app, { auth, db, setCookie, SESSION_COOKIE, now,
     res
       .status(410)
       .type('text')
-      .send('This sign-in page works once, for a minute, in a browser on this machine. Run shapewall serve --engine hosted --open again.')
+      .send('This sign-in page works once, for a minute, in a browser on this machine. Run shapewall serve --open again.')
 
   const form = express.urlencoded({ extended: false, limit: '1kb', parameterLimit: 4 })
   app.post('/open', form, (req, res) => {

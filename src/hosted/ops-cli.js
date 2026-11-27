@@ -23,11 +23,11 @@ function intFlag(flags, name, { min, max, fallback }) {
 
 const mb = (bytes) => `${(bytes / 1048576).toFixed(1)} MB`
 
-// `shapewall serve --engine hosted` (experimental): the solo engine for this
-// project (src/hosted/solo/serve.js). Kept running until stopped.
-export async function serveEngine(flags, out) {
+// `shapewall serve` (the solo engine, the default from 2.0): the engine for
+// this project (src/hosted/solo/serve.js). Kept running until stopped.
+export async function serveEngine(flags, out, options = {}) {
   const { serveEngine: run } = await import('./solo/serve.js')
-  return run(flags, out)
+  return run(flags, out, options)
 }
 
 export async function hostedCommand(positional, flags, out, err = out) {
