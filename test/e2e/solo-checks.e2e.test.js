@@ -14,7 +14,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { chromium } from 'playwright'
 import { startDemoSite } from '../../examples/demo-site/server.js'
-import { tempDir } from '../helpers.js'
+import { pathWithoutAgents, tempDir } from '../helpers.js'
 import { stopChild } from '../child-process-helpers.js'
 import { ROOT_DIR } from './helpers.js'
 
@@ -22,8 +22,9 @@ const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_S
 const CLI = path.join(ROOT_DIR, 'bin', 'shapewall.js')
 
 const HOME = tempDir('solo-checks-e2e-home')
+// No agent on PATH: the engine starts no agent of its own here.
 const ENV = {
-  PATH: process.env.PATH,
+  PATH: pathWithoutAgents(),
   HOME,
   XDG_CONFIG_HOME: path.join(HOME, '.config'),
   SHAPEWALL_NO_BROWSER: '1',
@@ -75,10 +76,7 @@ before(async () => {
   const home = raw.pages.find((item) => item.id === 'home')
   home.actions = [
     ...(home.actions || []),
-    {
-      type: 'waitForFunction',
-      expression: `(fetch('http://127.0.0.1:${other.address().port}/beacon').catch(() => {}), true)`,
-    },
+    { waitForFunction: `(fetch('http://127.0.0.1:PORT/beacon').catch(() => {}), true)`.replace('PORT', String(other.address().port)) },
   ]
   fs.writeFileSync(path.join(projectDir, 'shapewall.config.json'), JSON.stringify(raw, null, 2))
   const child = spawn(process.execPath, [CLI, 'serve', '--engine', 'hosted', '--port', '0', '--print-owner-link'], {
