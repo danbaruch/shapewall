@@ -32,8 +32,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   notifications as `serve` does, so `shapewall events`, bots and notification channels keep working. See
   [the event log](docs/notifications.md#the-event-log).
 - Solo engine (experimental): the board's `/info` says `solo: true` and lists the local-only features the engine serves
-  (`soloFeatures`). The board turns those on for the engine's owner only (journey editing, checks runs, batch fixes, the old
-  captures' DOM fallback, the capture hint in the empty state), each once the engine serves it. Team servers never send
+  (`soloFeatures`). The board turns those on for the engine's owner only (journey editing, checks runs, batch fixes, the capture
+  hint in the empty state), each once the engine serves it. Team servers never send
   `solo` and keep their behaviour.
 - Solo engine (experimental): About and updates can check for and apply an installation update, as on a local board: the
   installer's fixed helper only, for the engine's owner on this machine. See [Installation updates](docs/updates.md#on-the-solo-engine-experimental).
