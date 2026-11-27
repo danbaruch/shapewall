@@ -93,8 +93,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Agents: an ACP agent's file reads (`fs/read_text_file`) no longer reach Shapewall's own store (`.shapewall/`: accounts,
   sessions, notification settings, tokens), the recorded logins in `.shapewall-auth/` or the config's `auth.storageState`
   files, through a link either; only writes were refused before. A Claude Code agent also gets `Read` deny rules for those
-  paths in its session settings, since it reads files itself. Comments and captures reach agents through Shapewall's tools as
-  before.
+  paths in its session settings, since it reads files itself (checked against a real Claude Code on Linux: Read, Grep,
+  Glob and links into the store are refused). Comments and captures reach agents through Shapewall's tools as before.
+  Codex, goose and Gemini CLI read files with their own tools, which take no per-path deny, so on a local board they can
+  still read these paths; for a board where people you do not trust write comments, use Claude Code, or a connected agent
+  (`shapewall agent connect`), whose commands run in the OS sandbox.
 
 ### Fixed
 
