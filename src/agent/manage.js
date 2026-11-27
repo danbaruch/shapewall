@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { agentRouter } from './routes.js'
 import { localRequest, newSettingsToken } from './settings-routes.js'
-import { createOpenPages, localOpenRequest } from '../open-page.js'
+import { createOpenPages, localOpenRequest, sendTokenHandoff } from '../open-page.js'
 
 const CLIENT = fileURLToPath(new URL('../../dist/client/', import.meta.url))
 const CSP =
@@ -37,7 +37,7 @@ export function createAgentManagement({ config, env = process.env, token = newSe
   })
   app.post('/open', express.urlencoded({ extended: false, limit: '1kb', parameterLimit: 4 }), (req, res) => {
     if (!pages.redeem(req.body?.nonce)) return fail(res, 404)
-    res.redirect(303, `/#settings-token=${token}`)
+    sendTokenHandoff(res, { token, target: '/' })
   })
   app.use('/api', (req, res, next) => (/^\/agent\/(?:settings(?:\/|$)|events$)/.test(req.path) ? next() : fail(res, 404)))
   app.use('/api/agent', agents)

@@ -478,9 +478,11 @@ machine that rewrites `Host` (a default nginx `proxy_pass`, Caddy with `header_u
   `Private owner link (settings, sharing; keep it to yourself): http://127.0.0.1:4600/#settings-token=...`.
 - Open that direct local link (`shapewall serve --open` opens it for you in this mode: the browser is opened on a page in the
   project's `.shapewall/` folder, readable only by you, that posts a one-time nonce to `POST /open`; the server answers it once,
-  within a minute (five when no browser could be opened and the page's path is printed instead), with a redirect to the settings
-  link. Neither the token nor the nonce is ever on a command line, where other users of the machine could read it, or in the
-  output. The page is removed once used, when it expires and when serve stops; a used or expired one says so): the board keeps the token for that tab (`sessionStorage`), removes it from the address bar, and sends it in an
+  within a minute (five when no browser could be opened and the page's path is printed instead), with a page that hands the
+  token to the tab and opens the board, so no URL holds it and browser history never records it. Neither the token nor the
+  nonce is ever on a command line, where other users of the machine could read it, or in the output. The page is removed once
+  used, when it expires and when serve stops; one a stopped server left behind is dead, and the next start removes it. A used
+  or expired one says so): the board keeps the token for that tab (`sessionStorage`), removes it from the address bar, and sends it in an
   `X-Shapewall-Settings-Token` header, to `/api/info`, `/api/agent/settings`, chat message writes and approval answers. This authorizes owner-only comment tools on direct local chat turns; it never goes to an agent or model endpoint. The server compares it in constant time.
 - Without it (another tab, a bookmark, after a restart) the Settings button is hidden (the profile menu shows it greyed out), the
   panel says to open the link from your terminal or run `shapewall serve --open` for a direct local board, and `/api/agent/settings` answers `404`. For a fixed-origin account board, use the host-only settings command above. Other routes cannot add or edit an executable command or key destination.

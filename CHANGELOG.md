@@ -66,6 +66,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
   board as its owner first. The browser is opened on a page in the project's `.shapewall/` folder, readable only by you, that
   posts the nonce to `POST /open`; the page is removed once used, when it expires and when the server stops. With no browser,
   the page's path is printed instead of the link. `GET /open/<nonce>` no longer opens anything.
+- `POST /open` no longer redirects to `#settings-token=...`: it answers with a page that puts the settings token in the tab's
+  session storage and opens the board, so the token never lands in browser history. Open pages a stopped server left behind are
+  removed when the next server for the project starts.
+- `serve --accounts`: the account session cookie is `SameSite=Strict` on every issue (was `Lax`), so a link or form on another
+  site, to any port of the board's host name, never carries it. On a loopback account origin on Linux, a request that carries
+  it counts only from a socket of the OS user running `serve`.
 
 ## 1.4.0 - 2026-11-26
 

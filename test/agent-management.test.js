@@ -41,6 +41,25 @@ async function setup(t) {
   t.after(close)
   return { config, env, app, server, origin, port, call }
 }
+// What a redeemed POST /open answers (src/open-page.js sendTokenHandoff): a
+// no-store page that puts the token in the tab's sessionStorage and replaces
+// itself with the board. No URL holds the token: no Location, nothing to keep in history.
+function handoffOf(answer) {
+  assert.equal(answer.status, 200)
+  assert.equal(answer.headers.location, undefined)
+  assert.equal(answer.headers['cache-control'], 'no-store')
+  const csp = answer.headers['content-security-policy']
+  const nonce = /script-src 'nonce-([^']+)'/.exec(csp)?.[1]
+  assert.ok(nonce, csp)
+  assert.match(csp, /default-src 'none'/)
+  assert.match(csp, /frame-ancestors 'none'/)
+  const script = new RegExp(`<script nonce="${nonce.replace(/[+/=]/g, (c) => `\\${c}`)}">const d = (\\{[^<]*?\\});`).exec(answer.text)
+  assert.ok(script, answer.text)
+  const data = JSON.parse(script[1])
+  assert.equal(data.key, 'shapewall-settings-token')
+  return data
+}
+
 const settings = '/api/agent/settings'
 test('management exposes only host-authorized settings and preserves server state and project index', async (t) => {
   const b = await setup(t)
@@ -82,8 +101,7 @@ test('management exposes only host-authorized settings and preserves server stat
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'null' },
     })
   const opened = await post()
-  assert.equal(opened.status, 303)
-  assert.equal(opened.headers.location, `/#settings-token=${token}`)
+  assert.deepEqual(handoffOf(opened), { key: 'shapewall-settings-token', token, target: '/' })
   assert.equal(fs.existsSync(file), false, 'the page is removed once used')
   assert.equal((await post()).status, 404)
   // Only the newest page works, and stop removes it.

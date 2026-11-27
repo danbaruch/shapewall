@@ -55,8 +55,11 @@ authenticators, so phone passkeys, passkey sync and your Tailscale setup are you
 
 After enrollment, board APIs, captures, live snapshots and installation operations require the account session cookie. Public
 application shells and static interface assets can still load to explain sign-in. `/auth/*` implements the actual passkey,
-recovery, profile, session and security-log API used by Account and security. The account cookie is HttpOnly and SameSite=Lax,
-with Secure and a `__Host-` prefix on HTTPS. Hosted and local account cookies have different names.
+recovery, profile, session and security-log API used by Account and security. The account cookie is HttpOnly and SameSite=Strict
+(on every issue, so a link or form on another site never carries it), with Secure and a `__Host-` prefix on HTTPS. On a
+loopback account origin (`127.0.0.1`, `localhost`) the cookie reaches every port of that name, so on Linux a request that
+carries it is honoured only from a socket of the OS user running `serve` (read from `/proc/net/tcp`; it fails closed). A link
+from another site therefore lands on Sign in first. Hosted and local account cookies have different names.
 
 Accounts are an additional gate. They do not remove Tailscale/device pairing or grant the separate Agent Settings and managed
 update capabilities. Signing out ends account access; it does not revoke a Tailscale login or paired-device credential. The last
