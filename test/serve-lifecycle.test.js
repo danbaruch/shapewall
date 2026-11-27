@@ -20,7 +20,7 @@ test('the update restart exits 75 through the graceful stop: serve.json is clear
   const protocol = JSON.stringify({ latest: { version: '9.9.9', revision: 'abcdef1234567' }, updateAvailable: true, restartRequired: true })
   const helper = path.join(dir, 'update-helper')
   fs.writeFileSync(helper, `#!${process.execPath}\nconsole.log(${JSON.stringify(protocol)})\n`, { mode: 0o700 })
-  const child = spawn(process.execPath, [cli, 'serve', '--port', '0', '--no-chat', '--config', path.join(dir, 'shapewall.config.json')], {
+  const child = spawn(process.execPath, [cli, 'serve', '--engine', 'legacy', '--port', '0', '--no-chat', '--config', path.join(dir, 'shapewall.config.json')], {
     env: {
       PATH: process.env.PATH,
       HOME: dir,
