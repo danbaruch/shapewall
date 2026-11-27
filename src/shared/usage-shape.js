@@ -160,6 +160,8 @@ export const ACTION_GROUPS = {
     'project_made_public',
     'project_made_private',
     'step_up_changed',
+    'team_mode_on',
+    'team_mode_off',
   ],
   projects: ['project_created', 'project_deleted', 'board_removed', 'push_committed'],
   sharing: ['share_created', 'share_revoked', 'share_opened', 'share_passcode_failed', 'guest_commented', 'guest_replied', 'guest_ended'],

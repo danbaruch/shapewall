@@ -76,6 +76,7 @@ import { cspWithErrors, reportServerError } from '../error-tracking.js'
 import { mountSolo } from './solo/index.js'
 import { soloLocalGate } from './solo/signin.js'
 import { soloFlagGate } from './solo/flags.js'
+import { soloTeamView } from './solo/team-view.js'
 
 export { changeEventType, publicBoardView, TOKEN_SCOPES, INVITE_DAYS }
 
@@ -157,8 +158,18 @@ export function createHostedApp({
   // object turns it on and mountSolo (src/hosted/solo/index.js) mounts its
   // surfaces once; null, the default, is a team server and mounts nothing.
   solo = null,
+  // The solo engine's team listener (shapewall serve --team, src/hosted/solo/team.js): a second app on the
+  // engine's database for the people the owner invites, reached through tailscale serve. It shares the
+  // owner's app's live state (`shared`: { turnHub, links, agentPresence, chat }), and the owner's app runs the
+  // background jobs (sweeps, turn and claim timers), so this one runs none. Never with `solo`.
+  secondary = false,
+  shared = null,
 }) {
   if (guestOnly) tailnet = null
+  if (secondary && (solo || guestOnly)) throw new Error('secondary: a team listener is neither the solo app nor a share listener')
+  if (shared && !secondary) throw new Error('shared: only a secondary app shares the live state of another')
+  // No background jobs here: the app whose state this one shares runs them.
+  const background = !guestOnly && !secondary
   const base = new URL(origin)
   if (!['http:', 'https:'].includes(base.protocol) || base.pathname !== '/' || base.search)
     throw new Error('origin: an http(s) origin without a path')
@@ -179,12 +190,12 @@ export function createHostedApp({
   const ownsEvents = !eventBus
   const events = eventBus || createEventBus()
   // Which agents are listening right now (in memory only).
-  const agentPresence = createAgentPresence({ now })
+  const agentPresence = shared?.agentPresence || createAgentPresence({ now })
   const streams = new Set()
   // Connected agents (`shapewall agent connect`): the chat turns in flight
   // and the open links, in memory (src/hosted/turn-hub.js, agent-link.js).
-  const turnHub = createTurnHub({ now: () => now().getTime() })
-  const links = createAgentLinks({ hub: turnHub })
+  const turnHub = shared?.turnHub || createTurnHub({ now: () => now().getTime() })
+  const links = shared?.links || createAgentLinks({ hub: turnHub })
   const chatFor = (t) => createChatStore(t, { now })
   const policyFor = (t) =>
     createAgentPolicy(t, { now, handleFor: (user) => q.get('SELECT handle FROM users WHERE id = :id', { id: user })?.handle || null })
@@ -229,7 +240,7 @@ export function createHostedApp({
   // (primary) and the old one (previous; sign-in and the move only). Each has
   // its own passkey checks; `related` checks old passkeys on the new origin
   // (WebAuthn Related Origin Requests). The site of a request is its Host.
-  const previous = guestOnly ? null : prepareOrigins({ db, origin: publicOrigin, rpId: base.hostname, previousOrigin, now, log })
+  const previous = guestOnly || secondary ? null : prepareOrigins({ db, origin: publicOrigin, rpId: base.hostname, previousOrigin, now, log })
   const sites = {
     primary: { origin: publicOrigin, host: base.host, auth },
     previous: previous
@@ -256,7 +267,7 @@ export function createHostedApp({
 
   // What ends a chat turn from the server's side (the machine went away, a
   // revoked agent, a restart).
-  const chat = createChatService({ db, hub: turnHub, links, events, chatFor, now })
+  const chat = shared?.chat || createChatService({ db, hub: turnHub, links, events, chatFor, now })
 
   const app = express()
   app.disable('x-powered-by')
@@ -513,6 +524,9 @@ export function createHostedApp({
     ownersSeeSignIns: ownersSeeSignIns === true,
     tailnet,
     tailnetAccounts,
+    // The solo engine's team mode (src/hosted/solo/team.js), read per request: invites for tailnet logins and
+    // the team address in invite links while it is on. null on every other server.
+    team: solo ? soloTeamView(() => app.locals.soloTeam) : null,
   }
   mountInviteLinks(consoleApi, consoleDeps)
   // Share link preview and opening: no session, the link is the secret.
@@ -685,7 +699,7 @@ export function createHostedApp({
   // The one-time link that lets the first person sign up on an invite-only
   // server. Returns the secret URL for the operator file, or null when users exist.
   app.locals.setupLink = () => {
-    if (guestOnly || soloLocal || auth.userCount() > 0) return null
+    if (guestOnly || secondary || soloLocal || auth.userCount() > 0) return null
     return mintSetupLink(db, publicOrigin, now())
   }
   app.locals.deviceLogins = deviceLogins
@@ -702,11 +716,11 @@ export function createHostedApp({
       log(`staging sweep: ${error.message}`)
     }
   }
-  if (!guestOnly) sweep()
-  const sweepTimer = !guestOnly && sweepEveryMs ? setInterval(sweep, sweepEveryMs) : null
+  if (background) sweep()
+  const sweepTimer = background && sweepEveryMs ? setInterval(sweep, sweepEveryMs) : null
   sweepTimer?.unref()
   // No turn survives a restart: what the database still calls running ends here.
-  if (!guestOnly) {
+  if (background) {
     try {
       chat.sweepStale()
     } catch (error) {
@@ -714,7 +728,7 @@ export function createHostedApp({
     }
   }
   // Chat turns whose machine went away end as interrupted (unref'd too).
-  const turnTimer = guestOnly
+  const turnTimer = !background
     ? null
     : setInterval(() => {
         try {
@@ -725,8 +739,8 @@ export function createHostedApp({
       }, 5000)
   turnTimer?.unref()
   // Claims held by an agent that went silent go to a person (unref'd too).
-  const sweepClaims = guestOnly ? () => [] : createClaimSweep({ db, agentsFor, hub: turnHub, events, now, log, limits: claimHeartbeat })
-  const claimTimer = guestOnly || !claimHeartbeat.sweepEveryMs ? null : setInterval(sweepClaims, claimHeartbeat.sweepEveryMs)
+  const sweepClaims = !background ? () => [] : createClaimSweep({ db, agentsFor, hub: turnHub, events, now, log, limits: claimHeartbeat })
+  const claimTimer = !background || !claimHeartbeat.sweepEveryMs ? null : setInterval(sweepClaims, claimHeartbeat.sweepEveryMs)
   claimTimer?.unref()
   app.locals.sweepClaims = sweepClaims
   const ownsPresence = !presenceHub
@@ -769,8 +783,11 @@ export function createHostedApp({
     if (sweepTimer) clearInterval(sweepTimer)
     if (turnTimer) clearInterval(turnTimer)
     if (claimTimer) clearInterval(claimTimer)
-    chat.close()
-    links.closeAll()
+    // A shared turn hub, links and chat service belong to the app they came from.
+    if (!shared) {
+      chat.close()
+      links.closeAll()
+    }
     await soloSurfaces?.close?.()
     await cleaner.close()
   }

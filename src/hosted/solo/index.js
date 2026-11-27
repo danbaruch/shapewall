@@ -26,6 +26,9 @@
 // config file (G1, G2). The surfaces after it get the owner's workspace and
 // project (solo.workspaceId, solo.projectId, solo.boardUrl).
 //
+// team-routes.js: team mode's switch and the engine's rules for invites (R6);
+// the team listener is team.js, started by src/hosted/server.js.
+//
 // machine-tokens.js makes the owner's command-line token at every start
 // (cli.token in the data folder; G15) and the board's own agent's (R2).
 //
@@ -51,6 +54,7 @@ import { mountSoloEvents } from './events.js'
 import { mountSoloInfo } from './info.js'
 import { mountSoloJourneys } from './journeys.js'
 import { ensureSoloOwner, mountSoloSignIn } from './signin.js'
+import { mountSoloTeamRoutes } from './team-routes.js'
 import { mountSoloUpdate } from './update.js'
 import { mintMachineToken, retireMachineTokens } from './machine-tokens.js'
 import { engineProof } from '../../engine-target.js'
@@ -69,6 +73,9 @@ function mountOwner(app, deps, closers) {
   if (owner.created) deps.log(`Solo engine: made the owner account, its workspace and the project (${owner.projectId}).`)
   const signIn = mountSoloSignIn(app, { ...deps, gate: deps.localGate, owner })
   closers.push(() => signIn.close())
+  // Team mode (R6): Invite people, `serve --team` against the running engine, and the engine's rules for invites.
+  // The listener itself is started by src/hosted/server.js (app.locals.soloTeam, src/hosted/solo/team.js).
+  mountSoloTeamRoutes(app, { ...deps, owner, localGate: deps.localGate, keyAdmits: signIn.keyAdmits })
   const boards = createSoloBoards({ db: deps.db, ids: owner, configPath: solo.configPath, now: deps.now, log: deps.log })
   boards.sync({ force: true })
   // Before every other solo board route: the boards follow the file.

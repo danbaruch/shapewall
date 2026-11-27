@@ -106,6 +106,9 @@ export function mountConsoleRoutes(consoleApi, deps) {
     tailnet = null,
     tailnetAccounts = null,
     passkeys = null,
+    // The solo engine's team mode (src/hosted/solo/team-view.js), or null: while it is on, invites may be for a
+    // tailnet login and their links carry the team address (the people invited never reach this app's origin).
+    team = null,
   } = deps
   // Making, changing or removing an owner always asks for the passkey; the
   // same for an admin when the workspace asks for it ("Members and roles").
@@ -201,7 +204,9 @@ export function mountConsoleRoutes(consoleApi, deps) {
           publicProjects: true,
           guestSessions: true,
           // Invites for a tailnet login, and the list of tailnet visitors.
-          tailnetSignIn: Boolean(tailnet),
+          tailnetSignIn: Boolean(tailnet) || Boolean(team?.on()),
+          // The solo engine: team mode (shapewall serve --team; the console's Invite people).
+          ...(team ? { team: team.view() } : {}),
           // false: Tailscale is the only sign-in here (no passkeys, so nothing in "Ask for a passkey again" applies).
           passkeys: passkeys ? passkeys.on() : true,
         },
@@ -296,7 +301,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
       // (or a first visit that arrives as it) can take it.
       let tailnetLogin = null
       if (req.body?.tailnetLogin !== undefined && req.body?.tailnetLogin !== null && req.body?.tailnetLogin !== '') {
-        if (!tailnet)
+        if (!tailnet && !team?.on())
           throw new HttpError(409, 'tailnet_off', 'Tailnet sign-in is off on this server, so an invite cannot be for a tailnet login.')
         tailnetLogin = cleanTailnetLogin(req.body.tailnetLogin)
         if (!tailnetLogin)
@@ -349,7 +354,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
         ...(note ? { note } : {}),
         ...(tailnetLogin ? { tailnet: tailnetLogin } : {}),
       })
-      const url = `${publicOrigin}/invite#${token}`
+      const url = `${team?.on() ? team.origin() : publicOrigin}/invite#${token}`
       let emailed = null
       if (email) {
         const workspace = req.t.get('SELECT name FROM workspaces WHERE workspace_id = :ws')

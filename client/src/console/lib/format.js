@@ -199,6 +199,10 @@ export function describeAudit(entry) {
       return `linked their tailnet login${d.tailnet ? ` ${d.tailnet}` : ''}${d.atSignUp ? ' when signing up' : ''}`
     case 'tailnet_unlinked':
       return `unlinked their tailnet login${d.tailnet ? ` ${d.tailnet}` : ''}`
+    case 'team_mode_on':
+      return `put the board on the tailnet for the people invited${d.origin ? ` (${d.origin})` : ''}`
+    case 'team_mode_off':
+      return 'took the board off the tailnet: only this machine reaches it'
     case 'tailnet_visitor_dismissed':
       return `took ${d.tailnet || 'a tailnet visitor'} off the list of tailnet visitors`
     case 'step_up_changed': {

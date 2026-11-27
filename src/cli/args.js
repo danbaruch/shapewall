@@ -96,7 +96,8 @@ const OPTIONAL_VALUE = new Set(['sitemap', 'compare'])
 // A flag that is a plain switch elsewhere but takes an optional value for
 // one command: "events --follow" keeps printing, "open --follow [AGENT]"
 // opens the board following an agent (alone: any agent).
-const COMMAND_OPTIONAL_VALUE = { open: new Set(['follow']) }
+// "serve --team" turns team mode on, "serve --team off" off.
+const COMMAND_OPTIONAL_VALUE = { open: new Set(['follow']), serve: new Set(['team']) }
 
 // The flags each command reads. Anything else is a typo worth stopping for:
 // "capture --onyl home" would otherwise capture every page.
@@ -159,6 +160,8 @@ export const COMMAND_FLAGS = {
     'approve-on-host',
     'tls-cert',
     'tls-key',
+    'team',
+    'team-port',
   ],
   devices: ['json', 'all'],
   comments: [
