@@ -8,7 +8,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Solo engine (experimental): environments and compare. The engine's boards keep the config's `environments`, the board
-  compares them as a local board does, `shapewall push` from the project folder sends and keeps every environment's
+  compares them as a local board does, `shapewall push` to the engine sends and keeps every environment's
   captures, "Capture now" takes an environment (`env`), and a comment placed on a compare card's side is stored on that
   environment (the `comments.environment` column of migration 24). The token API (`?environment=`) and the hosted MCP
   `list_comments` (`environment`) filter by it, and a vouch for "Send to agent" covers it. Team servers keep one environment

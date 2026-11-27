@@ -57,8 +57,12 @@ async function until(check, label, ms = 30_000) {
 
 // The command line in the project folder (it targets the running engine).
 // Asynchronous: the demo site runs in this process and must keep answering.
-async function cli(args) {
-  const child = spawn(process.execPath, [CLI, ...args], { cwd: projectDir, env: ENV, stdio: ['ignore', 'pipe', 'pipe'] })
+async function cli(args, extraEnv = {}) {
+  const child = spawn(process.execPath, [CLI, ...args], {
+    cwd: projectDir,
+    env: { ...ENV, ...extraEnv },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
   let out = ''
   let err = ''
   child.stdout.on('data', (chunk) => (out += chunk))
@@ -150,7 +154,15 @@ async function settle(target) {
 test('push from the folder keeps both environments; compare shows them, and a comment on Production stays there', async () => {
   await cli(['capture'])
   await cli(['capture', '--env', 'production'])
-  const pushed = await cli(['push'])
+  // As docs/hosted.md: push takes the engine's address in SHAPEWALL_REMOTE, with a project token the owner made.
+  const origin = new URL(boardUrl).origin
+  const [, workspace, project] = /\/w\/([^/]+)\/p\/([^/]+)\//.exec(new URL(boardUrl).pathname)
+  const minted = await page.request.post(`${origin}/api/workspaces/${workspace}/projects/${project}/tokens`, {
+    data: { name: 'push', scopes: ['read', 'push'] },
+    headers: { Origin: origin },
+  })
+  assert.equal(minted.status(), 201, await minted.text())
+  const pushed = await cli(['push'], { SHAPEWALL_REMOTE: origin, SHAPEWALL_TOKEN: (await minted.json()).token })
   assert.match(pushed, /Pushed \d+ files/)
 
   const view = await api('boards/demo')

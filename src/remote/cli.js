@@ -16,6 +16,7 @@ import {
 } from '../feedback.js'
 import { AGENT_STATUSES, boardDir, readManifest, readVariants } from '../store.js'
 import { createRemote, pushDefinition, pushEnvironmentFiles, pushFiles, readCaptureFile, remoteSettings } from './remote.js'
+import { soloHost } from './loopback-pin.js'
 import { safeOut, terminalSafe } from './terminal.js'
 
 export async function push(flags, print) {
@@ -26,8 +27,10 @@ export async function push(flags, print) {
   const remote = createRemote(settings)
   const boards = flags.board ? [getBoard(config, flags.board)] : config.boards
   const project = await remote.project()
-  // The solo engine of this folder keeps a board's environments (compare); a team server keeps one.
-  const environments = settings.source === 'engine'
+  // The solo engine keeps a board's environments (compare); a team server keeps one. The other environments'
+  // addresses go only to an engine on this machine: this folder's, or one named by its own host name
+  // (<label>-<key>.shapewall.localhost, pinned to 127.0.0.1), and the server asks for their files only on solo.
+  const environments = settings.source === 'engine' || soloHost(new URL(settings.origin).hostname)
   if (flags.page !== undefined) {
     if (boards.length !== 1) throw new Error('push --page needs --board ID (this config has more than one board).')
     if (flags['include-checks']) throw new Error('push --page sends captures only; push the whole board for --include-checks.')

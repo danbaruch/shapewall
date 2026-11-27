@@ -783,7 +783,7 @@ shapewall serve --engine hosted --open
   comments), `--no-capture`.
 - **Environments and compare.** The engine's boards keep the `environments` of `shapewall.config.json`, and the board
   compares them as a local board does (Compare in the view menu, `?cmp=<a>_<b>`, the diff masks, "Changed pages only"). A
-  `shapewall push` from the project folder sends every environment's latest captures, and the engine keeps them all (a push
+  `shapewall push` to the engine (`SHAPEWALL_REMOTE` set to its address) sends every environment's latest captures, and the engine keeps them all (a push
   without them, from an older CLI or another `--remote`, keeps the environments the board has and replaces its captures, so
   the other environments' captures go until they are pushed or captured again). A comment placed on one side of a compare
   card is stored on that environment (and a comment made outside compare on the first), only the first environment keeps
