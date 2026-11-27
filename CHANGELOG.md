@@ -60,6 +60,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
   table. Nothing changes on a team server. Stop `shapewall hosted admin` jobs before the first start. Rollback notes are in
   docs/hosted.md, "Migration 24 and rollback".
 
+### Security
+
+- Agents: an ACP agent's file reads (`fs/read_text_file`) no longer reach Shapewall's own store (`.shapewall/`: accounts,
+  sessions, notification settings, tokens), the recorded logins in `.shapewall-auth/` or the config's `auth.storageState`
+  files, through a link either; only writes were refused before. A Claude Code agent also gets `Read` deny rules for those
+  paths in its session settings, since it reads files itself. Comments and captures reach agents through Shapewall's tools as
+  before.
+
 ### Fixed
 
 - Hosted boards: opening Checks no longer gets a 404 for the SEO tab. The board answers with no search previews (they stay on

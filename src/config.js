@@ -143,6 +143,14 @@ export function authFiles(config) {
   return [...out]
 }
 
+// The login states (auth.storageState: cookies) a config names, absolute: no agent reads them.
+export function storageStateFiles(config) {
+  const out = new Set()
+  for (const auth of [config?.auth, ...(config?.boards || []).map((board) => board?.auth)])
+    if (typeof auth?.storageState === 'string' && auth.storageState) out.add(path.resolve(config?.dir || '.', auth.storageState))
+  return [...out]
+}
+
 // The auth a board captures with: its own, else the top-level one.
 export const authFor = (config, board) => board?.auth || config.auth || { storageState: null, loginScript: null }
 

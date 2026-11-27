@@ -24,7 +24,7 @@ import { inside } from '../agent/acp/sandbox.js'
 import { agentSettings } from '../agent/config.js'
 import { agentConfigDir, createInstructionsNote, instructionsLines, instructionsSummary, loadInstructions } from '../agent/instructions.js'
 import { REMOTE_FIX_PREAMBLE, remotePreamble } from '../agent/context.js'
-import { DEFAULT_OUTPUT_DIR, authFiles, findConfigFile, loadConfig } from '../config.js'
+import { DEFAULT_OUTPUT_DIR, authFiles, findConfigFile, loadConfig, storageStateFiles } from '../config.js'
 import { closeSandbox } from '../agent/sandbox-exec.js'
 import { AGENT_SLUG_RE, forgetAgentCredential, pinAgentOwner, readAgentCredential, saveAgentCredential } from './credentials.js'
 import { fixRoot, sweepFixes } from './agent-fix.js'
@@ -536,6 +536,7 @@ export async function agentConnect(
       root: config.dir,
       protect: [config.outputDir],
       sensitivePaths: () => authFiles(config),
+      denyRead: storageStateFiles(config),
       limits: { processesMax: Math.max(concurrency, 2) },
       log: (line) => log(line),
     },
@@ -561,6 +562,7 @@ export async function agentConnect(
           root: config.dir,
           protect: [config.outputDir],
           sensitivePaths: () => authFiles(config),
+          denyRead: storageStateFiles(config),
           limits: { processesMax: Math.max(concurrency, 2) },
           log: (line) => log(line),
         },

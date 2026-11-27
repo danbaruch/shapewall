@@ -182,7 +182,10 @@ When the chat panel drives an agent CLI over ACP:
   the OS sandbox; while one of those (or a dev server) runs in the project, Shapewall's reads there wait. Every process a command
   started is still killed when it ends, those that left its process group included, as far as Shapewall saw them.
   Writes into `.git` and Shapewall's own store (`.shapewall`: comments, chat, captures) are refused, so an agent cannot rewrite the comments
-  it is reading. Writes to files that decide what runs later need a **Write** / **Don't write** card: any dotfile or dot folder
+  it is reading. Reads of the store are refused too (its accounts, sessions, tokens, notification settings and the solo engine's keys
+  live there; comments and captures reach the agent through Shapewall's tools, quoted), and so are reads of the recorded logins
+  (`.shapewall-auth/`) and of the config's `auth.storageState` files. A Claude Code agent reads files itself as well, so its session
+  settings carry `Read` deny rules for the same paths. Writes to files that decide what runs later need a **Write** / **Don't write** card: any dotfile or dot folder
   (`.claude`, `.codex`, `.husky`, `.vscode`, `.envrc`, `.github/workflows`, ...), `package.json`, `shapewall.config.json`, `Makefile`,
   `Dockerfile`, `justfile`.
 - **Diffs on edit cards.** An edit or write card shows the change as a diff Shapewall computes from the file as it is and the new
