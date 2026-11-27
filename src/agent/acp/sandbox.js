@@ -104,6 +104,9 @@ function fdPath(fd, expected, proc = PROC_FD) {
 
 // The real path of `target`, or of its nearest existing parent with the rest
 // appended. Throws for anything that is not an absolute path.
+// The recorded logins folder (local-tools.js AUTH_DIR; not imported, which would make a cycle).
+const AUTH_DIR = '.shapewall-auth'
+
 function realTarget(target) {
   if (typeof target !== 'string' || !target || target.includes('\0')) throw new SandboxError('a file path is required')
   if (!path.isAbsolute(target)) throw new SandboxError('paths must be absolute')
@@ -122,8 +125,14 @@ function realTarget(target) {
   }
 }
 
-// createSandbox({ root, protect }) -> { root, resolve, sensitive, read, write }.
-// `protect` lists folders (inside the root) that may be read but not written.
+// createSandbox({ root, protect }) -> { root, resolve, sensitive, read, write, denyRead }.
+// `protect` lists the Shapewall store folders (inside the root): neither read
+// nor written. They hold accounts, sessions, tokens, notification settings and
+// the solo engine's keys (`.engine`); captures and comments reach an agent
+// through Shapewall's tools, never as files. `.shapewall-auth` in the root (the
+// recorded logins) is never read either, and `denyRead` lists more folders or
+// files no read reaches (the config's auth.storageState). The list in effect
+// is `denyRead` on the result, for the agent's own controls (acp.js).
 // `sensitivePaths` (a list, or a function returning one) names more files
 // that need approval to write: the config's auth.loginScript (capture runs
 // it) and auth.storageState (the login capture uses).
@@ -131,14 +140,24 @@ export function createSandbox({
   root,
   protect = [],
   sensitivePaths = [],
+  denyRead = [],
   // Tests only: false checks files as a system without /proc does.
   procFd = PROC_FD,
 }) {
   const realRoot = realpath(root)
   const realProtected = [path.join(realRoot, '.git'), ...protect.map((dir) => realTarget(path.resolve(dir)))]
+  const realDenied = [
+    ...new Set([
+      ...protect.map((dir) => realTarget(path.resolve(dir))),
+      realTarget(path.join(realRoot, AUTH_DIR)),
+      ...denyRead.filter((item) => typeof item === 'string' && path.isAbsolute(item)).map((item) => realTarget(item)),
+    ]),
+  ]
 
   const check = (target, real, write) => {
     if (!inside(realRoot, real)) throw new SandboxError(`${target} is outside the project; only files under ${realRoot} are allowed`)
+    if (realDenied.some((dir) => inside(dir, real)))
+      throw new SandboxError(`${target} is Shapewall's own data or a recorded login, which agents may not read`)
     if (write && realProtected.some((dir) => inside(dir, real))) {
       throw new SandboxError(`${target} is in a folder agents may not write (.git or the Shapewall store)`)
     }
@@ -227,6 +246,7 @@ export function createSandbox({
 
   return {
     root: realRoot,
+    denyRead: realDenied,
     resolve,
     sensitive,
     // ACP's line is 1-based; limit is a number of lines.
