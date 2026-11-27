@@ -17,11 +17,13 @@ import {
 import { AGENT_STATUSES, boardDir, readManifest, readVariants } from '../store.js'
 import { createRemote, pushDefinition, pushFiles, readCaptureFile, remoteSettings } from './remote.js'
 import { safeOut, terminalSafe } from './terminal.js'
+import { boardHome } from '../cli/board-home.js'
 
 export async function push(flags, print) {
   // Names and URLs here come from the server: cleaned before printing.
   const out = safeOut(print)
-  const config = loadConfig(flags.config)
+  // Once the solo engine holds the project, its board folders hold the captures (src/cli/board-home.js).
+  const { config } = await boardHome(loadConfig(flags.config))
   const remote = createRemote(remoteSettings(flags))
   const boards = flags.board ? [getBoard(config, flags.board)] : config.boards
   const project = await remote.project()
