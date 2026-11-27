@@ -28,6 +28,7 @@ import path from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { agentRunEnv } from '../../agent-run.js'
+import { NO_ENGINE_VAR } from '../../engine-target.js'
 import { Readable, Writable } from 'node:stream'
 import { PROTOCOL_VERSION, RequestError, client, ndJsonStream } from '@agentclientprotocol/sdk'
 import { TERMINAL_ENV_ALLOWED, acpAgentKind, agentEnv, formatCommand, loginHint, terminalEnvRefused } from '../acp/command.js'
@@ -872,6 +873,9 @@ class AcpProcess {
       ...(readOnly || remoteEdit || this.restricted ? connectedEnv(acpAgentKind(argv)) : {}),
       // The agent and every command it runs are an agent's (src/agent-run.js).
       ...agentRunEnv(),
+      // agentEnv drops every SHAPEWALL_* name, so the mark that keeps the solo engine's tokens from a `shapewall`
+      // command the agent runs (engine-target.js, set by agent connect and watch --exec) is put back here (rev57 R57-4).
+      ...(env[NO_ENGINE_VAR] === '1' ? { [NO_ENGINE_VAR]: '1' } : {}),
     }
     this.root = sandbox.root
     this.state = 'starting'

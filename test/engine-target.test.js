@@ -23,6 +23,7 @@ import { createBrowser } from './hosted-helpers.js'
 
 quietSqliteWarning()
 
+const ACP_STUB = new URL('./fixtures/acp-stub.mjs', import.meta.url).pathname
 const ENV = { SHAPEWALL_USER_NAME: 'Robin Tester', PATH: process.env.PATH }
 const noExit = (options) => startHosted({ ...options, exitOnStop: false })
 
@@ -298,6 +299,35 @@ test('R57-4: a shapewall command an agent started (watch --exec without --pass-t
   const flags = { config: config.file }
   await assert.rejects(engineMode('mcp', flags, { env: { [NO_ENGINE_VAR]: '1' } }), /started by an agent/)
   assert.equal(flags.remote, undefined, 'nothing routed')
+  // A connected agent's ACP process (and so every command it runs) keeps the mark, although no other SHAPEWALL_*
+  // name reaches it (agentEnv). The stub answers "env" with the names it was started with.
+  const { createBackend } = await import('../src/agent/backends/index.js')
+  const bin = tempDir('engine-target-agent-bin')
+  const stub = path.join(bin, 'claude-agent-acp')
+  fs.writeFileSync(stub, `#!/bin/sh\nexec "${process.execPath}" "${ACP_STUB}" --ro-modes "$@"\n`, { mode: 0o755 })
+  const backend = createBackend(
+    { configured: true, backend: 'acp', label: 'Claude Code', vision: false, acp: { argv: [stub] }, readOnly: true },
+    {
+      env: { PATH: process.env.PATH, HOME: process.env.HOME, SHAPEWALL_REMOTE: 'http://127.0.0.1:9', [NO_ENGINE_VAR]: '1' },
+      root: config.dir,
+      protect: [config.outputDir],
+      log: () => {},
+    },
+  )
+  let said = ''
+  try {
+    for await (const event of backend.stream({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'env' }] }],
+      signal: new AbortController().signal,
+      thread: 'sample/board',
+    }))
+      if (event.type === 'text') said += event.text
+  } finally {
+    backend.close()
+  }
+  const names = JSON.parse(said)
+  assert.ok(names.includes(NO_ENGINE_VAR), said)
+  assert.ok(!names.includes('SHAPEWALL_REMOTE'), said)
   // watch --exec puts the marker in its command's environment unless --pass-token.
   const source = fs.readFileSync(new URL('../src/remote/remote-watch.js', import.meta.url), 'utf8')
   assert.match(source, /if \(!passToken\) \{[^}]*NO_ENGINE_VAR\] = '1'/s)
