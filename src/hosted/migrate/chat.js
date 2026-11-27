@@ -22,7 +22,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { chatDir, THREAD_RE, CHAT_RE, FILE_RE } from '../agent/threads.js'
+import { chatDir, THREAD_RE, CHAT_RE, FILE_RE } from '../../agent/threads.js'
 
 const VISITOR_PREFIX = 'From a visitor: '
 const TITLE_MAX = 120

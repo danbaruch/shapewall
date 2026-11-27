@@ -6,7 +6,7 @@
 // so captures, versions, variants, environments, diffs, journeys and check
 // reports move as they are: by rename on the same filesystem, by copy then
 // delete across filesystems. Comments and chat become rows
-// (src/migrate/comments.js, chat.js); chat attachments move with the files.
+// (src/hosted/migrate/comments.js, chat.js); chat attachments move with the files.
 // Locks, capture status and the watcher's state are of a process that is no
 // longer running and are not carried.
 //

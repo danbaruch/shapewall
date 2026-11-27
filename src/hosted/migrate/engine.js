@@ -1,5 +1,5 @@
 // The one place `shapewall migrate` writes the engine's database
-// (experimental in 1.5.0). Everything else in src/migrate plans in plain
+// (experimental in 1.5.0). Everything else in src/hosted/migrate plans in plain
 // objects; this module turns a plan into rows, so a change to the engine's
 // schema (migration 24 and later) is a change here only.
 //
@@ -16,10 +16,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { openDatabase, transaction } from '../hosted/db.js'
-import { accounts, tenant } from '../hosted/tenancy.js'
-import { ID_PATTERNS } from '../remote/ids.js'
-import { newId } from '../shared/account-tokens.js'
+import { openDatabase, transaction } from '../db.js'
+import { accounts, tenant } from '../tenancy.js'
+import { ID_PATTERNS } from '../../remote/ids.js'
+import { newId } from '../../shared/account-tokens.js'
 
 // The engine's folder inside the output directory. S5 named it `server`;
 // if migration 24 moves it (a dotted name, so no board id can clash), this
@@ -145,7 +145,7 @@ export function handleFor(name) {
 
 // The owner, workspace and project, made when the database has none.
 // `owner`: { id?, handle, name, account? } where `account` is the local
-// account to carry over (src/migrate/accounts.js readAccounts): its user row
+// account to carry over (src/hosted/migrate/accounts.js readAccounts): its user row
 // keeps its id, and its passkeys, recovery codes and picture come with it.
 function ensureSolo(db, engine, { owner, project, at }) {
   const ids = { ownerId: engine.ownerId, workspaceId: engine.workspaceId, projectId: engine.projectId }
@@ -265,7 +265,7 @@ function writeBoard(t, ids, board, at) {
   )
 }
 
-// A planned comment (src/migrate/comments.js) as a row. The owner's own
+// A planned comment (src/hosted/migrate/comments.js) as a row. The owner's own
 // comments and replies get the owner's account; every other name stays a
 // plain label with no account behind it.
 function writeComment(t, ids, boardId, comment, schema) {
@@ -343,7 +343,7 @@ function writeComment(t, ids, boardId, comment, schema) {
     )
 }
 
-// A planned thread (src/migrate/chat.js). Every migrated thread starts
+// A planned thread (src/hosted/migrate/chat.js). Every migrated thread starts
 // tainted (migration 23): who wrote a local thread's history was never
 // recorded, so it fails closed and its agent gets no extensions there.
 function writeThread(t, ids, boardId, thread) {

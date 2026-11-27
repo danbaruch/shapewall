@@ -13,9 +13,9 @@ import { main } from '../src/cli.js'
 import { openDatabase, quietSqliteWarning } from '../src/hosted/db.js'
 import { rowToComment } from '../src/hosted/comments.js'
 import { processStartTime } from '../src/lock.js'
-import { migrateCommand, MigrateError } from '../src/migrate/index.js'
-import { engineDbFile } from '../src/migrate/engine.js'
-import { MARKER, treeDigest } from '../src/migrate/files.js'
+import { migrateCommand, MigrateError } from '../src/hosted/migrate/index.js'
+import { engineDbFile } from '../src/hosted/migrate/engine.js'
+import { MARKER, treeDigest } from '../src/hosted/migrate/files.js'
 
 quietSqliteWarning()
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrate-fixtures')
@@ -247,7 +247,7 @@ test('the dry run says what migration 24 must add before comments on another env
   const before = treeDigest(p.out)
   const dry = await run(p, { 'dry-run': true })
   // A build that already has migration 24 has nothing to say here.
-  const { engineSchema } = await import('../src/migrate/engine.js')
+  const { engineSchema } = await import('../src/hosted/migrate/engine.js')
   const db = await openDatabase(':memory:')
   const has = engineSchema(db).commentEnvironment
   db.close()

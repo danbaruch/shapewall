@@ -19,11 +19,11 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { boardDir, commentOnOtherEnvironment, commentsFile, VERSION_RE } from '../store.js'
-import { CommentError, STORED_AGENT_STATUSES, cleanFixRef, validateAnchor } from '../comment-fields.js'
-import { validateDrawing } from '../comment-drawing.js'
-import { REACTIONS } from '../reactions.js'
-import { sniffImage } from '../image-sniff.js'
+import { boardDir, commentOnOtherEnvironment, commentsFile, VERSION_RE } from '../../store.js'
+import { CommentError, STORED_AGENT_STATUSES, cleanFixRef, validateAnchor } from '../../comment-fields.js'
+import { validateDrawing } from '../../comment-drawing.js'
+import { REACTIONS } from '../../reactions.js'
+import { sniffImage } from '../../image-sniff.js'
 
 const ENV_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 

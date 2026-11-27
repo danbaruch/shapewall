@@ -14,14 +14,14 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { acquireLock, isLockLive, readLock, releaseLock } from '../lock.js'
-import { boardDir } from '../store.js'
-import { runningBoardUrl } from '../serve-state.js'
-import { localUserName } from '../server/local-user.js'
-import { pushDefinition } from '../remote/remote.js'
-import { cleanDefinition } from '../hosted/push.js'
-import { slugFor } from '../hosted/projects.js'
-import { quietSqliteWarning } from '../hosted/db.js'
+import { acquireLock, isLockLive, readLock, releaseLock } from '../../lock.js'
+import { boardDir } from '../../store.js'
+import { runningBoardUrl } from '../../serve-state.js'
+import { localUserName } from '../../server/local-user.js'
+import { pushDefinition } from '../../remote/remote.js'
+import { cleanDefinition } from '../push.js'
+import { slugFor } from '../projects.js'
+import { quietSqliteWarning } from '../db.js'
 import {
   ENGINE_DIR,
   engineBoardDir,

@@ -13,7 +13,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { DEVICE_MAX_MS, Devices } from '../server/devices.js'
+import { DEVICE_MAX_MS, Devices } from '../../server/devices.js'
 
 export const accountsFile = (outputDir) => path.join(outputDir, '.accounts', 'accounts.sqlite')
 
