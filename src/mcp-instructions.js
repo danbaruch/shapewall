@@ -11,6 +11,8 @@
 //              token without "push"): `shapewall push` from the project
 //   hosted     the hosted /mcp endpoint, which never captures: run
 //              `shapewall mcp --remote` where the code is
+//   engine     the solo engine's /mcp endpoint (serve --engine hosted):
+//              recapture_pages captures on this machine, into the board
 
 const HAND_IN = {
   local:
@@ -22,6 +24,9 @@ const HAND_IN = {
   push:
     'When a comment is done, push new captures of the pages you changed with "shapewall push" from the project if you can: ' +
     'that is your hand-in (this server has no recapture_pages).',
+  engine:
+    'When a comment is done, call recapture_pages once for the pages you changed: the engine captures them on this machine ' +
+    'from the dev server and the board shows them, your hand-in.',
   hosted:
     'When a comment is done, the hand-in is a recapture of the pages you changed. This hosted endpoint cannot capture: ' +
     'run "shapewall mcp --remote" on the machine with the code and call recapture_pages there, or "shapewall push" from the project.',
