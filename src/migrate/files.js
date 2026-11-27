@@ -112,22 +112,35 @@ export function linksIn(root) {
   return out
 }
 
+// A file or folder's identity: its device and inode, as one key.
+const inodeOf = (stat) => `${stat.dev}:${stat.ino}`
+const inodeAt = (file) => inodeOf(fs.lstatSync(file, { bigint: true }))
+
 // Before a backup is read for a restore: no entry anywhere in it may be a
 // link, and every entry's real path must be inside the real path of the
 // output directory. A backup folder someone planted can then only hold
-// files that were already inside the project.
+// files that were already inside the project. Returns the (dev, ino) of
+// every entry it checked: the restore reads only those (linkTree `known`),
+// so a folder swapped in after this walk (a link in a path, R2-1) is refused.
 export function assertBackupContained(outputDir, dir) {
   const root = fs.realpathSync(outputDir)
   const links = linksIn(dir)
   if (links.length) throw new Error(`${path.basename(dir)} holds a symbolic link (${links[0]}); it is not used`)
+  const known = new Set()
   const walk = (full) => {
     const real = fs.realpathSync(full)
     if (real !== root && !real.startsWith(root + path.sep))
       throw new Error(`${path.basename(dir)} reaches outside ${outputDir}; it is not used`)
-    if (fs.lstatSync(full).isDirectory()) for (const name of fs.readdirSync(full)) walk(path.join(full, name))
+    const stat = fs.lstatSync(full, { bigint: true })
+    known.add(inodeOf(stat))
+    if (stat.isDirectory()) for (const name of fs.readdirSync(full)) walk(path.join(full, name))
   }
   walk(dir)
+  return known
 }
+
+const notTheBackup = (file) =>
+  new Error(`${file} is not one of the backup's own files (it changed after the rollback checked it); the rollback stops`)
 
 export function treeBytes(file) {
   const stat = fs.lstatSync(file)
@@ -161,29 +174,50 @@ export function treeDigest(root, { skip = [] } = {}) {
 // never copies, links or follows one (the planner refuses a board that has
 // any, so none reach here).
 // `mode`: { dir, file } to set on every copy instead of the source's.
-export function linkTree(from, to, { copy = false, mode = null } = {}) {
+// `known` (a restore): the (dev, ino) set assertBackupContained returned.
+// Every entry read must be in it, checked on what is actually linked or
+// read (the new link's inode, or the open file), so a path that leads
+// somewhere else since the check is refused, not followed. `made` collects
+// the (dev, ino) of each folder and copy written, for the check after.
+export function linkTree(from, to, { copy = false, mode = null, known = null, made = null } = {}) {
   const stat = fs.lstatSync(from)
   if (stat.isSymbolicLink()) throw new Error(`${from} is a symbolic link; the migration never follows one`)
   if (!stat.isDirectory() && !stat.isFile()) throw new Error(`${from} is not a file or a folder`)
+  if (known && !known.has(inodeAt(from))) throw notTheBackup(from)
   if (stat.isDirectory()) {
     fs.mkdirSync(to, { recursive: true, mode: mode?.dir ?? stat.mode & 0o777 })
     if (mode) fs.chmodSync(to, mode.dir)
+    made?.add(inodeAt(to))
     for (const name of fs.readdirSync(from)) {
       if (ownLock(path.join(from, name))) continue
-      linkTree(path.join(from, name), path.join(to, name), { copy, mode })
+      linkTree(path.join(from, name), path.join(to, name), { copy, mode, known, made })
     }
     return
   }
   if (!copy) {
     try {
       fs.linkSync(from, to)
+      if (known && !known.has(inodeAt(to))) {
+        fs.rmSync(to, { force: true })
+        throw notTheBackup(from)
+      }
       return
     } catch (error) {
       if (!['EXDEV', 'EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EMLINK', 'ENOSYS'].includes(error.code)) throw error
     }
   }
-  fs.copyFileSync(from, to, fs.constants.COPYFILE_EXCL)
+  if (known) {
+    // Copied from the file as opened, never through a link, once it is known to be the backup's.
+    const fd = fs.openSync(from, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0))
+    try {
+      if (!known.has(inodeOf(fs.fstatSync(fd, { bigint: true })))) throw notTheBackup(from)
+      fs.writeFileSync(to, fs.readFileSync(fd), { flag: 'wx', mode: mode?.file ?? stat.mode & 0o777 })
+    } finally {
+      fs.closeSync(fd)
+    }
+  } else fs.copyFileSync(from, to, fs.constants.COPYFILE_EXCL)
   fs.chmodSync(to, mode?.file ?? stat.mode & 0o777)
+  made?.add(inodeAt(to))
 }
 
 // Moves `from` to `to`: a rename, or a copy and delete across filesystems.
@@ -276,11 +310,25 @@ export function restoreBackup(outputDir, dir, { engineDir, marker }) {
   if (!record) throw new Error(`${path.basename(dir)} is not a finished migration backup`)
   inside(outputDir, dir)
   inside(outputDir, engineDir)
-  assertBackupContained(outputDir, dir)
+  const known = assertBackupContained(outputDir, dir)
+  const realDir = fs.realpathSync(dir)
   // Each path is checked with lstat right before it is renamed or replaced:
   // a link that appeared since is refused, never followed.
   const plain = (file, what) => {
     if (isLink(file)) throw new Error(`${what} is a symbolic link; the rollback stops and leaves it as it is`)
+  }
+  // The source still resolves where it did (no folder on its path was swapped).
+  const sameReal = (file, real) => {
+    if (fs.realpathSync(file) !== real) throw notTheBackup(file)
+  }
+  // Every entry of a fresh copy (`top`) is one linkTree wrote or linked from the backup.
+  const onlyOurs = (top, made) => {
+    const walk = (full) => {
+      const stat = fs.lstatSync(full, { bigint: true })
+      if (stat.isSymbolicLink() || (!known.has(inodeOf(stat)) && !made.has(inodeOf(stat)))) throw notTheBackup(full)
+      if (stat.isDirectory()) for (const name of fs.readdirSync(full)) walk(path.join(full, name))
+    }
+    walk(top)
   }
   const aside = path.join(dir, `replaced-${stampOf()}-${process.pid}`)
   const setAside = (from, name) => {
@@ -295,10 +343,21 @@ export function restoreBackup(outputDir, dir, { engineDir, marker }) {
     plain(path.join(dir, 'boards'), `${path.basename(dir)}/boards`)
     plain(source, `${path.basename(dir)}/boards/${board}`)
     if (!fs.lstatSync(source).isDirectory()) throw new Error(`${path.basename(dir)}/boards/${board} is not a folder`)
+    const real = path.join(realDir, 'boards', board)
+    sameReal(source, real)
     const staged = `${target}.restoring`
     plain(staged, staged)
     fs.rmSync(staged, { recursive: true, force: true })
-    linkTree(source, staged)
+    const made = new Set()
+    try {
+      linkTree(source, staged, { known, made })
+      // Again before anything is set aside: the copy is the backup's, from where it was checked.
+      sameReal(source, real)
+      onlyOurs(staged, made)
+    } catch (error) {
+      if (!isLink(staged)) fs.rmSync(staged, { recursive: true, force: true })
+      throw error
+    }
     setAside(target, `boards/${board}`)
     plain(staged, staged)
     plain(target, target)
@@ -306,9 +365,21 @@ export function restoreBackup(outputDir, dir, { engineDir, marker }) {
   }
   setAside(engineDir, 'engine')
   if (record.engine) {
-    plain(path.join(dir, 'engine'), `${path.basename(dir)}/engine`)
+    const source = path.join(dir, 'engine')
+    plain(source, `${path.basename(dir)}/engine`)
+    const real = path.join(realDir, 'engine')
+    sameReal(source, real)
     plain(engineDir, engineDir)
-    linkTree(path.join(dir, 'engine'), engineDir, { copy: true, mode: PRIVATE })
+    const made = new Set()
+    try {
+      linkTree(source, engineDir, { copy: true, mode: PRIVATE, known, made })
+      sameReal(source, real)
+      onlyOurs(engineDir, made)
+    } catch (error) {
+      // Only this copy is there (what was there before is set aside above).
+      if (!isLink(engineDir)) fs.rmSync(engineDir, { recursive: true, force: true })
+      throw error
+    }
   }
   const markerFile = path.join(outputDir, marker)
   plain(markerFile, markerFile)

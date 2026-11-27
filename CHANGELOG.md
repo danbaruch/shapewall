@@ -21,9 +21,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
   and replies), chat threads and the local `serve --accounts` owner with their passkeys and recovery codes become engine rows.
   `--dry-run` lists the counts and every item that would not come along, with the reason. A hard-link backup goes to
   `.shapewall/backup-1x-<time>/` first, a failed run puts the folder back, a second run does nothing (`MIGRATED-TO-2`), and
-  `--rollback` restores every board checked byte for byte, from the backups a run recorded only. It refuses while serve,
-  capture, watch or an agent runs, holds the boards' comment and chat locks for the whole run, and after a run that was
-  stopped midway points at `--rollback`. Only comments the board stamped as the owner's become the owner's; others signed
+  `--rollback` restores every board checked byte for byte, from the backups a run recorded only, linking or copying only
+  the backup's own files (each checked by device and inode as it is read). A run that finished but was stopped before it
+  removed `MIGRATING-TO-2` counts as finished. It refuses while serve, capture, watch or an agent runs, holds the boards'
+  comment and chat locks for the whole run, and after a run that was stopped midway points at `--rollback`. Only comments the board stamped as the owner's become the owner's; others signed
   with the owner's name come in as imported text. Agent settings and keys stay on the machine; sign-in sessions and paired
   devices do not move (sign in and pair again). The planner, backup and rollback are part of the Apache-licensed core; only
   the engine database writer is under the server's license.

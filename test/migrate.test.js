@@ -813,3 +813,167 @@ test('N3: a chat thread written while the files move stops the run, and is kept'
   assert.equal(kept.length, 1, 'the new thread is kept in the backup')
   assert.match(kept[0], /replaced-/)
 })
+
+// The regular files under `root` (never through a link) that are hard links to `file`.
+function linksTo(root, file) {
+  const want = fs.statSync(file)
+  const found = []
+  const walk = (dir) => {
+    for (const name of fs.readdirSync(dir)) {
+      const full = path.join(dir, name)
+      const stat = fs.lstatSync(full)
+      if (stat.isDirectory()) walk(full)
+      else if (stat.isFile() && stat.ino === want.ino && stat.dev === want.dev) found.push(full)
+    }
+  }
+  walk(root)
+  return found
+}
+
+test('R2-1: boards/ swapped for a link after the checks is refused; no outside file is linked in', async () => {
+  const p = project('v1.2.0')
+  const outside = tempDir('migrate-r21-outside')
+  made.push(outside)
+  fs.mkdirSync(path.join(outside, 'brain'))
+  fs.writeFileSync(path.join(outside, 'brain', 'secret.md'), 'SECRET\n')
+  const backup = plantBackup(p, { boards: ['brain'], digest: { brain: treeDigest(path.join(outside, 'brain')) } })
+  fs.mkdirSync(path.join(backup, 'boards', 'brain'), { recursive: true })
+  fs.writeFileSync(path.join(backup, 'boards', 'brain', 'secret.md'), 'SECRET\n') // same bytes: the digest matches
+  // The racing process, made deterministic: the swap happens inside the restore's own rmSync of the staged folder.
+  const rmSync = fs.rmSync
+  let swapped = false
+  fs.rmSync = function (target, ...rest) {
+    if (!swapped && String(target).endsWith('brain.restoring')) {
+      swapped = true
+      fs.renameSync(path.join(backup, 'boards'), path.join(backup, 'boards-real'))
+      fs.symlinkSync(outside, path.join(backup, 'boards'))
+    }
+    return rmSync.call(this, target, ...rest)
+  }
+  try {
+    await assert.rejects(run(p, { rollback: true }), /not one of the backup's own files/)
+  } finally {
+    fs.rmSync = rmSync
+  }
+  assert.ok(swapped)
+  assert.equal(fs.existsSync(path.join(p.out, 'brain')), false, 'nothing restored')
+  assert.equal(fs.existsSync(path.join(p.out, 'brain.restoring')), false, 'the staged copy is removed')
+  assert.deepEqual(linksTo(p.dir, path.join(outside, 'brain', 'secret.md')), [], 'no hard link to the outside file')
+  assert.equal(fs.existsSync(path.join(p.out, JOURNAL)), true, 'the journal stays')
+})
+
+test('R2-1: the engine folder swapped for a link while it is copied is refused; no outside file is copied in', async () => {
+  const p = project('v1.2.0')
+  const outside = tempDir('migrate-r21-engine')
+  made.push(outside)
+  fs.writeFileSync(path.join(outside, 'secret.md'), 'SECRET\n')
+  const backup = plantBackup(p, { engine: true })
+  fs.mkdirSync(path.join(backup, 'engine'))
+  fs.writeFileSync(path.join(backup, 'engine', 'secret.md'), 'ENGINE\n')
+  const engine = path.join(p.out, ENGINE_DIR)
+  // The swap lands after linkTree checked the engine folder, when it makes the copy's folder.
+  const mkdirSync = fs.mkdirSync
+  let swapped = false
+  fs.mkdirSync = function (target, ...rest) {
+    if (!swapped && path.resolve(String(target)) === engine) {
+      swapped = true
+      fs.renameSync(path.join(backup, 'engine'), path.join(backup, 'engine-real'))
+      fs.symlinkSync(outside, path.join(backup, 'engine'))
+    }
+    return mkdirSync.call(this, target, ...rest)
+  }
+  try {
+    await assert.rejects(run(p, { rollback: true }), /not one of the backup's own files/)
+  } finally {
+    fs.mkdirSync = mkdirSync
+  }
+  assert.ok(swapped)
+  assert.equal(fs.existsSync(engine), false, 'the partial engine copy is removed')
+  const copied = fs
+    .readdirSync(p.out, { recursive: true })
+    .map((name) => path.join(p.out, String(name)))
+    .filter((full) => !full.startsWith(backup) && fs.lstatSync(full).isFile() && fs.readFileSync(full, 'utf8') === 'SECRET\n')
+  assert.deepEqual(copied, [], 'the outside file is not copied in')
+})
+
+test('R2-2: a journal whose backup was deleted after the run changed the engine is not cleared as unchanged', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  const done = await run(p, { json: true })
+  assert.equal(done.code, 0)
+  // As if killed after the rows and moves, before the marker; then the person deleted the backup folder.
+  fs.writeFileSync(path.join(p.out, JOURNAL), JSON.stringify({ version: 1, backup: done.json.backup, pid: 1, boards: ['site'] }))
+  fs.rmSync(path.join(p.out, MARKER))
+  fs.rmSync(path.join(p.out, done.json.backup), { recursive: true, force: true })
+  const back = await run(p, { rollback: true })
+  assert.equal(back.code, 1, back.text)
+  assert.doesNotMatch(back.text, /before it changed anything/)
+  assert.match(back.text, /cannot be put back: its backup is gone, and the engine already has comments, chat or files of site/)
+  assert.equal(fs.existsSync(path.join(p.out, JOURNAL)), true, 'the journal stays')
+  const json = await run(p, { rollback: true, json: true })
+  assert.equal(json.json.ok, false)
+  assert.equal(json.json.problems.length, 1)
+  // A journal without its board list (an older run) checks every board of the config.
+  fs.writeFileSync(path.join(p.out, JOURNAL), JSON.stringify({ version: 1, backup: done.json.backup, pid: 1 }))
+  assert.equal((await run(p, { rollback: true })).code, 1)
+  // The run really stopped while writing its backup (the engine has nothing of it): cleared, as before.
+  const q = project('v1.2.0')
+  await withEnvironmentColumn(q.out)
+  fs.writeFileSync(
+    path.join(q.out, JOURNAL),
+    JSON.stringify({ version: 1, backup: 'backup-1x-20000101T000000Z', pid: 1, boards: ['site'] }),
+  )
+  const cleared = await run(q, { rollback: true })
+  assert.equal(cleared.code, 0, cleared.text)
+  assert.match(cleared.text, /before it changed anything/)
+  assert.equal(fs.existsSync(path.join(q.out, JOURNAL)), false)
+})
+
+test('R2-3: a journal left by a run that finished is removed, not reported as a run stopped midway', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  const before = digest(p.out)
+  const done = await run(p, { json: true })
+  assert.equal(done.code, 0)
+  // As if killed after the marker was written, before the journal went.
+  const leftover = () =>
+    fs.writeFileSync(path.join(p.out, JOURNAL), JSON.stringify({ version: 1, backup: done.json.backup, pid: 1, boards: ['site'] }))
+  leftover()
+  const dry = await run(p, { 'dry-run': true, json: true })
+  assert.doesNotMatch(JSON.stringify(dry.json), /stopped midway/)
+  assert.equal(fs.existsSync(path.join(p.out, JOURNAL)), true, 'a dry run writes nothing')
+  const again = await run(p)
+  assert.equal(again.code, 0, again.text)
+  assert.match(again.text, /had finished \(MIGRATED-TO-2 lists it\).*MIGRATING-TO-2 was removed/)
+  assert.match(again.text, /Already migrated/)
+  assert.equal(fs.existsSync(path.join(p.out, JOURNAL)), false)
+  // --rollback says the same, then undoes the finished run as asked.
+  leftover()
+  const back = await run(p, { rollback: true })
+  assert.equal(back.code, 0, back.text)
+  assert.match(back.text, /had finished/)
+  assert.match(back.text, /Put back site/)
+  assert.equal(fs.existsSync(path.join(p.out, JOURNAL)), false)
+  assert.deepEqual(digest(p.out), before)
+})
+
+test('R2-4: a board folder swapped for a link during the run is refused before any move; the outside folder is untouched', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  const outside = path.join(tempDir('migrate-r24-outside'), 'site')
+  made.push(path.dirname(outside))
+  const board = path.join(p.out, 'site')
+  let outsideBefore = null
+  // After the rows, before the files move: the board folder becomes a link to a copy of itself
+  // outside the project (so the change digest still matches).
+  const fault = (step) => {
+    if (step !== 'rows') return
+    fs.cpSync(board, outside, { recursive: true })
+    outsideBefore = treeDigest(outside)
+    fs.renameSync(board, `${board}-real`)
+    fs.symlinkSync(outside, board)
+  }
+  await assert.rejects(run(p, {}, { fault }), /became a symbolic link during the migration/)
+  assert.ok(outsideBefore)
+  assert.deepEqual(treeDigest(outside), outsideBefore, 'nothing moved out of or deleted in the outside folder')
+})
