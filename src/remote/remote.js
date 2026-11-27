@@ -36,7 +36,9 @@ export function remoteOrigin(flags = {}, env = process.env) {
   } catch {
     throw new Error(`--remote: not a URL (${raw})`)
   }
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopback(url.hostname))) {
+  // A *.localhost name is this machine too (RFC 6761): the solo engine's origin, http://<project>.shapewall.localhost:<port>.
+  const local = isLoopback(url.hostname) || /^[a-z0-9.-]+\.localhost$/i.test(url.hostname)
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
     throw new Error('--remote must be https (plain http only to this machine), so the token is never sent in the clear')
   }
   return url.origin

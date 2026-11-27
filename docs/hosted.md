@@ -660,6 +660,49 @@ The rules of those commands:
 - **The admin commands** are these and no more: `admin projects list|create NAME`, `admin invites create --login LOGIN | --link
 [--role ROLE] [--days N]`, `admin members list`, `admin agents list` (`--json` for scripts).
 
+## The solo engine (experimental)
+
+**Experimental.** Outside the [stability promise](stability.md): it can change, or go, in a minor release.
+
+`shapewall serve --engine hosted` runs this server for one project, on your own machine, for you alone. Run it in the project
+folder:
+
+```sh
+shapewall serve --engine hosted --open
+```
+
+- **Where it listens.** On 127.0.0.1 only, at `http://<project>.shapewall.localhost:<port>` (the project's title in lowercase,
+  for example `http://lumen-notes.shapewall.localhost:4600`). Browsers send every `*.localhost` name to this machine. The board
+  answers sign-ins on that name only: a cookie it sets there is not sent to `127.0.0.1` or `localhost`, on any port (cookies are
+  kept per name, not per port, so a server on another port of the same name would get it). Live HTML is served from a separate name, `uc.<project>.shapewall.localhost`.
+- **Signing in.** There is one account, the owner, made on the first start with your name (`SHAPEWALL_USER_NAME`, else
+  `git config user.name`). There is no passkey and no sign-up. `--open` opens the board with a one-time link: it works once,
+  within 60 seconds (5 minutes when no browser could be opened and the link is printed instead), from this machine, and only on
+  the project's own name; a request with a proxy header (`X-Forwarded-For`, `Forwarded`, ...) is refused. A plain
+  `http://127.0.0.1:<port>` request never gets a cookie. In a terminal, the start prints such a link; `--print-owner-link`
+  prints one anywhere. While the engine runs, `shapewall serve --engine hosted --open` (or `--print-owner-link`) in the same
+  folder asks the running engine for a fresh link. A sign-in lasts 24 hours from the last use and 7 days at most; the
+  account's Sessions list shows it as "Signed in from the terminal". With no passkeys, the console asks you to type the name of
+  what you remove or delete.
+- **The boards** are the ones `shapewall.config.json` declares; the engine reads it again when it changes. `shapewall push`,
+  `shapewall comments --remote`, `shapewall login --remote` and `shapewall agent connect --remote` take the engine's address,
+  as with a team server (approve them on `/device` in the signed-in browser).
+- **Data** lives in `.shapewall/.engine/` (a name no board id can take): the database, the captures, the one-time link key.
+  The folder is made private (0700) with a `.gitignore` of `*`. The engine refuses to start if git tracks anything in it.
+- **What it refuses.** Anything that reaches beyond this machine: `--host`, `--lan`, `--tailscale`, `--tls-cert`, `--tls-key`,
+  `--allowed-host`, `--no-identity`, `--trust-proxy`, `--accounts`, `--accounts-origin`, `--buzz-bridge`, `--agent-acp`,
+  `--allow-remote-agent`, `--no-remote-chat`, `--approve-on-host`. Connect agents with `shapewall agent connect --remote`
+  instead of `--agent-acp`. A data folder that holds a team server's accounts is refused, and a solo data folder is refused
+  as a team server's.
+- **Flags it takes.** `--port`, `--open`, `--print-owner-link`, `--read-only` (the board in the browser makes no changes; the
+  command line still pushes and replies, as on a local board), `--no-chat` (the board chat is off; connected agents still take
+  comments), `--no-capture`.
+- **A migration.** While `shapewall migrate` runs, or after one stopped midway, the engine, `shapewall serve` and
+  `shapewall watch` do not start. After a migration, the local `serve` and `watch` refuse the boards that moved to the engine.
+- **Updates.** With `SHAPEWALL_UPDATE_RESTART=1` (set by a managed install), a finished update stops the engine with exit code
+  75 so the service manager starts the new version. Stopping it (Ctrl+C) while an update is being applied waits for the update
+  to finish first.
+
 ## Accounts
 
 - **Passkeys only.** No email, no passwords. Sign-up and sign-in use discoverable credentials with user verification required, so

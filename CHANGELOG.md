@@ -27,9 +27,20 @@ and the project uses [Semantic Versioning](https://semver.org/).
   with the owner's name come in as imported text. Agent settings and keys stay on the machine; sign-in sessions and paired
   devices do not move (sign in and pair again). The planner, backup and rollback are part of the Apache-licensed core; only
   the engine database writer is under the server's license.
+- Solo engine (experimental): `shapewall serve --engine hosted` runs the hosted engine for one project on this machine, at
+  `http://<project>.shapewall.localhost:<port>`, with its data in `.shapewall/.engine/` (refused when git tracks it). One owner,
+  no passkey: `--open` or `--print-owner-link` gives a one-time link that works once, within 60 seconds (5 minutes when printed),
+  from this machine and on the project's own name only; the sign-in lasts 24 hours from the last use, 7 days at most. Its boards
+  follow `shapewall.config.json`. Flags that reach beyond this machine are refused; `--read-only` and `--no-chat` apply to the
+  board. See docs/hosted.md, "The solo engine (experimental)".
 
 ### Changed
 
+- `shapewall serve` and `shapewall watch` do not start while `shapewall migrate` runs or after one stopped midway, and refuse
+  the boards a migration moved to the solo engine.
+- `--remote` accepts plain `http` to a `*.localhost` name (this machine), as it does to `localhost` and `127.0.0.1`.
+- Hosted servers: stopping one while an update is being applied waits for the update to finish (it no longer gives up after
+  8 seconds), and exits with the code the update asked for.
 - Hosted servers: migration 24 prepares the database for the solo engine. It adds `comments.environment` (every existing comment
   is on `default`), lets `sessions.via` be `local` (a rebuild of `sessions`, like migration 18) and adds the `solo_binding`
   table. Nothing changes on a team server. Stop `shapewall hosted admin` jobs before the first start. Rollback notes are in

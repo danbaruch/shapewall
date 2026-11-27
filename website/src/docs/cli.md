@@ -191,6 +191,22 @@ experimental `--buzz-bridge` in [the Buzz bridge](/docs/buzz). `shapewall serve 
 host-only agent settings on this computer ([local accounts](/docs/local-accounts#tailscale-account-origin)). That command,
 `shapewall settings`, still works but is no longer listed in the help.
 
+### shapewall serve --engine hosted
+
+**Experimental.** Outside the [stability promise](/docs/stability): it can change, or go, in a minor release.
+
+```sh
+shapewall serve --engine hosted [--port 4600] [--open] [--print-owner-link] [--read-only] [--no-chat] [--no-capture]
+```
+
+Runs the hosted engine for this project, on this machine only, at `http://<project>.shapewall.localhost:<port>`, with its data in
+`.shapewall/.engine/` (never commit it: the engine refuses to start if git tracks it). There is one account, yours, with no
+passkey: `--open` signs the browser in with a one-time link that works once, from this machine, on that address only.
+`--print-owner-link` prints such a link instead; run either again while the engine runs to get a fresh one. `shapewall push`,
+`comments --remote`, `login --remote` and `agent connect --remote` take the engine's address as they take a team server's. The
+flags that reach beyond this machine (`--host`, `--lan`, `--tailscale`, `--tls-cert`, `--accounts`, `--agent-acp`, ...) are
+refused. Details: [the solo engine](/docs/hosted#the-solo-engine-experimental).
+
 ## shapewall buzz-bridge
 
 **Experimental.** Outside the [stability promise](/docs/stability): it can change, or go, in a minor release.
@@ -711,6 +727,9 @@ Commands
       --agent-acp "CMD"     chat with an agent CLI over ACP, e.g. "claude-agent-acp" (installed globally)
                             (also $SHAPEWALL_AGENT_ACP; never read from the config; https://shapewall.com/docs/chat)
       --allow-remote-agent  with --chat on a shared board, let an ACP agent run anyway (anyone reaching it acts as you)
+      --engine hosted       run the hosted engine for this project, on this machine only: one owner, signed in by a
+                            one-time link (--open), data in .shapewall/.engine/; takes --port, --open,
+                            --print-owner-link, --read-only, --no-chat, --no-capture (experimental)
   devices list              paired devices and pending requests for this project [--json]
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request
