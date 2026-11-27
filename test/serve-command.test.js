@@ -116,10 +116,6 @@ test('autoMigrate for real: a 1.x project moves once, with a backup; capture the
   assert.ok(home.config.outputDir.startsWith(path.join(engineDir(config.outputDir), 'files') + path.sep))
   assert.match(path.relative(engineDir(config.outputDir), home.config.outputDir), /^files[/\\]ws_[a-f0-9]{24}[/\\]pr_[a-f0-9]{24}$/)
   assert.equal((await boardHome(config, { env: { ...ENV, [ENGINE_VAR]: 'legacy' } })).engine, false)
-  await assert.rejects(
-    boardHome(config, { env: ENV, envId: 'staging-not-here', boardId: config.boards[0].id }),
-    /default environment .* only for now/,
-  )
 })
 
 test('serveCommand: starts the engine on a new project, refuses on a migration stopped midway', async () => {

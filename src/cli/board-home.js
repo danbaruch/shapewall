@@ -13,8 +13,8 @@
 // and with SHAPEWALL_ENGINE=legacy, the 1.x folders as before; the first
 // `serve` moves them in.
 //
-// The engine captures the default environment only for now, so a capture of
-// another environment is refused there.
+// Every environment goes there, in the same layout the engine's own capture
+// (src/hosted/solo/capture.js) uses.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -26,7 +26,7 @@ export class BoardHomeError extends Error {}
 
 // -> { config, engine: true | false }: `config` with outputDir set to the
 // engine's project folder when the engine holds the project.
-export async function boardHome(config, { env = process.env, envId = null, boardId = null } = {}) {
+export async function boardHome(config, { env = process.env } = {}) {
   const legacy =
     String(env[ENGINE_VAR] || '')
       .trim()
@@ -40,13 +40,5 @@ export async function boardHome(config, { env = process.env, envId = null, board
   if (!ids?.workspaceId || !ids.projectId) return { config, engine: false }
   if (!ID_PATTERNS.workspace.test(ids.workspaceId) || !ID_PATTERNS.project.test(ids.projectId))
     throw new BoardHomeError("The solo engine's database names a project this build cannot read.")
-  if (envId) {
-    const { getBoard } = await import('../config.js')
-    const board = getBoard(config, boardId)
-    if (envId !== board.environments[0].id)
-      throw new BoardHomeError(
-        `The solo engine keeps the default environment (${board.environments[0].id}) only for now, so --env ${envId} has nowhere to go. Run it with SHAPEWALL_ENGINE=legacy for the 1.x board folders (deprecated).`,
-      )
-  }
   return { config: { ...config, outputDir: path.join(engineDir(config.outputDir), 'files', ids.workspaceId, ids.projectId) }, engine: true }
 }

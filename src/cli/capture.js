@@ -25,7 +25,7 @@ export async function capture(flags, out, err) {
   // Not while `shapewall migrate` runs for the project, or after one stopped midway.
   assertMigrationAllows(config)
   // Into the solo engine's board folder once the engine holds the project (src/cli/board-home.js).
-  const home = await boardHome(config, { envId: flags.env || null, boardId: flags.board })
+  const home = await boardHome(config)
   const result = await runCapture({
     config: home.config,
     boardId: flags.board,
@@ -65,7 +65,7 @@ export async function capture(flags, out, err) {
 // `links`: page-to-page links from the last capture, or (--broken) the links
 // that led to an error.
 export async function links(flags, out) {
-  const config = (await boardHome(loadConfig(flags.config), { envId: flags.env || null, boardId: flags.board })).config
+  const config = (await boardHome(loadConfig(flags.config))).config
   const board = getBoard(config, flags.board)
   const env = getEnvironment(board, flags.env || null)
   const manifest = readManifest(config, board.id, env.id)

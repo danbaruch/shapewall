@@ -8,8 +8,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ### Added
 
 - `shapewall capture` and `links` write and read the solo engine's board folders (`.shapewall/.engine/files/`) once the
-  engine holds the project, so a capture from the terminal shows on the engine's board, with or without the engine running.
-  The engine captures the default environment only for now, so `capture --env` of another one is refused there.
+  engine holds the project, so a capture from the terminal (every environment) shows on the engine's board, with or without
+  the engine running. `push` sends from there too.
 - On the solo engine, the `author` of the MCP tools `reply_to_comment` and `add_comment`, and `comments reply --author` and
   `comments add --author`, label the agent's text as they do on a 1.x board (it stays marked as an agent's). The engine's
   comment JSON says `byOwner` for comments its owner wrote, as a 1.x board does.
