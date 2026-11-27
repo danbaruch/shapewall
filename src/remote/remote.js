@@ -192,12 +192,14 @@ export function createRemote({
     // Acting on one comment: a share link guest's needs `guests: true` too
     // (the server refuses it otherwise), the same opt-in as listing them.
     comment: (boardId, id, { guests = false, signal } = {}) => call('GET', one(boardId, id, '', guests), { signal }),
-    // Replies are signed with the token's name on the server (no author here).
-    reply: (boardId, id, { body, guests = false, signal }) =>
-      call('POST', one(boardId, id, '/replies', guests), { json: { body }, signal }),
-    // A new comment ({ page, body, viewport?, x?, y?, anchor? }), signed with the token's name on the server.
-    addComment: (boardId, { page, body, viewport, x, y, anchor }) =>
-      call('POST', `${board(boardId)}/comments`, { json: { page, body, viewport, x, y, anchor } }),
+    // Replies are signed with the token's name on the server. `author`: the label of an agent's reply on the solo
+    // engine (the 1.x MCP and CLI `author`, still marked as an agent there); a team server ignores it.
+    reply: (boardId, id, { body, author, guests = false, signal }) =>
+      call('POST', one(boardId, id, '/replies', guests), { json: { body, ...(author ? { author } : {}) }, signal }),
+    // A new comment ({ page, body, viewport?, x?, y?, anchor?, author? }), signed with the token's name on the server
+    // (`author` as for reply: the solo engine only).
+    addComment: (boardId, { page, body, viewport, x, y, anchor, author }) =>
+      call('POST', `${board(boardId)}/comments`, { json: { page, body, viewport, x, y, anchor, ...(author ? { author } : {}) } }),
     setAgentStatus: (boardId, id, agentStatus, { onlyFrom = null, guests = false, signal } = {}) =>
       call('POST', one(boardId, id, '/agent-status', guests), { json: { agentStatus, onlyFrom }, signal }),
     resolve: (boardId, id, { note, fixRef, agentStatus, guests = false } = {}) =>

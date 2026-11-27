@@ -27,7 +27,7 @@ project folder:
 npx shapewall doctor --install-browser                # downloads Chromium, checks that it starts
 npx shapewall init --base-url http://localhost:3000   # finds your screens, writes shapewall.config.json
 npx shapewall capture                                 # every screen, desktop and phone
-npx shapewall serve --open                            # the wall, on http://127.0.0.1:4600/
+npx shapewall serve --open                            # the wall, on this machine (port 4600)
 ```
 
 Answer `y` when npx asks to download the package, and use your app's address instead of `http://localhost:3000`. `init` reads

@@ -47,9 +47,9 @@ test('the data folder is .shapewall/.engine: a name no board id can have', () =>
 })
 
 test('exposure flags and local-only flags are refused with a reason (G12, G20)', () => {
-  assert.match(engineFlagProblem({ engine: 'local' }), /"hosted" \(experimental\) is the only engine/)
+  assert.match(engineFlagProblem({ engine: 'local' }), /"hosted" \(the solo engine, the default\) or "legacy"/)
   for (const flag of ['host', 'lan', 'tailscale', 'tls-cert', 'allowed-host', 'accounts', 'agent-acp', 'trust-proxy', 'no-identity']) {
-    assert.match(engineFlagProblem({ engine: 'hosted', [flag]: true }), new RegExp(`--${flag} is not for --engine hosted`), flag)
+    assert.match(engineFlagProblem({ engine: 'hosted', [flag]: true }), new RegExp(`--${flag} is not for the solo engine`), flag)
   }
   for (const flag of ['port', 'open', 'read-only', 'no-chat', 'no-capture', 'print-owner-link', 'chat', 'config'])
     assert.equal(engineFlagProblem({ engine: 'hosted', [flag]: true }), null, flag)
@@ -189,12 +189,8 @@ test('serve --engine hosted: its own random host, no sign-in off a terminal; --o
     const dir = engineDir(config.outputDir)
     const suffix = fs.readFileSync(path.join(dir, 'host.key'), 'utf8').trim()
     assert.equal(handle.origin, `http://lumen-notes-${suffix}.shapewall.localhost:${handle.server.address().port}`)
-    assert.ok(
-      first.lines.some((line) =>
-        line.startsWith(`Shapewall solo engine (experimental) is serving 1 board at http://lumen-notes-${suffix}`),
-      ),
-    )
-    assert.ok(first.lines.some((line) => /Sign in: run shapewall serve --engine hosted --open/.test(line)))
+    assert.ok(first.lines.some((line) => line.startsWith(`Shapewall is serving 1 board at http://lumen-notes-${suffix}`)))
+    assert.ok(first.lines.some((line) => /Sign in: run shapewall serve --open/.test(line)))
     // rev54 N3: the agent line gives the address in the environment, never as an argument other users can read.
     assert.ok(first.lines.includes(`Agents: SHAPEWALL_REMOTE=${handle.origin} shapewall agent connect`), first.lines.join('\n'))
     assert.equal(

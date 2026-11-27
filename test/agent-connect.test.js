@@ -517,7 +517,7 @@ for (const headless of [false, true])
       }
       const child = spawn(
         process.execPath,
-        [CLI, 'serve', '--port', '0', '--open', '--no-chat', '--config', path.join(dir, 'shapewall.config.json')],
+        [CLI, 'serve', '--engine', 'legacy', '--port', '0', '--open', '--no-chat', '--config', path.join(dir, 'shapewall.config.json')],
         {
           env,
           stdio: ['ignore', 'pipe', 'pipe'],
@@ -596,7 +596,18 @@ for (const chat of [true, false])
       }
       const child = spawn(
         process.execPath,
-        [CLI, 'serve', '--port', '0', '--open', ...(!chat ? ['--no-chat'] : []), '--config', path.join(dir, 'shapewall.config.json')],
+        [
+          CLI,
+          'serve',
+          '--engine',
+          'legacy',
+          '--port',
+          '0',
+          '--open',
+          ...(!chat ? ['--no-chat'] : []),
+          '--config',
+          path.join(dir, 'shapewall.config.json'),
+        ],
         {
           env,
           stdio: ['ignore', 'pipe', 'pipe'],

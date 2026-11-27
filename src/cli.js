@@ -9,7 +9,7 @@ import { pinSoloLoopback, soloHttpRemote } from './remote/loopback-pin.js'
 import { ENGINE_COMMANDS, engineMode } from './cli/engine-mode.js'
 import { removed, setDeprecationSink } from './deprecation.js'
 import { init, initCi, sitemap } from './cli/init.js'
-import { serve } from './cli/serve.js'
+import { serveCommand } from './cli/serve-command.js'
 import { warnDevicesDeprecated, warnServeDeprecations } from './cli/serve-deprecations.js'
 import { notify } from './cli/notify.js'
 import { comments } from './cli/comments.js'
@@ -60,13 +60,12 @@ const COMMANDS = {
   links: ({ flags, out }) => links(flags, out),
   serve: async ({ flags, out }) => {
     warnServeDeprecations(flags)
-    // --engine hosted (experimental): the solo engine, in src/hosted (src/hosted/solo/serve.js).
-    if (flags.engine !== undefined) {
-      const { serveEngine } = await import('./hosted/ops-cli.js')
-      await serveEngine(flags, out)
-      return null
-    }
-    await serve(flags, out)
+    // The solo engine by default (src/hosted/solo/serve.js), after moving any 1.x board data into it;
+    // --engine legacy or SHAPEWALL_ENGINE=legacy: the 1.x board server, deprecated (src/cli/serve-command.js).
+    await serveCommand(flags, out, {
+      version: VERSION,
+      startEngine: async (...args) => (await import('./hosted/ops-cli.js')).serveEngine(...args),
+    })
     return null
   },
   devices: ({ positional, flags, out }) => {

@@ -12,9 +12,10 @@ Shapewall has two shapes. Pick by who needs the board and when, not by how big t
 | A team with people outside your tailnet         | `shapewall hosted` behind your own domain                    | Everyone you invite, from anywhere   | Yes                        |
 
 The first two are the same local board. The last three are the same hosted server, reached in different ways. The third is that
-hosted server run for one project on your own machine (the solo engine, experimental in 1.5.0). Moving between the local board and a
-hosted server changes nothing about the project's config; `shapewall push` and `shapewall share` move captures and comments to a
-server, and `shapewall migrate` moves them into the solo engine.
+hosted server run for one project on your own machine (the solo engine). From 2.0 it is what `shapewall serve` runs, so the local
+board is the solo engine too ([upgrading a 1.x project](#upgrading-a-1x-project)). Moving between the local board and a hosted server
+changes nothing about the project's config; `shapewall push` and `shapewall share` move captures and comments to a server, and
+`shapewall migrate` moves them into the solo engine.
 
 ## The local board
 
@@ -27,6 +28,38 @@ npx shapewall serve --open
 
 It lives in the project folder, runs while you work and stops when you close it, like a dev server. Captures, comments and agent fixes
 all happen on this machine. There is no account and nothing to host. Details: [Running and sharing a board](deployment.md).
+
+From 2.0, `serve` runs the local board on the solo engine: the same engine as the hosted server, for one project and one owner, on
+this machine only, with its data in `.shapewall/.engine/` ([the solo engine](hosted.md#the-solo-engine-experimental)). You sign the
+browser in from the terminal (`serve --open`); there is still no account to make. `shapewall capture` writes into the engine's board
+folder, and `comments`, `watch` and `mcp` in the project folder go to the engine while it runs.
+
+### Upgrading a 1.x project
+
+The first `shapewall serve` of 2.x in a project that has 1.x board data in `.shapewall/` moves that data into the engine, then starts:
+
+1. It says which boards move and where the backup goes.
+2. It runs `shapewall migrate`: a full backup in `.shapewall/backup-1x-<time>/` (hard links where it can), then the comments, replies,
+   reactions, images, drawings and chat threads become engine rows, and the captures, history, variants, journeys and checks move as
+   they are. `.shapewall/MIGRATED-TO-2` records the run. A run that fails puts the folder back as it was.
+3. It starts the engine. Later starts find nothing to move.
+
+`shapewall migrate --dry-run` shows the same plan without changing anything, and `shapewall migrate --rollback` puts the folder back
+from the backup (run the old version pinned afterwards: `npx shapewall@1 serve`). Paired devices are not moved: they sign in again.
+Anything that would stop the move (a 1.x `serve` or `watch` still running for the project, a migration that was stopped midway, a board
+the engine cannot take yet) stops `serve` with the reason, and nothing changes.
+
+Once a board has moved, the 1.x writers refuse it: a `shapewall mcp`, `watch` or starter agent started before the move, and the 1.x
+server. `comments`, `watch` and `mcp` need the engine running (`shapewall serve`) to reach the moved board's comments.
+
+The stable surfaces keep their 1.x shapes on the engine: the comment JSON of `comments --json`, `watch` and `watch --exec`, the MCP
+tools and their arguments (the `author` of `reply_to_comment` and `add_comment`, and `comments reply --author`, label the agent's
+text, which stays marked as an agent's), and the lines of `.shapewall/events.jsonl`.
+
+**The 1.x board server** stays through 2.x as a deprecated escape hatch, removed in 3.0: `shapewall serve --engine legacy`, or
+`SHAPEWALL_ENGINE=legacy` for a service or a script. A flag only the 1.x server has (`--host`, `--lan`, `--tailscale`, `--tls-cert`,
+`--accounts`, `--agent-acp`, `--allowed-host`, `--buzz-bridge` and the device flags) also runs it, with the same warning, so
+`serve --host 0.0.0.0` in a container keeps working. With `SHAPEWALL_ENGINE=legacy`, `capture` writes the 1.x board folders again.
 
 To use the same board from your phone, add `--tailscale`: Shapewall asks Tailscale to serve it at this machine's private HTTPS name,
 and your other devices pair once. See [Your own other devices](deployment.md#your-own-other-devices-local-mode).

@@ -630,6 +630,7 @@ export function createHostedApp({
     hub: turnHub,
     links,
     chat,
+    solo: Boolean(soloLocal),
   })
   // On the solo engine the token API and the MCP endpoint answer this machine's own OS user only (soloLocalGate
   // admitsMachine: a loopback peer, no proxy headers, the engine's name or a loopback address on its port, and on

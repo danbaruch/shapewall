@@ -10,6 +10,7 @@
 // The run holds the board-job lock (board-job.js, <board>/capture.lock) and
 // keeps status.json current.
 
+import { assertMigrationAllows } from '../engine-folder.js'
 import { linkRequester } from './link-request.js'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -588,6 +589,10 @@ export async function runCapture({
   const isDefault = env.id === board.environments[0].id
   const keepVersions = isDefault && config.versions > 0
   const pages = selectPages(board, only)
+  // Not into a 1.x board folder while `shapewall migrate` runs, after one stopped midway, or once the board moved to
+  // the solo engine (its captures live in the engine's folder now; `shapewall capture` writes there, src/cli/capture.js).
+  // The engine's own captures pass: their output folder is the engine's board folder, which no migration marks.
+  assertMigrationAllows(config, { local: true, boardIds: [board.id] })
   const dir = boardDir(config, board.id)
   fs.mkdirSync(dir, { recursive: true })
   const job = acquireBoardJob(config, board.id, 'capture')

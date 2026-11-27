@@ -92,6 +92,9 @@ export async function createRemoteMcpServer({
   allowCapture = true,
   capture = null,
   push = null,
+  // `shapewall mcp` in a project whose solo engine runs (src/cli/engine-mode.js): add_comment and
+  // reply_to_comment take the 1.x `author` argument (src/mcp.js), the label of the agent's text there.
+  localAuthor = false,
   log = () => {},
   // The hosted server's own /mcp endpoint (src/hosted/mcp-http.js): it never
   // captures, so its instructions point at `mcp --remote` for the hand-in.
@@ -619,6 +622,10 @@ export async function createRemoteMcpServer({
     }),
   )
 
+  // The 1.x local argument, on the solo engine only (same words as src/mcp.js).
+  const authorArg = localAuthor
+    ? { author: z.string().max(60).optional().describe('Display name for an external agent. Board agents use their configured name.') }
+    : {}
   if (!readOnly && scopes.has('reply')) {
     server.registerTool(
       'add_comment',
@@ -634,9 +641,10 @@ export async function createRemoteMcpServer({
           body: z.string().min(1).max(5000),
           viewport: z.string().max(40).optional().describe("Default: the page's first viewport"),
           selector: z.string().max(600).optional().describe('An element selector from list_selectors'),
+          ...authorArg,
         },
       },
-      tool(async ({ board, page: pageId, body, viewport, selector }) => {
+      tool(async ({ board, page: pageId, body, viewport, selector, author }) => {
         const target = boardFor(board)
         const notes = []
         let placed = {}
@@ -674,7 +682,13 @@ export async function createRemoteMcpServer({
           })
           placed = { anchor, x: pin.x, y: pin.y }
         }
-        const answer = await remote.addComment(target, { page: pageId, body, viewport, ...placed })
+        const answer = await remote.addComment(target, {
+          page: pageId,
+          body,
+          viewport,
+          ...placed,
+          ...(localAuthor && author ? { author } : {}),
+        })
         const made = answer.comment ? { ...answer.comment, link: links.comment(target, answer.comment) } : answer.comment
         return json(untrustedJson({ board: answer.board, comment: made, ...(notes.length ? { notes } : {}) }))
       }),
@@ -690,10 +704,15 @@ export async function createRemoteMcpServer({
           id: commentId,
           body: z.string().min(1).max(2000),
           includeGuests: guestsArg,
+          ...authorArg,
         },
       },
-      tool(async ({ board, id, body, includeGuests = false }) => {
-        const { comment, reply } = await remote.reply(boardFor(board), id, { body, guests: includeGuests })
+      tool(async ({ board, id, body, includeGuests = false, author }) => {
+        const { comment, reply } = await remote.reply(boardFor(board), id, {
+          body,
+          guests: includeGuests,
+          ...(localAuthor && author ? { author } : {}),
+        })
         return json({
           reply,
           comment: { id: comment.id, status: comment.status, agentStatus: comment.agentStatus, replyCount: comment.replies.length },
@@ -873,13 +892,14 @@ export async function createRemoteMcpServer({
   return server
 }
 
-export async function runRemoteMcp({ remote, readOnly = false, board = null, config = null, allowCapture = true }) {
+export async function runRemoteMcp({ remote, readOnly = false, board = null, config = null, allowCapture = true, localAuthor = false }) {
   const server = await createRemoteMcpServer({
     remote,
     readOnly,
     board,
     config,
     allowCapture,
+    localAuthor,
     // stdout is the protocol; progress goes to stderr, cleaned (push lines hold the server's URL).
     log: (line) => process.stderr.write(`${terminalSafe(line)}\n`),
   })

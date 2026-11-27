@@ -195,6 +195,11 @@ host-only agent settings on this computer ([local accounts](/docs/local-accounts
 
 **Experimental.** Outside the [stability promise](/docs/stability): it can change, or go, in a minor release.
 
+From 2.0 this is what `shapewall serve` runs by default; the first start in a project with 1.x board data runs
+`shapewall migrate` first, with a backup ([upgrading a 1.x project](/docs/where-to-run#upgrading-a-1x-project)).
+`shapewall serve --engine legacy` (or `SHAPEWALL_ENGINE=legacy`) runs the 1.x board server, deprecated and removed in 3.0, and
+so does any flag only it takes (`--host`, `--lan`, `--tailscale`, `--accounts`, `--agent-acp`, ...).
+
 ```sh
 shapewall serve --engine hosted [--port 4600] [--open] [--print-owner-link] [--read-only] [--no-chat] [--no-capture]
                 [--skip-git-check]
@@ -752,7 +757,7 @@ Commands
       --build-mode MODE     the app's build: production, development or unknown (default)
       --browser-version V   require this installed browser version
                             exit code: 0 every view complete, 2 some partial or failed, 1 error
-  serve                     serve the board (http://127.0.0.1:4600/ by default)
+  serve                     serve the board on this machine (the solo engine; port 4600 by default)
       --port N              default 4600
       --host ADDR           default 127.0.0.1 (see https://shapewall.com/docs/self-hosting before changing)
       --tailscale[=print]    private HTTPS over Tailscale; =print changes nothing
@@ -774,12 +779,15 @@ Commands
       --agent-acp "CMD"     chat with an agent CLI over ACP, e.g. "claude-agent-acp" (installed globally)
                             (also $SHAPEWALL_AGENT_ACP; never read from the config; https://shapewall.com/docs/chat)
       --allow-remote-agent  with --chat on a shared board, let an ACP agent run anyway (anyone reaching it acts as you)
-      --engine hosted       run the hosted engine for this project, on this machine only: one owner, signed in by a
-                            one-time page (--open), data in .shapewall/.engine/; takes --port, --open,
+      --engine hosted       the default from 2.0: the hosted engine for this project, on this machine only: one
+                            owner, signed in by a one-time page (--open), data in .shapewall/.engine/; the first
+                            start in a 1.x project runs shapewall migrate (backup first); takes --port, --open,
                             --print-owner-link, --read-only, --no-chat, --no-capture, --skip-git-check
                             (start even when git cannot say whether it tracks .engine/); while it runs,
                             comments, watch and mcp in this folder go to it, and it runs this project's
-                            agent (a coding agent or a model endpoint) on the link; --no-chat without one (experimental)
+                            agent (a coding agent or a model endpoint) on the link; --no-chat without one
+      --engine legacy       the 1.x board server (deprecated, removed in 3.0; also $SHAPEWALL_ENGINE=legacy);
+                            --host, --lan, --tailscale, --accounts, --agent-acp and the other 1.x-only flags pick it too
   devices list              paired devices and pending requests for this project [--json]
                             (deprecated: use the tailnet instead, see shapewall serve --help)
   devices approve CODE      approve after matching the code on your device

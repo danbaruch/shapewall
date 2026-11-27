@@ -18,9 +18,11 @@ export function setDeprecationSink(write) {
   said.clear()
 }
 
-// `what` is the old spelling, `instead` what to do now.
-export function deprecated(what, instead) {
-  const line = `Warning: ${what} is deprecated and will be removed in Shapewall ${REMOVED_IN}; ${instead}.`
+// `what` is the old spelling, `instead` what to do now; `removedIn` the
+// major that removes it (default REMOVED_IN, 3.0: what 2.x deprecates, such
+// as the 1.x board server).
+export function deprecated(what, instead, { removedIn = REMOVED_IN } = {}) {
+  const line = `Warning: ${what} is deprecated and will be removed in Shapewall ${removedIn}; ${instead}.`
   if (said.has(line)) return
   said.add(line)
   sink(line)

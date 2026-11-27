@@ -1,0 +1,584 @@
+{
+  "mcpTools": {
+    "list_pages": {
+      "board": "arg"
+    },
+    "list_journeys": {
+      "board": "arg"
+    },
+    "list_comments": {
+      "agentStatus": "arg",
+      "author": "arg",
+      "board": "arg",
+      "cursor": "arg",
+      "journey": "arg",
+      "limit": "arg",
+      "mention": "arg",
+      "page": "arg",
+      "pageName": "arg",
+      "q": "arg",
+      "since": "arg",
+      "status": "arg",
+      "timeZone": "arg",
+      "until": "arg"
+    },
+    "list_selectors": {
+      "board": "arg",
+      "page": "arg",
+      "text": "arg",
+      "viewport": "arg"
+    },
+    "get_page_capture": {
+      "board": "arg",
+      "crop": "arg",
+      "page": "arg",
+      "viewport": "arg"
+    },
+    "get_comment": {
+      "board": "arg",
+      "id": "arg",
+      "image": "arg"
+    },
+    "board_link": {
+      "board": "arg",
+      "comment": "arg",
+      "compare": "arg",
+      "follow": "arg",
+      "page": "arg",
+      "viewport": "arg"
+    },
+    "compare_captures": {
+      "after": "arg",
+      "before": "arg",
+      "board": "arg",
+      "crop": "arg",
+      "page": "arg",
+      "viewport": "arg"
+    },
+    "reply_to_comment": {
+      "author": "arg",
+      "board": "arg",
+      "body": "arg",
+      "id": "arg"
+    },
+    "add_comment": {
+      "author": "arg",
+      "board": "arg",
+      "body": "arg",
+      "page": "arg",
+      "selector": "arg",
+      "viewport": "arg"
+    },
+    "set_comment_status": {
+      "agentStatus": "arg",
+      "board": "arg",
+      "id": "arg",
+      "note": "arg"
+    },
+    "resolve_comment": {
+      "board": "arg",
+      "fixRef": "arg",
+      "id": "arg",
+      "note": "arg"
+    },
+    "recapture_pages": {
+      "board": "arg",
+      "pageIds": "arg"
+    }
+  },
+  "commentsList": {
+    "board": {
+      "baseUrl": "string",
+      "id": "string",
+      "title": "string"
+    },
+    "comments": [
+      {
+        "agentStatus": "null",
+        "agentStatusAt": "null",
+        "author": "string",
+        "body": "string",
+        "byOwner": "boolean",
+        "captureVersion": "null",
+        "createdAt": "string",
+        "drawing": "null",
+        "editedAt": "null",
+        "element": {
+          "selector": "string",
+          "text": "string"
+        },
+        "files": {
+          "images": [],
+          "latestLiveHtml": "null",
+          "latestScreenshot": "null",
+          "latestVersion": "null",
+          "liveHtml": "null",
+          "markup": "null",
+          "screenshot": "null",
+          "version": "null"
+        },
+        "fixRef": "null",
+        "github": {
+          "issue": "null",
+          "pulls": []
+        },
+        "id": "number",
+        "mentions": [],
+        "page": {
+          "group": "string",
+          "id": "string",
+          "note": "null",
+          "path": "string",
+          "title": "string",
+          "url": "string"
+        },
+        "position": {
+          "x": "number",
+          "xPercent": "number",
+          "y": "number",
+          "yPercent": "number"
+        },
+        "reopenCount": "number",
+        "reopenedAt": "null",
+        "replies": [
+          {
+            "author": "string",
+            "body": "string",
+            "createdAt": "string",
+            "drawing": "null",
+            "files": {
+              "images": [],
+              "markup": "null"
+            },
+            "id": "number"
+          }
+        ],
+        "resolution": "null",
+        "resolvedAt": "null",
+        "status": "string",
+        "updatedAt": "string",
+        "variant": "null",
+        "viewport": {
+          "height": "number",
+          "name": "string",
+          "width": "number"
+        }
+      }
+    ],
+    "count": "number",
+    "note": "string",
+    "status": "string",
+    "trust": "string"
+  },
+  "commentsGet": {
+    "board": {
+      "baseUrl": "string",
+      "id": "string",
+      "title": "string"
+    },
+    "comment": {
+      "agentStatus": "null",
+      "agentStatusAt": "null",
+      "author": "string",
+      "body": "string",
+      "byOwner": "boolean",
+      "captureVersion": "null",
+      "createdAt": "string",
+      "drawing": "null",
+      "editedAt": "null",
+      "element": {
+        "selector": "string",
+        "text": "string"
+      },
+      "files": {
+        "images": [],
+        "latestLiveHtml": "null",
+        "latestScreenshot": "null",
+        "latestVersion": "null",
+        "liveHtml": "null",
+        "markup": "null",
+        "screenshot": "null",
+        "version": "null"
+      },
+      "fixRef": "null",
+      "github": {
+        "issue": "null",
+        "pulls": []
+      },
+      "id": "number",
+      "mentions": [],
+      "page": {
+        "group": "string",
+        "id": "string",
+        "note": "null",
+        "path": "string",
+        "title": "string",
+        "url": "string"
+      },
+      "position": {
+        "x": "number",
+        "xPercent": "number",
+        "y": "number",
+        "yPercent": "number"
+      },
+      "reopenCount": "number",
+      "reopenedAt": "null",
+      "replies": [
+        {
+          "author": "string",
+          "body": "string",
+          "createdAt": "string",
+          "drawing": "null",
+          "files": {
+            "images": [],
+            "markup": "null"
+          },
+          "id": "number"
+        }
+      ],
+      "resolution": "null",
+      "resolvedAt": "null",
+      "status": "string",
+      "updatedAt": "string",
+      "variant": "null",
+      "viewport": {
+        "height": "number",
+        "name": "string",
+        "width": "number"
+      }
+    },
+    "note": "string",
+    "trust": "string"
+  },
+  "commentsReply": {
+    "board": {
+      "baseUrl": "string",
+      "id": "string",
+      "title": "string"
+    },
+    "comment": {
+      "agentStatus": "null",
+      "agentStatusAt": "null",
+      "author": "string",
+      "body": "string",
+      "byOwner": "boolean",
+      "captureVersion": "null",
+      "createdAt": "string",
+      "drawing": "null",
+      "editedAt": "null",
+      "element": {
+        "selector": "string",
+        "text": "string"
+      },
+      "files": {
+        "images": [],
+        "latestLiveHtml": "null",
+        "latestScreenshot": "null",
+        "latestVersion": "null",
+        "liveHtml": "null",
+        "markup": "null",
+        "screenshot": "null",
+        "version": "null"
+      },
+      "fixRef": "null",
+      "github": {
+        "issue": "null",
+        "pulls": []
+      },
+      "id": "number",
+      "mentions": [],
+      "page": {
+        "group": "string",
+        "id": "string",
+        "note": "null",
+        "path": "string",
+        "title": "string",
+        "url": "string"
+      },
+      "position": {
+        "x": "number",
+        "xPercent": "number",
+        "y": "number",
+        "yPercent": "number"
+      },
+      "reopenCount": "number",
+      "reopenedAt": "null",
+      "replies": [
+        {
+          "author": "string",
+          "body": "string",
+          "createdAt": "string",
+          "drawing": "null",
+          "files": {
+            "images": [],
+            "markup": "null"
+          },
+          "id": "number"
+        }
+      ],
+      "resolution": "null",
+      "resolvedAt": "null",
+      "status": "string",
+      "updatedAt": "string",
+      "variant": "null",
+      "viewport": {
+        "height": "number",
+        "name": "string",
+        "width": "number"
+      }
+    },
+    "note": "string",
+    "reply": {
+      "author": "string",
+      "body": "string",
+      "createdAt": "string",
+      "drawing": "null",
+      "files": {
+        "images": [],
+        "markup": "null"
+      },
+      "id": "number"
+    },
+    "trust": "string"
+  },
+  "commentsAdd": {
+    "board": {
+      "baseUrl": "string",
+      "id": "string",
+      "title": "string"
+    },
+    "comment": {
+      "agentStatus": "null",
+      "agentStatusAt": "null",
+      "author": "string",
+      "body": "string",
+      "byOwner": "boolean",
+      "captureVersion": "null",
+      "createdAt": "string",
+      "drawing": "null",
+      "editedAt": "null",
+      "element": "null",
+      "files": {
+        "images": [],
+        "latestLiveHtml": "null",
+        "latestScreenshot": "null",
+        "latestVersion": "null",
+        "liveHtml": "null",
+        "markup": "null",
+        "screenshot": "null",
+        "version": "null"
+      },
+      "fixRef": "null",
+      "github": {
+        "issue": "null",
+        "pulls": []
+      },
+      "id": "number",
+      "mentions": [],
+      "page": {
+        "group": "string",
+        "id": "string",
+        "note": "null",
+        "path": "string",
+        "title": "string",
+        "url": "string"
+      },
+      "position": {
+        "x": "number",
+        "xPercent": "number",
+        "y": "number",
+        "yPercent": "number"
+      },
+      "reopenCount": "number",
+      "reopenedAt": "null",
+      "replies": [],
+      "resolution": "null",
+      "resolvedAt": "null",
+      "status": "string",
+      "updatedAt": "string",
+      "variant": "null",
+      "viewport": {
+        "height": "number",
+        "name": "string",
+        "width": "number"
+      }
+    },
+    "note": "string",
+    "trust": "string"
+  },
+  "watchLine": {
+    "board": {
+      "baseUrl": "string",
+      "id": "string",
+      "title": "string"
+    },
+    "comment": {
+      "agentStatus": "string",
+      "agentStatusAt": "string",
+      "author": "string",
+      "body": "string",
+      "byOwner": "boolean",
+      "captureVersion": "null",
+      "createdAt": "string",
+      "drawing": "null",
+      "editedAt": "null",
+      "element": "null",
+      "files": {
+        "images": [],
+        "latestLiveHtml": "null",
+        "latestScreenshot": "null",
+        "latestVersion": "null",
+        "liveHtml": "null",
+        "markup": "null",
+        "screenshot": "null",
+        "version": "null"
+      },
+      "fixRef": "null",
+      "github": {
+        "issue": "null",
+        "pulls": []
+      },
+      "id": "number",
+      "mentions": [],
+      "page": {
+        "group": "string",
+        "id": "string",
+        "note": "string",
+        "path": "string",
+        "title": "string",
+        "url": "string"
+      },
+      "position": {
+        "x": "number",
+        "xPercent": "number",
+        "y": "number",
+        "yPercent": "number"
+      },
+      "reopenCount": "number",
+      "reopenedAt": "null",
+      "replies": [],
+      "resolution": "null",
+      "resolvedAt": "null",
+      "status": "string",
+      "updatedAt": "string",
+      "variant": "null",
+      "viewport": {
+        "height": "number",
+        "name": "string",
+        "width": "number"
+      }
+    },
+    "note": "string",
+    "trust": "string"
+  },
+  "watchExec": {
+    "board": {
+      "baseUrl": "string",
+      "id": "string",
+      "title": "string"
+    },
+    "comment": {
+      "agentStatus": "string",
+      "agentStatusAt": "string",
+      "author": "string",
+      "body": "string",
+      "byOwner": "boolean",
+      "captureVersion": "null",
+      "createdAt": "string",
+      "drawing": "null",
+      "editedAt": "null",
+      "element": "null",
+      "files": {
+        "images": [],
+        "latestLiveHtml": "null",
+        "latestScreenshot": "null",
+        "latestVersion": "null",
+        "liveHtml": "null",
+        "markup": "null",
+        "screenshot": "null",
+        "version": "null"
+      },
+      "fixRef": "null",
+      "github": {
+        "issue": "null",
+        "pulls": []
+      },
+      "id": "number",
+      "mentions": [],
+      "page": {
+        "group": "string",
+        "id": "string",
+        "note": "string",
+        "path": "string",
+        "title": "string",
+        "url": "string"
+      },
+      "position": {
+        "x": "number",
+        "xPercent": "number",
+        "y": "number",
+        "yPercent": "number"
+      },
+      "reopenCount": "number",
+      "reopenedAt": "null",
+      "replies": [],
+      "resolution": "null",
+      "resolvedAt": "null",
+      "status": "string",
+      "updatedAt": "string",
+      "variant": "null",
+      "viewport": {
+        "height": "number",
+        "name": "string",
+        "width": "number"
+      }
+    },
+    "note": "string",
+    "trust": "string"
+  },
+  "events": [
+    {
+      "actor": "string",
+      "agentStatus": "string",
+      "at": "string",
+      "board": {
+        "baseUrl": "string",
+        "id": "string",
+        "title": "string"
+      },
+      "comment": {
+        "agentStatus": "string",
+        "author": "string",
+        "body": "string",
+        "captureVersion": "null",
+        "createdAt": "string",
+        "element": {
+          "selector": "string",
+          "text": "string"
+        },
+        "fixRef": "null",
+        "id": "number",
+        "mentions": [],
+        "pageId": "string",
+        "replyCount": "number",
+        "resolution": "null",
+        "status": "string",
+        "updatedAt": "string",
+        "viewport": "string"
+      },
+      "commentId": "number",
+      "id": "string",
+      "previous": {
+        "agentStatus": "string"
+      },
+      "reply": {
+        "author": "string",
+        "body": "string",
+        "createdAt": "string",
+        "id": "number"
+      },
+      "type": "string",
+      "version": "number"
+    }
+  ]
+}

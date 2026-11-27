@@ -60,7 +60,7 @@ export async function engineMode(command, flags, { env = process.env, err = () =
   assertMigrationAllows(config, { local: true, boardIds })
   if (engineAtRest(config).data)
     err(
-      `Note: this project also has a solo engine (not running). These are the 1.x board's comments in ${config.outputDir}; start shapewall serve --engine hosted to work with the engine's.`,
+      `Note: this project also has a solo engine (not running). These are the 1.x board's comments in ${config.outputDir}; start shapewall serve to work with the engine's.`,
     )
   return null
 }

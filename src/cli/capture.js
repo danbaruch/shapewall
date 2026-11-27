@@ -8,6 +8,8 @@ import { formatBroken } from '../broken-links.js'
 import { pageLinks } from '../links.js'
 import { keyWarningLines } from '../config-keys.js'
 import { addAgentDocsOnce } from '../agent-docs.js'
+import { assertMigrationAllows } from '../engine-folder.js'
+import { boardHome } from './board-home.js'
 
 // `capture`: one line per shot and a summary; with --json the summary is one
 // JSON document on stdout and the progress lines go to stderr. Capture never
@@ -20,8 +22,12 @@ export async function capture(flags, out, err) {
   // The first capture in a project adds the Shapewall section to AGENTS.md, once (src/agent-docs.js).
   const agentDocsLine = addAgentDocsOnce(config)
   if (agentDocsLine) (json ? err : out)(agentDocsLine)
+  // Not while `shapewall migrate` runs for the project, or after one stopped midway.
+  assertMigrationAllows(config)
+  // Into the solo engine's board folder once the engine holds the project (src/cli/board-home.js).
+  const home = await boardHome(config)
   const result = await runCapture({
-    config,
+    config: home.config,
     boardId: flags.board,
     envId: flags.env || null,
     only: flags.only,
@@ -59,7 +65,7 @@ export async function capture(flags, out, err) {
 // `links`: page-to-page links from the last capture, or (--broken) the links
 // that led to an error.
 export async function links(flags, out) {
-  const config = loadConfig(flags.config)
+  const config = (await boardHome(loadConfig(flags.config))).config
   const board = getBoard(config, flags.board)
   const env = getEnvironment(board, flags.env || null)
   const manifest = readManifest(config, board.id, env.id)

@@ -66,8 +66,8 @@ npx shapewall serve --open
 1. `doctor --install-browser` downloads Chromium and checks that it starts. Before `init`, it skips the config check.
 2. `init` writes `shapewall.config.json` with the screens it finds in your app.
 3. `capture` takes every page at desktop and phone width.
-4. `serve --open` starts the board on http://127.0.0.1:4600/ and opens it in your browser as its owner, the tab that can connect an
-   agent. With no browser on this machine it prints a one-time link instead: open it within 5 minutes.
+4. `serve --open` starts the board on this machine (port 4600, at the project's own `*.shapewall.localhost` name it prints) and
+   opens it in your browser as its owner, the tab that can connect an agent. With no browser on this machine it prints a one-time link instead: open it within 5 minutes.
 
 The first `npx shapewall` asks to download the package ("Ok to proceed? (y)"): answer `y`. To keep one version for everyone on the
 project, add it as a dev dependency first:

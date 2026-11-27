@@ -5,8 +5,38 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+
+- `shapewall capture` and `links` write and read the solo engine's board folders (`.shapewall/.engine/files/`) once the
+  engine holds the project, so a capture from the terminal (every environment) shows on the engine's board, with or without
+  the engine running. `push` sends from there too.
+- On the solo engine, the `author` of the MCP tools `reply_to_comment` and `add_comment`, and `comments reply --author` and
+  `comments add --author`, label the agent's text as they do on a 1.x board (it stays marked as an agent's). The engine's
+  comment JSON says `byOwner` for comments its owner wrote, as a 1.x board does.
+
+### Changed
+
+- **`shapewall serve` runs the solo engine by default** (2.0.0): the hosted engine for this project, one owner, on this
+  machine only, data in `.shapewall/.engine/`. `npx shapewall init && npx shapewall serve` is still a board in seconds with no
+  account. The first start in a project with 1.x board data says which boards move, runs `shapewall migrate` (a backup in
+  `.shapewall/backup-1x-<time>/` first; a failed run puts the folder back), then starts. Anything that stops the move (a 1.x
+  `serve` or `watch` still running, a migration stopped midway, a board the engine cannot take) stops `serve` with the reason
+  and changes nothing. See [Upgrading a 1.x project](docs/where-to-run.md#upgrading-a-1x-project).
+- The 1.x writers refuse a board the engine holds (409 `board_migrated`): comments and replies, the board chat, the starter
+  agent and `capture` into the 1.x folders, also from a `shapewall mcp` or `watch` started before the move.
+- `shapewall share --remote` stops on a board the engine holds instead of sending what is left in the 1.x folders. Moving an
+  engine board to a hosted server is not in this build yet; `shapewall migrate --rollback` puts the 1.x board back.
+- The stable surfaces keep their 1.x shapes on the engine, checked against a committed 1.x snapshot
+  (test/contract-1x.test.js): `comments --json`, `watch` and `watch --exec` JSON, the MCP tools and their arguments, and the
+  lines of `.shapewall/events.jsonl`. New fields may appear, as docs/stability.md allows.
+
 ### Deprecated
 
+- The 1.x board server: `shapewall serve --engine legacy`, or `SHAPEWALL_ENGINE=legacy` for a service or a script. It stays
+  through 2.x and goes in 3.0. A flag only the 1.x server takes (`--host`, `--lan`, `--tailscale`, `--tls-cert`, `--tls-key`,
+  `--allowed-host`, `--accounts`, `--accounts-origin`, `--agent-acp`, `--allow-remote-agent`, `--buzz-bridge`,
+  `--trust-proxy` and the device flags) also runs it, with the same warning, so `serve --host 0.0.0.0` in a container keeps
+  working. With `SHAPEWALL_ENGINE=legacy`, `capture` writes the 1.x board folders again.
 - Kept through 2.x with a one-line warning on stderr, removed in 3.0: `serve --lan` and `serve --accounts` (also
   `SHAPEWALL_ACCOUNTS=1`), the `devices` command (pair through the tailnet with `serve --tailscale`), and
   `starterAgent.testCommand` (set `commands.test`). The warning now reads "will be removed in Shapewall 3.0".

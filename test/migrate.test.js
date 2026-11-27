@@ -368,7 +368,7 @@ test('refuses while a capture, a watcher or serve holds the project, and writes 
     fs.writeFileSync(path.join(p.out, ENGINE_DIR, 'serve.lock'), body('serve-engine'))
     const engineBusy = await run(p)
     assert.equal(engineBusy.code, 1, engineBusy.text)
-    assert.match(engineBusy.text, /the solo engine \(shapewall serve --engine hosted\) is running/)
+    assert.match(engineBusy.text, /the solo engine \(shapewall serve\) is running/)
     fs.rmSync(path.join(p.out, ENGINE_DIR, 'serve.lock'))
     assert.deepEqual(digest(p.out), before)
     // Rollback refuses the same way.

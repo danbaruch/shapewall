@@ -666,7 +666,8 @@ The rules of those commands:
 
 **Experimental.** Outside the [stability promise](stability.md): it can change, or go, in a minor release.
 
-`shapewall serve --engine hosted` runs this server for one project, on your own machine, for you alone. Run it in the project
+`shapewall serve --engine hosted` runs this server for one project, on your own machine, for you alone. From 2.0 it is what
+`shapewall serve` runs by default ([upgrading a 1.x project](where-to-run.md#upgrading-a-1x-project)). Run it in the project
 folder:
 
 ```sh

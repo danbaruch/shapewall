@@ -68,7 +68,7 @@ export function assertMigrationAllows(config, { local = false, boardIds = null }
     const moved = ids.filter((id) => state.migrated.has(id))
     if (moved.length)
       throw new EngineFolderError(
-        `${moved.length === 1 ? `Board ${moved[0]} was` : `Boards ${moved.join(', ')} were`} migrated to the solo engine (${MIGRATED}). Run shapewall serve --engine hosted, or shapewall migrate --rollback to go back.`,
+        `${moved.length === 1 ? `Board ${moved[0]} was` : `Boards ${moved.join(', ')} were`} migrated to the solo engine (${MIGRATED}). Run shapewall serve (the solo engine), or shapewall migrate --rollback to go back.`,
       )
   }
   return state.migrated

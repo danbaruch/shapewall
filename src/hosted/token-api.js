@@ -30,7 +30,7 @@ import { mountAgentLink, requireNoRunningFix } from './agent-link.js'
 import { sendPng } from './board-context.js'
 import { markupName } from '../comment-media.js'
 import { commentListsFile, createMarkupCache, readCommentFile, renderMarkupPng, sendImage } from './comment-files.js'
-import { REPLY_AUTHOR, cleanAuthor, rowToComment, validateOnlyFrom } from './comments.js'
+import { COMMENT_AUTHOR, REPLY_AUTHOR, cleanAuthor, rowToComment, validateOnlyFrom } from './comments.js'
 import { API_TOKEN_RE, sha256 } from './crypto.js'
 import { transaction } from './db.js'
 import { HttpError, fail } from './http.js'
@@ -72,6 +72,8 @@ export function mountTokenApi({
   hub = null,
   links = null,
   chat = null,
+  // The solo engine (src/hosted/solo): its tokens are its one owner's, on this machine.
+  solo = false,
 }) {
   // ---- Token API ----
   const pushOptions = (t) => {
@@ -231,8 +233,18 @@ export function mountTokenApi({
 
   // Feedback items with download URLs instead of server paths.
   function remoteItem(req, ctx, context, comment) {
+    // The 1.x `byOwner` on the solo engine: a person's comment by its one owner (who made every token there).
+    const byOwner = solo
+      ? {
+          byOwner:
+            !comment.authorAgent &&
+            !comment.authorGuest &&
+            Boolean(req.token.createdBy) &&
+            comment[COMMENT_AUTHOR]?.user === req.token.createdBy,
+        }
+      : {}
     const item = {
-      ...feedbackItem(context, { ...comment, replies: tokenReplies(req, ctx, comment.replies, comment.id) }),
+      ...feedbackItem(context, { ...comment, ...byOwner, replies: tokenReplies(req, ctx, comment.replies, comment.id) }),
       dispatchable: Boolean(comment.dispatchable),
       needsRunApproval: Boolean(comment.needsRunApproval),
       // The agent it was sent to, for a token that may take work: its own
@@ -344,8 +356,15 @@ export function mountTokenApi({
     }
   }
   // A token writes as itself: its name (set by an admin) with an agent flag.
-  // Any `author` in the request is ignored, so a token cannot pose as a person.
-  const tokenAuthor = (req) => ({ name: cleanAuthor(req.token.name, 'agent'), agent: true })
+  // On a team server any `author` in the request is ignored, so a token cannot
+  // pose as a person. On the solo engine every token is its one owner's, and
+  // `author` is the label of the agent's text, as the 1.x local MCP tools and
+  // `comments reply --author` wrote it (2.0.0, plan R5): still marked as an
+  // agent's, never as the owner's, and never vouched for.
+  const tokenAuthor = (req) => {
+    const label = solo && typeof req.body?.author === 'string' && req.body.author.trim() ? req.body.author : req.token.name
+    return { name: cleanAuthor(label, cleanAuthor(req.token.name, 'agent')), agent: true }
+  }
 
   mountTokenEvents(v1, { db, iso, events, streams, scope, agentsFor })
   if (chatFor && hub && links && chat)

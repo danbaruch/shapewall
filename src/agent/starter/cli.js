@@ -4,7 +4,8 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { loadConfig, findConfigFile } from '../../config.js'
+import { getBoard, loadConfig, findConfigFile } from '../../config.js'
+import { EngineFolderError, assertMigrationAllows } from '../../engine-folder.js'
 import { withNotifications } from '../../cli/notify.js'
 import { githubSettings, linkPull, openPullRequest } from '../../github.js'
 import { createRuntime, detectRuntime, agentImage } from './runtime.js'
@@ -28,7 +29,23 @@ function configFor(flags) {
 }
 
 async function sourceFor(config, flags) {
-  if (flags.remote === undefined) return localSource(config, flags.board || null)
+  if (flags.remote === undefined) {
+    // The 1.x board files: not while `shapewall migrate` runs or after one stopped midway, nor for a board it moved to
+    // the solo engine (whose comments live in the engine; the starter reaches it with --remote).
+    try {
+      assertMigrationAllows(config, { local: true, boardIds: [getBoard(config, flags.board || null).id] })
+    } catch (error) {
+      if (error instanceof EngineFolderError)
+        throw new Error(
+          `${error.message} The starter agent works on the engine's board with --remote <its address> (shapewall serve prints it).`,
+          {
+            cause: error,
+          },
+        )
+      throw error
+    }
+    return localSource(config, flags.board || null)
+  }
   const { createRemote, remoteSettings } = await import('../../remote/remote.js')
   const { remoteBoard } = await import('../../remote/cli.js')
   const remote = createRemote(remoteSettings(flags))

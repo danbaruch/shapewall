@@ -34,7 +34,8 @@ The core of Shapewall:
 - the commands `init`, `sitemap`, `capture`, `serve` (its base flags), `comments`, `watch`, `mcp`, `events`, `journeys`, `links`,
   `variant`, `export`, `notify`, `github`, `ci`, `doctor`, `auth record`, `push`, `share`, `login --remote`, `agent connect`
   (except the link policy flags below), `agent status` (its human-readable output is not covered, see Internal), and `hosted`
-  (its server flags, `backup` and `restore`);
+  (its server flags, `backup` and `restore`). From 2.0 `serve` runs the solo engine; `serve --engine legacy` and
+  `SHAPEWALL_ENGINE=legacy` (the 1.x board server) are deprecated and go in 3.0;
 - the core config keys, including `commands`, `agent.browser.allow`, `agent.fixIn` and `agent.localSession` (1.4.0; its value
   `"own"` was removed in 2.0), the comment item JSON, the MCP tools, `/api/v1` (except `/api/v1/agent/*`), `/mcp`, the webhook payload and
   its signature, `events.jsonl`, the environment variables that are not listed as experimental below, the exit codes, and the
