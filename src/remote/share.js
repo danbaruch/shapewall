@@ -6,6 +6,7 @@ export { portableManifest, portableVariants } from '../portable-capture.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { withFileLock } from '../lock.js'
+import { migratedBoards } from '../engine-folder.js'
 import { getBoard, loadConfig } from '../config.js'
 import {
   CAPTURE_FILE_RE,
@@ -190,6 +191,15 @@ async function runShare(
   const out = safeOut(print)
   const origin = remoteOrigin(flags, env)
   const boards = flags.board ? [getBoard(config, flags.board)] : config.boards
+  // 2.0.0 (plan R5): a board the solo engine holds keeps its comments in the
+  // engine's database, which share does not read (yet). Moving what is left
+  // in the 1.x folders would send an empty or stale board, so it stops here.
+  const held = migratedBoards(config.outputDir)
+  const moved = boards.filter((board) => held.has(board.id)).map((board) => board.id)
+  if (moved.length)
+    throw new Error(
+      `share --remote moves a 1.x board, and ${moved.join(', ')} ${moved.length === 1 ? 'lives' : 'live'} in the solo engine now (MIGRATED-TO-2). Moving an engine board to a hosted server is not in this build yet; shapewall migrate --rollback puts the 1.x board back to share it.`,
+    )
   const projectPath = fs.realpathSync(config.dir)
   const plans = boards.map((board) => {
     const portable = flags['no-comments'] ? { comments: [], uploads: new Map() } : portableComments(config, board, projectPath)

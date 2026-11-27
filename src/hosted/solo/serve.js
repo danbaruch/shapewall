@@ -56,6 +56,8 @@ const REFUSED = {
   'trust-proxy': 'no proxy in front of the solo engine',
 }
 
+export const REFUSED_FLAGS = Object.keys(REFUSED)
+
 export function engineFlagProblem(flags) {
   if (!ENGINES.includes(flags.engine))
     return `--engine: "hosted" (the solo engine, the default) or "legacy" (the 1.x board server, deprecated).`
