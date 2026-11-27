@@ -58,6 +58,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Hosted boards: opening Checks no longer gets a 404 for the SEO tab. The board answers with no search previews (they stay on
   the machine that ran the checks), so the tab shows the pushed reports' SEO issues.
 
+### Security
+
+- `shapewall serve --open` and `shapewall settings --open` no longer put the one-time open link's nonce on the browser
+  opener's command line (`xdg-open`, `open`, `explorer.exe`), where another user of the machine could read it and open the
+  board as its owner first. The browser is opened on a page in the project's `.shapewall/` folder, readable only by you, that
+  posts the nonce to `POST /open`; the page is removed once used, when it expires and when the server stops. With no browser,
+  the page's path is printed instead of the link. `GET /open/<nonce>` no longer opens anything.
+
 ## 1.4.0 - 2026-11-26
 
 One capability model for every agent path: who wrote a turn decides its tier (solo, team or open), the machine sets the

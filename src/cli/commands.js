@@ -57,7 +57,7 @@ export async function settings(flags, out, err) {
     throw error
   }
   if (stopping) close()
-  else if (flags.open) openBrowser(`${management.url}${management.app.locals.openLink()}`, out)
+  else if (flags.open) openBrowser(management.app.locals.openLink(management.url), out)
   return null
 }
 
