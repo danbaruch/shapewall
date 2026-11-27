@@ -9,6 +9,7 @@ import { checkSteps } from './journey-paths.js'
 import { normalizeNotifications } from './notify/config.js'
 import { validateAgent } from './agent/config.js'
 import { validateStarterAgent } from './agent/starter/settings.js'
+import { validateCommands } from './agent/capabilities.js'
 import { cliCommand } from './invocation.js'
 import { normalizeBudgets } from './checks/budgets.js'
 import { CAPTURE_PACING_DEFAULTS, CAPTURE_PACING_MAX } from './capture/pacing.js'
@@ -139,6 +140,14 @@ export function authFiles(config) {
   for (const auth of [config?.auth, ...(config?.boards || []).map((board) => board?.auth)]) {
     for (const key of ['loginScript', 'storageState']) if (typeof auth?.[key] === 'string' && auth[key]) out.add(auth[key])
   }
+  return [...out]
+}
+
+// The login states (auth.storageState: cookies) a config names, absolute: no agent reads them.
+export function storageStateFiles(config) {
+  const out = new Set()
+  for (const auth of [config?.auth, ...(config?.boards || []).map((board) => board?.auth)])
+    if (typeof auth?.storageState === 'string' && auth.storageState) out.add(path.resolve(config?.dir || '.', auth.storageState))
   return [...out]
 }
 
@@ -955,9 +964,14 @@ export function normalizeConfig(raw, { dir = process.cwd(), file = null, env = p
   }
   const notifications = normalizeNotifications(raw.notifications, { boardIds: [...ids], env }, problems)
   const github = validateGithub(raw.github, problems)
+  // The Shapewall section in AGENTS.md (src/agent-docs.js). Kept as given (true, false, or null when
+  // unset): serve and capture only ever add it when the key is not set at all.
+  if (raw.agentDocs !== undefined && typeof raw.agentDocs !== 'boolean') problems.push('agentDocs: true or false')
   if (github?.board && !ids.has(github.board)) problems.push(`github.board: no board "${github.board}"`)
   const agent = validateAgent(raw.agent, problems)
   const starterAgent = validateStarterAgent(raw.starterAgent, problems, { boardIds: [...ids] })
+  // Named commands an agent may run through Shapewall (src/agent/capabilities.js).
+  const commands = validateCommands(raw.commands, problems)
   // Capture on pull requests (src/ci/settings.js): allow-lists name pages and viewports of any board.
   const ci = validateCi(raw.ci, problems, {
     pageIds: boards.flatMap((board) => board.pages.map((page) => page.id)),
@@ -983,10 +997,12 @@ export function normalizeConfig(raw, { dir = process.cwd(), file = null, env = p
     reducedMotion,
     browser,
     liveHtml: raw.liveHtml !== false,
+    agentDocs: typeof raw.agentDocs === 'boolean' ? raw.agentDocs : null,
     versions,
     github,
     agent,
     starterAgent,
+    commands,
     ci,
     boards,
     notifications,

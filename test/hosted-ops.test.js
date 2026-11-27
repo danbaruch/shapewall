@@ -700,27 +700,27 @@ test('migration 17 (sign-in) and 16 (usage layouts) reach a database in either o
   const layoutsTable = (db) => db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'usage_layouts'").get().n
   const file = path.join(tempDir('migration-17'), 'shapewall.db')
   let db = await openDatabase(file)
-  assert.deepEqual(versions(db).slice(-7), [15, 16, 17, 18, 19, 20, 21])
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 21)
+  assert.deepEqual(versions(db).slice(-9), [15, 16, 17, 18, 19, 20, 21, 22, 23])
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 23)
   // 17 first, 16 later: a database made by this branch before 16 was merged (16 absent, 17 ran).
   db.exec('DROP TABLE usage_layouts; DELETE FROM schema_migrations WHERE version = 16;')
-  assert.deepEqual(versions(db).slice(-6), [15, 17, 18, 19, 20, 21])
+  assert.deepEqual(versions(db).slice(-8), [15, 17, 18, 19, 20, 21, 22, 23])
   db.close()
   db = await openDatabase(file)
-  assert.deepEqual(versions(db).slice(-7), [15, 16, 17, 18, 19, 20, 21], '16 runs when it arrives, 17 is not run again')
+  assert.deepEqual(versions(db).slice(-9), [15, 16, 17, 18, 19, 20, 21, 22, 23], '16 runs when it arrives, 17 is not run again')
   assert.equal(layoutsTable(db), 1)
   assert.ok(columns(db, 'users').includes('tailnet_user_id'))
   // The rollback of 17 as docs/hosted.md gives it ("Migration 17 and rollback"): 16 stays.
   const docs = fs.readFileSync(new URL('../docs/hosted.md', import.meta.url), 'utf8')
   // 18 first (docs/hosted.md, "Migration 18 and rollback"): its check names sessions.tailnet_login, which 17's rollback drops.
   db.exec(/```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 18 and rollback')))[1])
-  assert.deepEqual(versions(db).slice(-6), [15, 16, 17, 19, 20, 21])
+  assert.deepEqual(versions(db).slice(-8), [15, 16, 17, 19, 20, 21, 22, 23])
   const section = docs.slice(docs.indexOf('### Migration 17 and rollback'))
   const sql = /To remove the schema as well[^`]*`([^`]+)`/.exec(section)[1].replace(/\s+/g, ' ')
   assert.match(sql, /DELETE FROM schema_migrations WHERE version = 17;$/)
   db.exec(sql)
   db.exec('PRAGMA user_version = 16')
-  assert.deepEqual(versions(db).slice(-5), [15, 16, 19, 20, 21])
+  assert.deepEqual(versions(db).slice(-7), [15, 16, 19, 20, 21, 22, 23])
   for (const gone of ['tailnet_login', 'tailnet_linked_at', 'tailnet_user_id']) assert.ok(!columns(db, 'users').includes(gone), gone)
   assert.ok(!columns(db, 'passkeys').includes('tailnet_added_from'))
   assert.ok(!columns(db, 'workspaces').includes('step_up'))
@@ -731,8 +731,8 @@ test('migration 17 (sign-in) and 16 (usage layouts) reach a database in either o
   // 16 first (a database that ran only 16, as staging's build left it), then this build: 17 runs, 16 is not run again.
   db = await openDatabase(file)
   assert.equal(layoutsTable(db), 1)
-  assert.deepEqual(versions(db).slice(-7), [15, 16, 17, 18, 19, 20, 21])
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 21)
+  assert.deepEqual(versions(db).slice(-9), [15, 16, 17, 18, 19, 20, 21, 22, 23])
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 23)
   assert.ok(columns(db, 'users').includes('tailnet_user_id'))
   assert.ok(columns(db, 'workspaces').includes('step_up'))
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'server_settings'").get().n, 1)
@@ -772,13 +772,13 @@ test('a database from an early build of this release, where the sign-in migratio
       VALUES ('us_early', 'ada', 'Ada', 'w', '2026-11-01T00:00:00.000Z', 'ada@example.com', '2026-11-01T00:00:00.000Z');
     ${early}
   `)
-  assert.deepEqual(versions(db).slice(-5), [15, 16, 19, 20, 21])
+  assert.deepEqual(versions(db).slice(-7), [15, 16, 19, 20, 21, 22, 23])
   assert.equal(layoutsTable(db), 0)
   db.close()
   // This build opens it: no "duplicate column", 17 marked, and the real 16 (the layouts) runs once.
   db = await openDatabase(file)
-  assert.deepEqual(versions(db).slice(-7), [15, 16, 17, 18, 19, 20, 21])
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 21)
+  assert.deepEqual(versions(db).slice(-9), [15, 16, 17, 18, 19, 20, 21, 22, 23])
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 23)
   assert.equal(layoutsTable(db), 1, 'the layouts table is made')
   assert.ok(columns(db, 'usage_layouts').includes('layout'))
   assert.ok(columns(db, 'users').includes('tailnet_user_id'))
@@ -788,7 +788,7 @@ test('a database from an early build of this release, where the sign-in migratio
   db.close()
   // Opened again: with the layouts there, 16 is theirs; nothing to repair, nothing run twice.
   db = await openDatabase(file)
-  assert.deepEqual(versions(db).slice(-7), [15, 16, 17, 18, 19, 20, 21], 'with the layouts there, 16 is theirs: left alone')
+  assert.deepEqual(versions(db).slice(-9), [15, 16, 17, 18, 19, 20, 21, 22, 23], 'with the layouts there, 16 is theirs: left alone')
   db.close()
   // The other way round for that early database: a build with only 16 (the layouts) opened it first. It
   // believed the ledger ("16 ran") and made no table; this build then sees the same signs and repairs.
@@ -799,7 +799,7 @@ test('a database from an early build of this release, where the sign-in migratio
   assert.equal(layoutsTable(db), 0, 'skipped: the ledger said 16')
   db.close()
   db = await openDatabase(second)
-  assert.deepEqual(versions(db).slice(-7), [15, 16, 17, 18, 19, 20, 21])
+  assert.deepEqual(versions(db).slice(-9), [15, 16, 17, 18, 19, 20, 21, 22, 23])
   assert.equal(layoutsTable(db), 1)
   assert.ok(columns(db, 'usage_layouts').includes('layout'), 'the real 16, not a stand-in')
   db.close()

@@ -2,11 +2,11 @@
 // exceptions, notification worker, serve-state file or project registration.
 import fs from 'node:fs'
 import path from 'node:path'
-import { randomBytes } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { agentRouter } from './routes.js'
 import { localRequest, newSettingsToken } from './settings-routes.js'
+import { createOpenPages, localOpenRequest, sendTokenHandoff } from '../open-page.js'
 
 const CLIENT = fileURLToPath(new URL('../../dist/client/', import.meta.url))
 const CSP =
@@ -17,7 +17,9 @@ export function createAgentManagement({ config, env = process.env, token = newSe
   app.disable('x-powered-by')
   app.set('trust proxy', false)
   const agents = agentRouter({ config, env, settingsToken: token, limits: agentLimits })
-  const links = new Map()
+  // --open: a 0600 page in the project's .shapewall folder posts a one-time
+  // nonce to POST /open, so it is never on a command line (src/open-page.js).
+  const pages = createOpenPages({ dir: config.outputDir, ttlMs: 60000 })
   const fail = (res, status) =>
     res.status(status).json({
       error: { code: status === 404 ? 'not_found' : 'host_only', message: 'Use the private agent settings link on this computer.' },
@@ -29,14 +31,13 @@ export function createAgentManagement({ config, env = process.env, token = newSe
     res.setHeader('Content-Security-Policy', CSP)
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Referrer-Policy', 'no-referrer')
-    if (!localRequest(req)) return fail(res, 403)
+    const opening = req.method === 'POST' && req.path === '/open'
+    if (!(opening ? localOpenRequest(req) : localRequest(req))) return fail(res, 403)
     next()
   })
-  app.get('/open/:nonce', (req, res) => {
-    const expires = links.get(req.params.nonce)
-    links.delete(req.params.nonce)
-    if (!expires || expires < Date.now()) return fail(res, 404)
-    res.redirect(303, `/#settings-token=${token}`)
+  app.post('/open', express.urlencoded({ extended: false, limit: '1kb', parameterLimit: 4 }), (req, res) => {
+    if (!pages.redeem(req.body?.nonce)) return fail(res, 404)
+    sendTokenHandoff(res, { token, target: '/' })
   })
   app.use('/api', (req, res, next) => (/^\/agent\/(?:settings(?:\/|$)|events$)/.test(req.path) ? next() : fail(res, 404)))
   app.use('/api/agent', agents)
@@ -53,16 +54,15 @@ export function createAgentManagement({ config, env = process.env, token = newSe
     res.type('html').send(html)
   })
   app.use((req, res) => fail(res, 404))
-  app.locals.openLink = () => {
-    const nonce = randomBytes(24).toString('base64url')
-    links.clear()
-    links.set(nonce, Date.now() + 60000)
-    return `/open/${nonce}`
+  // The file:// URL of a new open page for the server at `url`; only the newest works.
+  app.locals.openLink = (url) => {
+    pages.close()
+    return pages.mint(new URL('/open', url).href)
   }
   let stopped
   app.locals.close = () => {
     closing = true
-    links.clear()
+    pages.close()
     stopped ||= agents.close()
     return stopped
   }

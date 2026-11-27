@@ -15,6 +15,7 @@ import {
 } from '../feedback.js'
 import { AGENT_STATUSES, addReply, deleteComment, getComment, setAgentStatus, updateComment } from '../store.js'
 import { mentionFlag, withNotifications } from './notify.js'
+import { runByAgent } from '../agent-run.js'
 
 // Changes (resolve, reply, ...) send their notifications before the command exits.
 export async function comments(positional, flags, out, err) {
@@ -66,7 +67,8 @@ async function commentAction(config, positional, flags, out, err) {
         resolution: typeof flags.note === 'string' ? flags.note : undefined,
         ...(action === 'resolve' && typeof flags.ref === 'string' ? { fixRef: flags.ref } : {}),
       },
-      { actor: authorFlag(flags, { dir: config.dir }) },
+      // This machine's own command line: the owner, or an agent run of theirs.
+      { actor: authorFlag(flags, { dir: config.dir }), by: runByAgent() ? 'agent' : 'owner' },
     )
     if (flags.json) printJson(comment)
     else out(`#${comment.id} is ${comment.status}`)

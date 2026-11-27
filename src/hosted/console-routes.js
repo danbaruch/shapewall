@@ -469,15 +469,27 @@ export function mountConsoleRoutes(consoleApi, deps) {
         project: req.project.id,
         policy: JSON.stringify(policy),
       })
-      // What changed, setting by setting (names of settings and their values; the board overrides as a count).
+      // What changed, setting by setting (names of settings and their values;
+      // for the board overrides, which settings of which board changed).
       const shown = (value) =>
         Array.isArray(value) ? value.join(', ') || 'none' : value && typeof value === 'object' ? Object.keys(value).length : value
       const changed = Object.keys(policy).filter((key) => JSON.stringify(policy[key]) !== JSON.stringify(before[key]))
+      const boardKeys = {}
+      if (changed.includes('boards'))
+        for (const id of new Set([...Object.keys(before.boards || {}), ...Object.keys(policy.boards || {})])) {
+          const was = before.boards?.[id] || {}
+          const now = policy.boards?.[id] || {}
+          const keys = [...new Set([...Object.keys(was), ...Object.keys(now)])].filter(
+            (key) => JSON.stringify(was[key]) !== JSON.stringify(now[key]),
+          )
+          if (keys.length) boardKeys[id] = keys
+        }
       auditOf(req, 'agent_policy_changed', req.project.id, {
         name: req.project.name,
         changed,
         before: Object.fromEntries(changed.map((key) => [key, shown(before[key])])),
         after: Object.fromEntries(changed.map((key) => [key, shown(policy[key])])),
+        ...(changed.includes('boards') ? { boardsChanged: boardKeys } : {}),
       })
       res.json({ policy })
     }),
@@ -527,7 +539,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
       // A token that was an agent: what waited for it goes to any agent, and
       // the project loses it as its default (src/hosted/agents.js).
       const agents = agentsFor(req.t)
-      const agent = agents.forToken(req.project.id, String(req.params.tid))
+      const agent = agents.forToken(req.project.id, String(req.params.tid), { create: false })
       if (agent)
         agents.afterRevoke(
           { userId: req.user.id, role: req.role, audit: (action, target, detail) => auditOf(req, action, target, detail) },

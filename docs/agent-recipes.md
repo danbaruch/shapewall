@@ -35,8 +35,9 @@ shapewall agent connect --remote https://wall.example.com --as scout --name "Sco
 An admin approves the code it prints, names the agent and chooses who may use it. By default it reads the project and answers,
 and does not change files or run commands from the board. Add `--approvals owner` on that machine to let it make a fix for a
 comment: on a new branch, never in the checkout, each edit allowed on the board by you
-([Edits from the board](hosted.md#edits-from-the-board-the-trust-decision)). It runs no commands from the board, so keep a `watch`
-recipe for fixes that need to build, test or recapture. Only Claude Code can be connected in this release.
+([Edits from the board](hosted.md#edits-from-the-board-the-trust-decision)). It runs only the commands its machine allows (the
+project's named commands, or a shell in the OS sandbox: [what an agent can do](agent-capabilities.md)), so keep a `watch` recipe
+for fixes that need more, such as a recapture. Only Claude Code can be connected in this release.
 Codex, goose and Gemini CLI are refused with a message: their read-only behaviour could not be shown to hold, so for them the
 `watch` recipes below, with `--remote`, stay the way.
 See [Connected agents](hosted.md#connected-agents).
@@ -44,6 +45,9 @@ See [Connected agents](hosted.md#connected-agents).
 ## Claude Code
 
 ### MCP in your session
+
+`npx shapewall agent setup --claude` registers the server for you, in this project and only for you
+([details](agent-workflow.md#your-agent-finds-the-board)). For the whole team, committed in `.mcp.json`:
 
 ```sh
 claude mcp add --scope project shapewall -- npx shapewall mcp
@@ -111,6 +115,9 @@ npx shapewall watch --exec "codex exec --sandbox workspace-write -c sandbox_work
 Without the `-c` setting the change and the reply still happen, but the capture fails inside the sandbox; recapture yourself afterwards.
 
 ### MCP
+
+`npx shapewall agent setup --codex` writes the entry with `tool_timeout_sec = 600` and keeps the rest of `~/.codex/config.toml`
+([details](agent-workflow.md#your-agent-finds-the-board)). By hand:
 
 ```sh
 codex mcp add shapewall -- npx shapewall mcp --config "$PWD/shapewall.config.json"

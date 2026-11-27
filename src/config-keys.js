@@ -32,9 +32,11 @@ export const TOP_LEVEL_KEYS = [
   'github',
   'agent',
   'starterAgent',
+  'commands',
   'sitemap',
   'ci',
   'checks',
+  'agentDocs',
 ]
 export const BOARD_KEYS = [
   'id',

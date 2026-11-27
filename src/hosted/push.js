@@ -22,7 +22,7 @@ import { ID_RE, frameSize, normalizeConfig } from '../config.js'
 import { FILE_MAX as HTML_MAX, withCspMeta } from '../capture/live.js'
 import { CssTooLargeError, sanitizeDocument } from '../capture/sanitize.js'
 import { ELEMENT_MAP_LIMITS, ElementMapError, parseElementMap } from '../capture/element-map.js'
-import { CAPTURE_FILE_RE, VERSION_FILE_RE, VERSION_RE } from '../store.js'
+import { CAPTURE_FILE_RE, VERSION_FILE_RE, VERSION_RE, entryVersion, versionTime } from '../store.js'
 import { referencedVersions } from './retention.js'
 import { ID_PATTERNS, newId } from './crypto.js'
 import { transaction } from './db.js'
@@ -53,6 +53,8 @@ export const PUSH_LIMITS = {
   // Everything a workspace stores (committed boards plus open pushes).
   workspaceBytes: 5 * 1024 * 1024 * 1024,
 }
+// How far ahead of the server's clock a page push's capture time may be.
+const FUTURE_SKEW_MS = 10 * 60_000
 const PNG_MAX_WIDTH = 3840
 const PNG_MAX_HEIGHT = 8000
 
@@ -357,6 +359,91 @@ function cleanVariants(raw, board) {
   return out
 }
 
+// The pages and viewports of a page push, checked against the pushed board:
+// { <page id>: [<viewport>, ...] } -> [[page, viewport], ...].
+function pagePairs(raw, board) {
+  if (!isObject(raw)) throw new PushError(400, 'invalid_pages', 'Send pages as { "<page id>": ["<viewport>", ...] }.')
+  const entries = Object.entries(raw)
+  if (!entries.length || entries.length > PUSH_LIMITS.pages)
+    throw new PushError(400, 'invalid_pages', `A page push names 1 to ${PUSH_LIMITS.pages} pages.`)
+  const pairs = []
+  for (const [pageId, list] of entries) {
+    const page = board.pages.find((item) => item.id === pageId)
+    if (!page) throw new PushError(400, 'unknown_page', `No page "${String(pageId).slice(0, 64)}" on board "${board.id}".`)
+    if (!Array.isArray(list) || !list.length) throw new PushError(400, 'invalid_pages', `Name the viewports of "${page.id}".`)
+    for (const viewport of new Set(list)) {
+      if (typeof viewport !== 'string' || !page.viewports.includes(viewport))
+        throw new PushError(400, 'unknown_viewport', `Page "${page.id}" has no viewport "${String(viewport).slice(0, 40)}".`)
+      pairs.push([page.id, viewport])
+    }
+  }
+  return pairs
+}
+
+function regularFile(file) {
+  try {
+    return fs.lstatSync(file).isFile()
+  } catch {
+    return false
+  }
+}
+
+// A board file into a page push's staging folder: a hard link (no bytes
+// copied, so the commit holds the write lock only for the walk, and the data
+// is already on disk), else a copy that is synced before the commit. Board
+// files are never written in place (a push swaps whole folders in, retention
+// unlinks), so sharing an inode with the board being replaced is safe.
+function linkOrCopy(from, to) {
+  try {
+    fs.linkSync(from, to)
+    return
+  } catch (error) {
+    if (!['EXDEV', 'EPERM', 'ENOTSUP', 'EMLINK', 'EACCES'].includes(error.code)) throw error
+  }
+  fs.copyFileSync(from, to, fs.constants.COPYFILE_FICLONE)
+  const fd = fs.openSync(to, 'r')
+  try {
+    fs.fsyncSync(fd)
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+// Links (or copies) the regular files and folders of `from` into `to`
+// (relative paths that `keep` accepts), never following a link. Files
+// already in `to` stay.
+function copyBoard(from, to, keep, relative = '') {
+  for (const entry of fs.readdirSync(path.join(from, relative), { withFileTypes: true })) {
+    const name = path.join(relative, entry.name)
+    if (entry.isDirectory()) copyBoard(from, to, keep, name)
+    else if (entry.isFile() && keep(name)) {
+      const dest = path.join(to, name)
+      if (fs.existsSync(dest)) continue
+      fs.mkdirSync(path.dirname(dest), { recursive: true })
+      linkOrCopy(path.join(from, name), dest)
+    }
+  }
+}
+
+// Bytes of the regular files under `dir`.
+function folderBytes(dir) {
+  let total = 0
+  for (const entry of safeEntries(dir)) {
+    const file = path.join(dir, entry.name)
+    if (entry.isDirectory()) total += folderBytes(file)
+    else if (entry.isFile()) total += fs.statSync(file).size
+  }
+  return total
+}
+
+function safeEntries(dir) {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+}
+
 export function createPushStore(
   t,
   { db, dataDir, workspaceQuota = PUSH_LIMITS.workspaceBytes, boardsPerProject = PUSH_LIMITS.boardsPerProject },
@@ -378,6 +465,7 @@ export function createPushStore(
   }
 
   function start({ projectId, tokenId, raw, now = new Date() }) {
+    if (isObject(raw) && raw.mode === 'pages') return startPages({ projectId, tokenId, raw, now })
     const definition = cleanDefinition(raw)
     sweep(now)
     const boards = t.all('SELECT board_id FROM boards WHERE workspace_id = :ws AND project_id = :project', { project: projectId })
@@ -455,6 +543,12 @@ export function createPushStore(
     const board = first.definition.board
     const parsed = parseName(String(area), String(name), board)
     if (!parsed) throw new PushError(400, 'invalid_file', 'That file name is not one Shapewall writes for this board.')
+    // A page push takes only the captures of its own pages and viewports.
+    if (
+      first.definition.mode === 'pages' &&
+      (area !== 'captures' || !first.definition.pairs.some(([page, viewport]) => page === parsed.owner && viewport === parsed.viewport))
+    )
+      throw new PushError(400, 'invalid_file', 'This page push takes only the captures of the pages and viewports it named.')
     if (!Buffer.isBuffer(body) || !body.length) throw new PushError(400, 'empty_file', 'Send the file as the request body.')
     if (first.files >= PUSH_LIMITS.files) throw new PushError(413, 'too_many_files', `A push holds at most ${PUSH_LIMITS.files} files.`)
     const limit = PUSH_LIMITS[parsed.kind]
@@ -480,7 +574,18 @@ export function createPushStore(
       throw new PushError(413, 'too_many_files', `A push holds at most ${PUSH_LIMITS.files} files.`)
     const grow = clean.length - (previous ?? 0)
     if (push.bytes + grow > PUSH_LIMITS.bytes) throw new PushError(413, 'too_large', 'This push is over the size cap.')
-    if (workspaceBytesBesides(projectId, board.id) + grow > workspaceQuota) {
+    // A page push keeps the board it adds to, so its bytes count here too.
+    const kept =
+      push.definition.mode === 'pages'
+        ? t.get(
+            'SELECT COALESCE(SUM(bytes), 0) AS n FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board',
+            {
+              project: projectId,
+              board: board.id,
+            },
+          ).n
+        : 0
+    if (workspaceBytesBesides(projectId, board.id) + kept + grow > workspaceQuota) {
       throw new PushError(413, 'quota_exceeded', 'This workspace is over its storage quota.')
     }
     fs.mkdirSync(dir, { recursive: true })
@@ -493,10 +598,303 @@ export function createPushStore(
     return { name, bytes: clean.length }
   }
 
+  const boardFolder = (projectId, boardId) => path.join(projectDir(dataDir, t.workspaceId, projectId), boardId)
+
+  // The workspace quota with `bytes` as the new size of this board.
+  function checkQuota(projectId, boardId, bytes) {
+    const others = t.get(
+      'SELECT COALESCE(SUM(bytes), 0) AS n FROM boards WHERE workspace_id = :ws AND NOT (project_id = :project AND board_id = :board)',
+      { project: projectId, board: boardId },
+    ).n
+    if (others + commentFileBytes(t) + bytes > workspaceQuota)
+      throw new PushError(413, 'quota_exceeded', 'This workspace is over its storage quota.')
+  }
+
+  // Swaps the push's staging folder in as the board's folder, inside one
+  // write transaction that also marks the push committed. `prepare(at)` runs
+  // first in that transaction (after the token is checked again): it finishes
+  // the staging folder and writes the board's row. `carried` are files it
+  // added to the staging folder that a failed commit takes out again.
+  function installBoard({ push, projectId, boardId, credential, carried, prepare, now }) {
+    const target = boardFolder(projectId, boardId)
+    const staging = stagingDir(push.id)
+    const old = `${target}.old-${push.id}`
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    // Written down before the first rename, so a crash anywhere in the swap
+    // can be put right from the database's word (recoverSwaps).
+    const swap = { push: push.id, workspace: t.workspaceId, project: projectId, board: boardId, hadTarget: fs.existsSync(target) }
+    writeSwap(dataDir, swap)
+    let settled = false
+    try {
+      transaction(db, () => {
+        try {
+          commitInLock()
+        } catch (error) {
+          // Still inside the write lock and nothing committed: the folders
+          // go back before anyone else can write (a failed COMMIT itself is
+          // settled after the rollback, below.)
+          try {
+            if (settleSwap(dataDir, swap, false) !== 'kept') removeSwap(dataDir, push.id)
+            for (const file of carried) fs.rmSync(file, { force: true })
+            settled = true
+          } catch {
+            /* settled below, or by the sweep */
+          }
+          throw error
+        }
+      })
+    } catch (error) {
+      if (!settled) {
+        // COMMIT itself failed (or settling above did): the folders go back
+        // to how they were, by what the database says. If that cannot be
+        // done now, the journal stays and the next sweep does it.
+        try {
+          if (settleSwap(dataDir, swap, pushStatus(db, push.id) === 'committed') !== 'kept') removeSwap(dataDir, push.id)
+          // The push is open again with only its own uploads (a retry carries again).
+          for (const file of carried) fs.rmSync(file, { force: true })
+        } catch {
+          /* the sweep settles it */
+        }
+      }
+      throw error
+    }
+    function commitInLock() {
+      const at = now.toISOString()
+      if (credential) {
+        const live = findApiToken(db, credential.hash, credential.now().toISOString())
+        if (!live || live.id !== credential.id || live.project_id !== projectId || live.workspace_id !== t.workspaceId)
+          throw new PushError(401, 'bad_token', 'This token is no longer valid for this project.')
+        if (!JSON.parse(live.scopes).includes('push'))
+          throw new PushError(403, 'missing_scope', 'This token does not have the "push" scope.')
+      }
+      prepare(at)
+      t.run("UPDATE pushes SET status = 'committed', finished_at = :at WHERE workspace_id = :ws AND id = :id", { id: push.id, at })
+      // Inside the transaction: if the swap fails, the rows roll back too.
+      if (fs.existsSync(target)) fs.renameSync(target, old)
+      try {
+        fs.renameSync(staging, target)
+      } catch (error) {
+        // Not there: put the old one back. There after all (the rename landed
+        // and then reported a failure): settleSwap takes both back.
+        if (fs.existsSync(old) && !fs.existsSync(target)) fs.renameSync(old, target)
+        throw error
+      }
+      // The renames on disk before COMMIT: a power loss must not keep the
+      // commit and lose the folders it names.
+      syncDir(path.dirname(target))
+      syncDir(path.dirname(staging))
+    }
+    try {
+      settleSwap(dataDir, swap, true)
+      removeSwap(dataDir, push.id)
+    } catch {
+      /* committed: the sweep removes the old folder */
+    }
+  }
+
+  // ---- Page pushes ----
+  //
+  // `{ mode: "pages", board, pages: { <page>: [<viewport>, ...] } }` starts a
+  // push that replaces only those pages' captures, for those viewports, on a
+  // board already pushed: `shapewall push --page` and recapture_pages of
+  // `mcp --remote`. Every other page, the variants, the versions, the
+  // checks and the board definition stay as the server has them at commit
+  // time (another machine may have pushed meanwhile). Only captures/ files
+  // of the named pages and viewports are taken; the commit builds the rest of
+  // the staging folder from the board as it is then, inside the write
+  // transaction, and swaps it in like a whole push, so a page push is atomic
+  // and recoverable the same way.
+  //
+  // Stale writes: a capture's version starts with the time it was taken
+  // (VERSION_RE). The commit refuses the whole push (409 stale_capture) when
+  // any page and viewport on the board holds a capture taken later than the
+  // one sent, so an older capture never replaces a newer one, whichever
+  // machine pushed it. The capture it replaces becomes a version (history and
+  // comments made on it keep working); retention trims versions as usual.
+  function startPages({ projectId, tokenId, raw, now }) {
+    const boardId = String(raw.board || '')
+    if (!ID_RE.test(boardId)) throw new PushError(400, 'invalid_board', 'Send { mode: "pages", board, pages }.')
+    const row = t.get('SELECT definition FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
+      project: projectId,
+      board: boardId,
+    })
+    if (!row) throw new PushError(404, 'unknown_board', `No board "${boardId}" here yet. Push the whole board first: shapewall push`)
+    const definition = JSON.parse(row.definition)
+    const pairs = pagePairs(raw.pages, definition.board)
+    sweep(now)
+    const id = newId('ps')
+    t.run(
+      `INSERT INTO pushes (workspace_id, id, project_id, board_id, token_id, definition, status, created_at)
+       VALUES (:ws, :id, :project, :board, :token, :definition, 'open', :at)`,
+      {
+        id,
+        project: projectId,
+        board: boardId,
+        token: tokenId || null,
+        definition: JSON.stringify({ ...definition, mode: 'pages', pairs }),
+        at: now.toISOString(),
+      },
+    )
+    fs.mkdirSync(stagingDir(id), { recursive: true })
+    return {
+      id,
+      board: boardId,
+      mode: 'pages',
+      pages: Object.fromEntries(pairs.map(([page]) => [page, pairs.filter((pair) => pair[0] === page).map((pair) => pair[1])])),
+      limits: {
+        png: PUSH_LIMITS.png,
+        html: PUSH_LIMITS.html,
+        elements: PUSH_LIMITS.elements,
+        files: PUSH_LIMITS.files,
+        bytes: PUSH_LIMITS.bytes,
+      },
+    }
+  }
+
+  function commitPages({ push, projectId, manifest, credential, now }) {
+    const { board, viewports, pairs } = push.definition
+    const staging = stagingDir(push.id)
+    const target = boardFolder(projectId, board.id)
+    const replaced = new Set(pairs.map(([page, viewport]) => `${page}.${viewport}`))
+    // What this push brings: the files uploaded for its pages and viewports,
+    // and a manifest entry for each, an ok capture with a version.
+    const sent = {}
+    for (const [page, viewport] of pairs) {
+      if (!fs.existsSync(path.join(staging, 'captures', `${page}.${viewport}.png`)))
+        throw new PushError(400, 'missing_file', `${page}.${viewport}.png was not uploaded; nothing was committed.`)
+      const entry = manifest?.pages?.[page]?.[viewport]
+      if (!isObject(entry) || entry.status !== 'ok' || typeof entry.version !== 'string' || !VERSION_RE.test(entry.version))
+        throw new PushError(400, 'invalid_manifest', `The manifest needs an ok capture with a version for ${page} (${viewport}).`)
+      // The version is the capture's time: one from the future would hold
+      // this page against every later push (the stale guard), so a client
+      // clock more than ten minutes ahead of the server's is refused.
+      const taken = Date.parse(versionTime(entry.version) || '')
+      if (!Number.isFinite(taken) || taken > now.getTime() + FUTURE_SKEW_MS)
+        throw new PushError(
+          400,
+          'invalid_manifest',
+          `The capture of ${page} (${viewport}) is dated in the future; check this machine's clock.`,
+        )
+      sent[`${page}.${viewport}`] = entry
+    }
+    // The staging folder down to this push's own uploads: before each commit
+    // attempt (a retry starts again from them) and after a failed one, so a
+    // refused commit leaves no copy of the board behind.
+    const keepUploads = () => {
+      for (const entry of safeList(staging)) {
+        if (entry !== 'captures') fs.rmSync(path.join(staging, entry), { recursive: true, force: true })
+      }
+      for (const name of safeList(path.join(staging, 'captures'))) {
+        if (!replaced.has(name.split('.').slice(0, 2).join('.')) || !CAPTURE_FILE_RE.test(name))
+          fs.rmSync(path.join(staging, 'captures', name), { force: true })
+      }
+    }
+    let pages = 0
+    try {
+      installBoard({
+        push,
+        projectId,
+        boardId: board.id,
+        credential,
+        carried: [],
+        now,
+        prepare: (at) => {
+          // The board as it is now, read in the write transaction.
+          const row = t.get('SELECT definition FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
+            project: projectId,
+            board: board.id,
+          })
+          if (!row || !fs.existsSync(target))
+            throw new PushError(409, 'board_gone', 'The board was removed meanwhile; nothing was committed.')
+          const current = JSON.parse(row.definition)
+          for (const [page, viewport] of pairs)
+            if (!current.board.pages.some((item) => item.id === page && item.viewports.includes(viewport)))
+              throw new PushError(409, 'board_changed', `The board no longer has ${page} (${viewport}); push the whole board.`)
+          let currentManifest = null
+          try {
+            currentManifest = JSON.parse(fs.readFileSync(path.join(target, 'captures', 'manifest.json'), 'utf8'))
+          } catch {
+            currentManifest = null
+          }
+          const stale = []
+          for (const [page, viewport] of pairs) {
+            const held = entryVersion(currentManifest?.pages?.[page]?.[viewport], currentManifest)
+            if (held && held.slice(0, 19) > sent[`${page}.${viewport}`].version.slice(0, 19)) stale.push(`${page} (${viewport})`)
+          }
+          if (stale.length)
+            throw new PushError(
+              409,
+              'stale_capture',
+              `The board has a newer capture of ${stale.join(', ')} than this push; nothing was committed. Capture again, then push.`,
+            )
+          keepUploads()
+          // Everything else from the board as it is: other pages, variants,
+          // versions, checks (hard links where the file system allows).
+          // Never through a symlink.
+          copyBoard(target, staging, (relative) => {
+            if (relative === path.join('captures', 'manifest.json')) return false
+            if (path.dirname(relative) === 'captures') return !replaced.has(path.basename(relative).split('.').slice(0, 2).join('.'))
+            return true
+          })
+          // The capture each of these replaces becomes a version, as on a
+          // local recapture, unless the board already keeps it.
+          for (const [page, viewport] of pairs) {
+            const version = entryVersion(currentManifest?.pages?.[page]?.[viewport], currentManifest)
+            if (!version || version === sent[`${page}.${viewport}`].version) continue
+            for (const suffix of ['.png', '.thumb.png', '.html']) {
+              const from = path.join(target, 'captures', `${page}.${viewport}${suffix}`)
+              const to = path.join(staging, 'versions', `${page}.${viewport}.${version}${suffix}`)
+              if (!regularFile(from) || fs.existsSync(to)) continue
+              fs.mkdirSync(path.dirname(to), { recursive: true })
+              linkOrCopy(from, to)
+            }
+          }
+          const files = new Set()
+          for (const area of ['captures', 'variants', 'versions'])
+            for (const name of safeList(path.join(staging, area))) files.add(`${area}/${name}`)
+          const merged = { ...(currentManifest || {}), pages: {} }
+          // Pages this push leaves keep their version as it is now: an entry
+          // from before versions existed takes its version from the run's time,
+          // which would otherwise move with the merged capturedAt.
+          for (const [page, entries] of Object.entries(currentManifest?.pages || {})) {
+            merged.pages[page] = {}
+            for (const [viewport, entry] of Object.entries(isObject(entries) ? entries : {})) {
+              const version = isObject(entry) && !entry.version ? entryVersion(entry, currentManifest) : null
+              merged.pages[page][viewport] = version ? { ...entry, version } : entry
+            }
+          }
+          for (const [page, viewport] of pairs)
+            merged.pages[page] = { ...(merged.pages[page] || {}), [viewport]: sent[`${page}.${viewport}`] }
+          const times = [currentManifest?.capturedAt, manifest?.capturedAt].filter((value) => Number.isFinite(Date.parse(value || '')))
+          merged.capturedAt = times.sort((a, b) => Date.parse(b) - Date.parse(a))[0] || null
+          const nextManifest = cleanManifest(merged, current.board, current.viewports || viewports, files)
+          fs.mkdirSync(path.join(staging, 'captures'), { recursive: true })
+          fs.writeFileSync(path.join(staging, 'captures', 'manifest.json'), JSON.stringify(nextManifest))
+          const bytes = folderBytes(staging)
+          checkQuota(projectId, board.id, bytes)
+          t.run(
+            'UPDATE boards SET pushed_at = :at, push_count = push_count + 1, bytes = :bytes WHERE workspace_id = :ws AND project_id = :project AND board_id = :board',
+            { at, bytes, project: projectId, board: board.id },
+          )
+          pages = new Set(pairs.map(([page]) => page)).size
+        },
+      })
+    } catch (error) {
+      try {
+        if (fs.existsSync(staging)) keepUploads()
+      } catch {
+        /* the push expires within the hour, and its staging folder with it */
+      }
+      throw error
+    }
+    return { board: board.id, mode: 'pages', files: push.files, pages, viewports: pairs.length, checks: 0 }
+  }
+
   // Writes the cleaned manifest and variants, swaps the staging folder in
   // and records the board definition.
   function commit({ pushId, projectId, manifest, variants, checks, now = new Date(), credential }) {
     const push = openPush(pushId, projectId, now)
+    if (push.definition.mode === 'pages') return commitPages({ push, projectId, manifest, credential, now })
     const { board, viewports } = push.definition
     const staging = stagingDir(push.id)
     let cleanChecks = { schemaVersion: 1, reports: [] }
@@ -594,125 +992,59 @@ export function createPushStore(
     const nextManifest = cleanManifest(manifest, board, viewports, files)
     fs.writeFileSync(path.join(staging, 'captures', 'manifest.json'), JSON.stringify(nextManifest))
     fs.writeFileSync(path.join(staging, 'variants.json'), JSON.stringify({ variants: cleanList }))
-    const target = path.join(projectDir(dataDir, t.workspaceId, projectId), board.id)
-    const old = `${target}.old-${push.id}`
-    fs.mkdirSync(path.dirname(target), { recursive: true })
-    // Written down before the first rename, so a crash anywhere in the swap
-    // can be put right from the database's word (recoverSwaps).
-    const swap = { push: push.id, workspace: t.workspaceId, project: projectId, board: board.id, hadTarget: fs.existsSync(target) }
-    writeSwap(dataDir, swap)
+    const target = boardFolder(projectId, board.id)
     // History the board's comments point at, copied over from the board
     // being replaced (carryReferenced); taken out again if the commit fails.
-    let carried = []
-    let settled = false
-    try {
-      transaction(db, () => {
-        try {
-          commitInLock()
-        } catch (error) {
-          // Still inside the write lock and nothing committed: the folders
-          // go back before anyone else can write (a failed COMMIT itself is
-          // settled after the rollback, below.)
-          try {
-            if (settleSwap(dataDir, swap, false) !== 'kept') removeSwap(dataDir, push.id)
-            for (const file of carried) fs.rmSync(file, { force: true })
-            settled = true
-          } catch {
-            /* settled below, or by the sweep */
-          }
-          throw error
-        }
-      })
-    } catch (error) {
-      if (!settled) {
-        // COMMIT itself failed (or settling above did): the folders go back
-        // to how they were, by what the database says. If that cannot be
-        // done now, the journal stays and the next sweep does it.
-        try {
-          if (settleSwap(dataDir, swap, pushStatus(db, push.id) === 'committed') !== 'kept') removeSwap(dataDir, push.id)
-          // The push is open again with only its own uploads (a retry carries again).
-          for (const file of carried) fs.rmSync(file, { force: true })
-        } catch {
-          /* the sweep settles it */
-        }
-      }
-      throw error
-    }
-    function commitInLock() {
-      const at = now.toISOString()
-      if (credential) {
-        const live = findApiToken(db, credential.hash, credential.now().toISOString())
-        if (!live || live.id !== credential.id || live.project_id !== projectId || live.workspace_id !== t.workspaceId)
-          throw new PushError(401, 'bad_token', 'This token is no longer valid for this project.')
-        if (!JSON.parse(live.scopes).includes('push'))
-          throw new PushError(403, 'missing_scope', 'This token does not have the "push" scope.')
-      }
-      const existing = t.get('SELECT board_id FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
-        project: projectId,
-        board: board.id,
-      })
-      // Rechecked here: other pushes may have committed since this one started.
-      if (!existing) {
-        const count = t.get('SELECT COUNT(*) AS n FROM boards WHERE workspace_id = :ws AND project_id = :project', {
+    const carried = []
+    installBoard({
+      push,
+      projectId,
+      boardId: board.id,
+      credential,
+      carried,
+      now,
+      prepare: (at) => {
+        const existing = t.get('SELECT board_id FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
           project: projectId,
-        }).n
-        if (count >= boardsPerProject) throw new PushError(409, 'too_many_boards', `A project holds at most ${boardsPerProject} boards.`)
-      }
-      // Read in the transaction: no comment can pin a version between this
-      // and the swap. Their bytes count once, with the board's.
-      const plan = existing ? planCarry(referencedVersions(t, projectId, board.id), target, staging, nextManifest) : []
-      const bytes = push.bytes + checkBytes + plan.reduce((n, item) => n + item.bytes, 0)
-      const others = t.get(
-        'SELECT COALESCE(SUM(bytes), 0) AS n FROM boards WHERE workspace_id = :ws AND NOT (project_id = :project AND board_id = :board)',
-        { project: projectId, board: board.id },
-      ).n
-      if (others + commentFileBytes(t) + bytes > workspaceQuota)
-        throw new PushError(413, 'quota_exceeded', 'This workspace is over its storage quota.')
-      if (plan.length) fs.mkdirSync(path.join(staging, 'versions'), { recursive: true })
-      // Each under a temporary name, renamed when whole: a crash mid-copy
-      // never leaves a cut-short file under a name a retry would install.
-      for (const item of plan) {
-        const temp = `${item.to}${CARRYING}`
-        fs.copyFileSync(item.from, temp)
-        carried.push(temp)
-        fs.renameSync(temp, item.to)
-        carried.push(item.to)
-      }
-      const definition = JSON.stringify(push.definition)
-      if (existing) {
-        t.run(
-          'UPDATE boards SET definition = :definition, pushed_at = :at, push_count = push_count + 1, bytes = :bytes WHERE workspace_id = :ws AND project_id = :project AND board_id = :board',
-          { definition, at, bytes, project: projectId, board: board.id },
-        )
-      } else {
-        t.run(
-          `INSERT INTO boards (workspace_id, project_id, board_id, definition, pushed_at, push_count, bytes, created_at)
-           VALUES (:ws, :project, :board, :definition, :at, 1, :bytes, :at)`,
-          { project: projectId, board: board.id, definition, at, bytes },
-        )
-      }
-      t.run("UPDATE pushes SET status = 'committed', finished_at = :at WHERE workspace_id = :ws AND id = :id", { id: push.id, at })
-      // Inside the transaction: if the swap fails, the rows roll back too.
-      if (fs.existsSync(target)) fs.renameSync(target, old)
-      try {
-        fs.renameSync(staging, target)
-      } catch (error) {
-        // Not there: put the old one back. There after all (the rename landed
-        // and then reported a failure): settleSwap takes both back.
-        if (fs.existsSync(old) && !fs.existsSync(target)) fs.renameSync(old, target)
-        throw error
-      }
-      // The renames on disk before COMMIT: a power loss must not keep the
-      // commit and lose the folders it names.
-      syncDir(path.dirname(target))
-      syncDir(path.dirname(staging))
-    }
-    try {
-      settleSwap(dataDir, swap, true)
-      removeSwap(dataDir, push.id)
-    } catch {
-      /* committed: the sweep removes the old folder */
-    }
+          board: board.id,
+        })
+        // Rechecked here: other pushes may have committed since this one started.
+        if (!existing) {
+          const count = t.get('SELECT COUNT(*) AS n FROM boards WHERE workspace_id = :ws AND project_id = :project', {
+            project: projectId,
+          }).n
+          if (count >= boardsPerProject) throw new PushError(409, 'too_many_boards', `A project holds at most ${boardsPerProject} boards.`)
+        }
+        // Read in the transaction: no comment can pin a version between this
+        // and the swap. Their bytes count once, with the board's.
+        const plan = existing ? planCarry(referencedVersions(t, projectId, board.id), target, staging, nextManifest) : []
+        const bytes = push.bytes + checkBytes + plan.reduce((n, item) => n + item.bytes, 0)
+        checkQuota(projectId, board.id, bytes)
+        if (plan.length) fs.mkdirSync(path.join(staging, 'versions'), { recursive: true })
+        // Each under a temporary name, renamed when whole: a crash mid-copy
+        // never leaves a cut-short file under a name a retry would install.
+        for (const item of plan) {
+          const temp = `${item.to}${CARRYING}`
+          fs.copyFileSync(item.from, temp)
+          carried.push(temp)
+          fs.renameSync(temp, item.to)
+          carried.push(item.to)
+        }
+        const definition = JSON.stringify(push.definition)
+        if (existing) {
+          t.run(
+            'UPDATE boards SET definition = :definition, pushed_at = :at, push_count = push_count + 1, bytes = :bytes WHERE workspace_id = :ws AND project_id = :project AND board_id = :board',
+            { definition, at, bytes, project: projectId, board: board.id },
+          )
+        } else {
+          t.run(
+            `INSERT INTO boards (workspace_id, project_id, board_id, definition, pushed_at, push_count, bytes, created_at)
+             VALUES (:ws, :project, :board, :definition, :at, 1, :bytes, :at)`,
+            { project: projectId, board: board.id, definition, at, bytes },
+          )
+        }
+      },
+    })
     return { board: board.id, files: files.size, pages: board.pages.length, checks: cleanChecks.reports.length }
   }
 

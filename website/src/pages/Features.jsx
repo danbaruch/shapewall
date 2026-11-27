@@ -4,12 +4,16 @@ import { ArrowRight, Check, Download } from 'lucide-react'
 import { Badge, Container, Eyebrow, GetStarted, LiveDemo, Shot } from '../components/ui.jsx'
 import {
   BeforeAfter,
+  CapabilitiesIllustration,
   CaptureIllustration,
+  FollowIllustration,
   GithubIllustration,
   JourneyIllustration,
   MapIllustration,
   NotifyIllustration,
   PhonePair,
+  SetupIllustration,
+  TriggersIllustration,
 } from '../components/illustrations.jsx'
 import { AgentTerminal } from '../components/terminal.jsx'
 import { FinalCta } from './Home.jsx'
@@ -126,6 +130,75 @@ const SECTIONS = [
     links: [{ to: '/docs/agent-hardening', label: 'Read the hardening guide' }],
     art: <AgentTerminal />,
     dark: true,
+  },
+  {
+    id: 'capabilities',
+    group: 'Steer your agents',
+    nav: 'What it can do',
+    title: 'Your agent tests its own work, inside limits you set',
+    text: 'What an agent may do on a board follows who wrote the turn. On your own turns it runs your project\u2019s named commands and a shell inside an OS sandbox, and checks its work in a headless browser that opens only your app. When someone else wrote the turn, each command waits for a card on the board.',
+    points: [
+      'Named commands from shapewall.config.json: test, build, dev and lint, each run without a shell',
+      'Commands in a bubblewrap sandbox on Linux: the fix copy only, no home folder, package registries only',
+      'Commands run in a copy, never your checkout: a local board gets them with Work on a branch; on macOS, editing sessions get none in 1.4.0',
+      'Approvals are asked again when the agent changes a manifest, a lockfile or a test the command reads',
+      'The machine that runs the agent sets the ceiling; a project\u2019s setting can only lower it',
+      'A connected agent on a team server starts read and answer only; each line is switched on on its own machine',
+      'The console, shapewall agent status and the agent itself list the same lines',
+    ],
+    links: [{ to: '/docs/agent-capabilities', label: 'What an agent can do' }],
+    art: <CapabilitiesIllustration />,
+  },
+  {
+    id: 'setup',
+    group: 'Steer your agents',
+    nav: 'Agent setup',
+    title: 'Your agent finds the board on its own',
+    text: 'shapewall init adds a short Shapewall section to your project\u2019s AGENTS.md, so any agent that opens the project knows the board is there and how to read it. One more command registers the MCP server with Claude Code and Codex, or install the plugin for the same server plus skills.',
+    points: [
+      'A marked section in AGENTS.md (and a one-line CLAUDE.md that imports it); a file you already have is never edited unless you ask',
+      'shapewall agent setup shows the change, asks first, backs up each file and undoes cleanly with --remove',
+      'The Claude Code and Codex plugin (experimental): the MCP server plus skills to take the next comment, open the board and show status',
+      'Connected agents follow your project\u2019s instruction files, and Claude Code\u2019s auto memory stays off for them',
+    ],
+    links: [
+      { to: '/docs/agent-workflow#your-agent-finds-the-board', label: 'How your agent finds the board' },
+      { to: '/docs/plugins', label: 'The plugin' },
+    ],
+    art: <SetupIllustration />,
+  },
+  {
+    id: 'links',
+    group: 'Steer your agents',
+    nav: 'Links and follow',
+    title: 'Links to the exact view, and follow your agent',
+    text: 'Every link Shapewall makes opens the board flown to one place: a page, a comment, a screen size or a page\u2019s before and after. Your agent hands you the link when it is done. Turn on Follow agent and the board keeps up with it: it flies to each comment the agent takes and opens the before and after of the screen it changed.',
+    points: [
+      'shapewall open --page pricing, --comment 12, --viewport phone or --compare, on a local or a hosted board',
+      'The MCP board_link tool gives the agent the same links, and every comment and page it reads carries one',
+      'compare_captures shows the agent its own before and after, with a pixel diff',
+      'Moving the canvas or opening another comment stops following; other changed screens wait in a quiet menu',
+    ],
+    links: [
+      { to: '/docs/agent-workflow#links-to-the-board', label: 'Links to the board' },
+      { to: '/docs/agent-workflow#follow-an-agent', label: 'Follow an agent' },
+    ],
+    art: <FollowIllustration />,
+  },
+  {
+    id: 'threads',
+    group: 'Steer your agents',
+    nav: 'Shared threads',
+    title: 'Shared threads: the agent answers when asked',
+    text: 'On a shared board, people talk to each other in the board chat and in each comment\u2019s thread, like in a chat app. The agent starts work only when someone @mentions it or presses Send to agent, and then reads what people wrote since its last answer.',
+    points: [
+      '@agent, the agent\u2019s own handle, Send to agent or Fix with starts a turn; every other message stays with the people',
+      'The person who connected the agent can let one thread answer every message, and the agent\u2019s machine can refuse that',
+      'Text an agent wrote never starts an agent turn, so agents cannot set each other off',
+      'A private chat, and a local board only you use, still answer every message',
+    ],
+    links: [{ to: '/docs/chat#when-an-agent-answers', label: 'When an agent answers' }],
+    art: <TriggersIllustration />,
   },
   {
     id: 'before-after',

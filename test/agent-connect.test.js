@@ -61,6 +61,32 @@ function project(name) {
   return normalizeConfig(structuredClone(SAMPLE), { dir, file: path.join(dir, 'shapewall.config.json') })
 }
 
+// What a redeemed POST /open answers (src/open-page.js sendTokenHandoff): a
+// no-store page that puts the token in the tab's sessionStorage and replaces
+// itself with the board. No URL holds the token: no Location, nothing to keep in history.
+function handoffOf(answer) {
+  assert.equal(answer.status, 200)
+  assert.equal(answer.headers.location, undefined)
+  assert.equal(answer.headers['cache-control'], 'no-store')
+  const csp = answer.headers['content-security-policy']
+  const nonce = /script-src 'nonce-([^']+)'/.exec(csp)?.[1]
+  assert.ok(nonce, csp)
+  assert.match(csp, /default-src 'none'/)
+  assert.match(csp, /frame-ancestors 'none'/)
+  const script = new RegExp(`<script nonce="${nonce.replace(/[+/=]/g, (c) => `\\${c}`)}">const d = (\\{[^<]*?\\});`).exec(answer.text)
+  assert.ok(script, answer.text)
+  const data = JSON.parse(script[1])
+  assert.equal(data.key, 'shapewall-settings-token')
+  return data
+}
+
+// The page an open link points at (src/open-page.js): its file, nonce and form action.
+function openPageOf(link) {
+  const file = fileURLToPath(link)
+  const html = fs.readFileSync(file, 'utf8')
+  return { file, nonce: /name="nonce" value="([^"]+)"/.exec(html)[1], action: /action="([^"]+)"/.exec(html)[1] }
+}
+
 function listen(app) {
   return new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance))
@@ -391,50 +417,73 @@ test('connect route: a save while its test runs is refused, so the restore canno
   }
 })
 
-test('open link: one use, a minute, local and direct only, no-store; none without a token', async (t) => {
+test('open link: a 0600 page posts a one-use nonce, a minute, local and direct only, no-store; none without a token', async (t) => {
   const home = privateDir('shapewall-connect-home-')
   const env = { PATH: process.env.PATH, XDG_CONFIG_HOME: home, HOME: home }
-  const app = createApp({ config: project('connect-open'), clientDir: tempDir('connect-open-client'), env, settingsToken: TOKEN })
+  const config = project('connect-open')
+  const app = createApp({ config, clientDir: tempDir('connect-open-client'), env, settingsToken: TOKEN })
   const server = await listen(app)
   const port = server.address().port
+  const base = `http://127.0.0.1:${port}/`
+  const redeem = (nonce, headers = {}) =>
+    request(port, 'POST', '/open', {
+      body: `nonce=${nonce}`,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'null', ...headers },
+    })
   try {
-    const link = app.locals.openLink()
-    assert.match(link, /^open\/[A-Za-z0-9_-]{32}$/)
-    const first = await request(port, 'GET', `/${link}`)
-    assert.equal(first.status, 303)
-    assert.equal(first.headers.location, `../#settings-token=${TOKEN}`)
-    assert.equal(first.headers['cache-control'], 'no-store')
-    const second = await request(port, 'GET', `/${link}`)
+    const link = app.locals.openLink(base)
+    assert.equal(new URL(link).protocol, 'file:')
+    const first = openPageOf(link)
+    assert.equal(path.dirname(first.file), config.outputDir)
+    assert.equal(first.action, `${base}open`)
+    assert.match(first.nonce, /^[A-Za-z0-9_-]{32}$/)
+    assert.ok(!link.includes(first.nonce), 'the nonce is not in the link')
+    if (POSIX) assert.equal(fs.statSync(first.file).mode & 0o777, 0o600)
+    // GET never redeems, not even with the nonce in the path.
+    assert.equal((await request(port, 'GET', `/open/${first.nonce}`)).status, 410)
+    assert.equal((await request(port, 'GET', '/open')).status, 410)
+    const opened = await redeem(first.nonce)
+    assert.deepEqual(handoffOf(opened), { key: 'shapewall-settings-token', token: TOKEN, target: './' })
+    assert.equal(opened.headers['cache-control'], 'no-store')
+    assert.equal(fs.existsSync(first.file), false, 'the page is removed once used')
+    const second = await redeem(first.nonce)
     assert.equal(second.status, 410)
     assert.ok(!second.text.includes(TOKEN))
     assert.equal(second.headers['cache-control'], 'no-store')
-    // Through a proxy: refused, and the link is spent.
-    const proxied = app.locals.openLink()
-    assert.equal((await request(port, 'GET', `/${proxied}`, { headers: { 'X-Forwarded-For': '203.0.113.9' } })).status, 410)
-    assert.equal((await request(port, 'GET', `/${proxied}`)).status, 410)
+    // Through a proxy, or from another site: refused, and the nonce is spent.
+    for (const headers of [{ 'X-Forwarded-For': '203.0.113.9' }, { Origin: 'https://evil.example' }]) {
+      const spent = openPageOf(app.locals.openLink(base))
+      assert.equal((await redeem(spent.nonce, headers)).status, 410)
+      assert.equal((await redeem(spent.nonce)).status, 410)
+      assert.equal(fs.existsSync(spent.file), false)
+    }
     // A made-up nonce.
-    assert.equal((await request(port, 'GET', '/open/not-a-real-nonce')).status, 410)
+    assert.equal((await redeem('not-a-real-nonce')).status, 410)
     // Expired after a minute.
-    const stale = app.locals.openLink()
+    const stale = openPageOf(app.locals.openLink(base))
     t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
     t.mock.timers.tick(OPEN_LINK_TTL_MS + 1)
-    const expired = await request(port, 'GET', `/${stale}`)
+    const expired = await redeem(stale.nonce)
     t.mock.timers.reset()
     assert.equal(expired.status, 410)
     assert.match(expired.text, /used or has expired/)
     // No browser could be opened for it: five minutes, then gone.
-    const kept = app.locals.openLink()
-    const keptLate = app.locals.openLink()
+    const kept = app.locals.openLink(base)
+    const keptLate = app.locals.openLink(base)
     t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
     app.locals.keepOpenLink(kept)
     app.locals.keepOpenLink(keptLate)
     t.mock.timers.tick(OPEN_LINK_TTL_MS * 3)
-    const stillOpen = await request(port, 'GET', `/${kept}`)
+    const stillOpen = await redeem(openPageOf(kept).nonce)
     t.mock.timers.tick(OPEN_LINK_HEADLESS_TTL_MS)
-    const tooLate = await request(port, 'GET', `/${keptLate}`)
+    const tooLate = await redeem(openPageOf(keptLate).nonce)
     t.mock.timers.reset()
-    assert.equal(stillOpen.status, 303)
+    assert.equal(handoffOf(stillOpen).token, TOKEN)
     assert.equal(tooLate.status, 410)
+    // At stop, every waiting page goes.
+    const waiting = openPageOf(app.locals.openLink(base))
+    stopChildren(app)
+    assert.equal(fs.existsSync(waiting.file), false, 'pages are removed at stop')
   } finally {
     stopChildren(app)
     await new Promise((resolve) => server.close(resolve))
@@ -443,6 +492,85 @@ test('open link: one use, a minute, local and direct only, no-store; none withou
   const shared = createApp({ config: project('connect-open-shared'), clientDir: tempDir('connect-open-client'), env, allowedHosts: null })
   assert.equal(shared.locals.openLink, null)
 })
+
+for (const headless of [false, true])
+  test(
+    `serve --open${headless ? ' with no browser' : ''}: the opener argv holds neither the token nor the nonce, and no output holds the nonce`,
+    { skip: !POSIX },
+    async () => {
+      // The real serve: a fake xdg-open records what it was given (and, headless, fails as with no display).
+      const bin = privateDir('shapewall-connect-opener-')
+      const log = path.join(bin, 'args.txt')
+      fs.writeFileSync(
+        path.join(bin, 'xdg-open'),
+        `#!/bin/sh\nprintf '%s\\n' "$@" > "${log}.tmp"\nmv "${log}.tmp" "${log}"\n${headless ? 'exit 3\n' : ''}`,
+        { mode: 0o755 },
+      )
+      const home = privateDir('shapewall-connect-home-')
+      const dir = tempDir('connect-serve-argv')
+      fs.writeFileSync(path.join(dir, 'shapewall.config.json'), JSON.stringify(SAMPLE))
+      const env = {
+        PATH: [bin, path.dirname(process.execPath), '/usr/bin', '/bin'].join(path.delimiter),
+        HOME: home,
+        XDG_CONFIG_HOME: home,
+        SHAPEWALL_PRINT_OWNER_LINK: '1',
+      }
+      const child = spawn(
+        process.execPath,
+        [CLI, 'serve', '--port', '0', '--open', '--no-chat', '--config', path.join(dir, 'shapewall.config.json')],
+        {
+          env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      )
+      let output = ''
+      child.stdout.on('data', (chunk) => (output += chunk))
+      child.stderr.on('data', (chunk) => (output += chunk))
+      const ended = new Promise((resolve) => child.once('exit', resolve))
+      try {
+        const deadline = Date.now() + 15000
+        while (!fs.existsSync(log) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100))
+        if (headless)
+          while (!/open this link/.test(output) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50))
+        const token = /#settings-token=([A-Za-z0-9_-]+)/.exec(output)?.[1]
+        assert.ok(token, output)
+        const argv = fs.readFileSync(log, 'utf8')
+        const args = argv.trim().split('\n')
+        assert.equal(args.length, 1)
+        assert.equal(new URL(args[0]).protocol, 'file:')
+        const page = openPageOf(args[0])
+        assert.equal(path.dirname(page.file), path.join(dir, '.shapewall'))
+        assert.equal(fs.statSync(page.file).mode & 0o777, 0o600)
+        assert.ok(!argv.includes(page.nonce), 'the nonce is not in the opener arguments')
+        assert.ok(!argv.includes(token), 'the token is not in the opener arguments')
+        assert.ok(!output.includes(page.nonce), 'the nonce is not in the output')
+        if (headless) assert.match(output, /open this link: file:\/\/.*expires in 5 minutes/)
+        const opened = new URL(page.action)
+        assert.equal(opened.pathname, '/open')
+        const post = (nonce) =>
+          request(Number(opened.port), 'POST', '/open', {
+            body: `nonce=${nonce}`,
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'null' },
+          })
+        if (!headless) {
+          const answer = await post(page.nonce)
+          assert.equal(handoffOf(answer).token, token)
+          assert.equal(fs.existsSync(page.file), false, 'the page is removed once used')
+          assert.equal((await post(page.nonce)).status, 410)
+        }
+        // A page still waiting at stop (headless: not used) is removed.
+        child.kill('SIGTERM')
+        await ended
+        assert.deepEqual(
+          fs.readdirSync(path.join(dir, '.shapewall')).filter((name) => name.startsWith('open-')),
+          [],
+        )
+        assert.ok(!output.includes(page.nonce), 'the nonce is not in the output')
+      } finally {
+        child.kill('SIGKILL')
+      }
+    },
+  )
 
 for (const chat of [true, false])
   test(
@@ -484,15 +612,21 @@ for (const chat of [true, false])
         if (chat) assert.match(output, /Agents found on this machine: Claude Code\. Connect one in the Agent panel/)
         const args = fs.readFileSync(log, 'utf8').trim().split('\n')
         assert.equal(args.length, 1)
-        const opened = new URL(args[0])
+        const page = openPageOf(args[0])
+        const opened = new URL(page.action)
         assert.equal(opened.protocol, 'http:')
         assert.equal(opened.hostname, '127.0.0.1')
-        assert.match(opened.pathname, /^\/open\/[A-Za-z0-9_-]{32}$/)
+        assert.equal(opened.pathname, '/open')
         assert.ok(!args[0].includes(token), 'the token is not in the opener arguments')
-        const answer = await request(Number(opened.port), 'GET', opened.pathname)
-        assert.equal(answer.status, 303)
-        assert.equal(answer.headers.location, `../#settings-token=${token}`)
-        assert.equal((await request(Number(opened.port), 'GET', opened.pathname)).status, 410)
+        assert.ok(!args[0].includes(page.nonce), 'the nonce is not in the opener arguments')
+        const post = () =>
+          request(Number(opened.port), 'POST', '/open', {
+            body: `nonce=${page.nonce}`,
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'null' },
+          })
+        const answer = await post()
+        assert.equal(handoffOf(answer).token, token)
+        assert.equal((await post()).status, 410)
         const info = await request(Number(opened.port), 'GET', '/api/info', { headers: { 'X-Shapewall-Settings-Token': token } })
         assert.equal(info.json.shareEnabled, true, 'sharing remains available with chat off')
         if (!chat) assert.equal(info.json.agent, null)

@@ -16,6 +16,8 @@
 // untrusted comment text) unless `passToken` (--pass-token) says so. Ids from
 // the server are checked before they become file names.
 
+import { isAgentAuthored } from '../agent/triggers.js'
+import { watchCapabilities, writeCapabilitiesFile } from '../agent/watch-capabilities.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { runWatchCommand } from '../watch-command.js'
@@ -83,7 +85,8 @@ export async function watchRemote({
   const list = async () => {
     const report = await remote.comments(boardId, { status: 'open', mention, guests: includeGuests, signal })
     board = remoteBoardRef(boardId, report)
-    return report.comments.filter((item) => includeGuests || !item.authorGuest)
+    // Never an agent's own comment (src/agent/triggers.js), --guests or not.
+    return report.comments.filter((item) => (includeGuests || !item.authorGuest) && !isAgentAuthored(item))
   }
   const handOut = (item) => untrustedJson({ board, comment: item })
   let baseline = 0
@@ -123,6 +126,15 @@ export async function watchRemote({
     }
   }
 
+  // A hosted comment's authors are the server's word: never the owner's own here.
+  const capabilitiesFile = (item) => {
+    try {
+      return writeCapabilitiesFile(agentDir, item.id, watchCapabilities({ config: null, env, owner: false, machine: null }))
+    } catch (error) {
+      log('#' + item.id + ': capabilities file not written (' + error.message + ')')
+      return ''
+    }
+  }
   const runCommand = async (item) => {
     if (!validCommentId(item.id)) throw new Error('the server sent an invalid comment id')
     const commentFile = path.join(agentDir, `comment-${item.id}.json`)
@@ -149,6 +161,8 @@ export async function watchRemote({
         env: {
           ...childEnv,
           SHAPEWALL_COMMENT_ID: String(item.id),
+          // An agent's process (src/agent-run.js).
+          SHAPEWALL_AGENT_RUN: '1',
           SHAPEWALL_BOARD: boardId,
           SHAPEWALL_PAGE_ID: item.page?.id || item.variant?.pageId || '',
           SHAPEWALL_VARIANT_ID: item.variant?.id || '',
@@ -158,6 +172,8 @@ export async function watchRemote({
           SHAPEWALL_LIVE_HTML: liveHtml,
           SHAPEWALL_COMMENT_FILE: commentFile,
           SHAPEWALL_REMOTE: remote.origin,
+          // What this machine's rules allow for it (watch-capabilities.js; not enforced by Shapewall).
+          SHAPEWALL_CAPABILITIES_FILE: capabilitiesFile(item),
         },
         logFd,
         input: json,

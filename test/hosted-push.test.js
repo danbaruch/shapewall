@@ -352,7 +352,11 @@ test('mcp --remote lists, reads with a screenshot crop, replies and resolves; sc
   const client = await connect(token)
   const tools = (await client.listTools()).tools.map((item) => item.name).sort()
   assert.deepEqual(tools, [
+    'add_comment',
+    'board_link',
+    'compare_captures',
     'get_comment',
+    'get_page_capture',
     'list_comments',
     'list_journeys',
     'list_pages',
@@ -387,7 +391,10 @@ test('mcp --remote lists, reads with a screenshot crop, replies and resolves; sc
 
   const readOnly = await connect(await createToken(owner, owner.workspaceId, project.id, ['read']))
   assert.deepEqual((await readOnly.listTools()).tools.map((item) => item.name).sort(), [
+    'board_link',
+    'compare_captures',
     'get_comment',
+    'get_page_capture',
     'list_comments',
     'list_journeys',
     'list_pages',

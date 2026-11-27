@@ -119,7 +119,11 @@ export function describeAudit(entry) {
     case 'token_renamed':
       return `renamed the API token ${d.from ? `${d.from} to ` : ''}${d.to || target}`
     case 'push_committed':
-      return `pushed ${d.files ?? 'some'} files`
+      return d.mode === 'pages'
+        ? `pushed ${d.files ?? 'some'} files of ${count(d.pages || 0, 'page', 'pages')}`
+        : `pushed ${d.files ?? 'some'} files`
+    case 'token_commented':
+      return `added comment ${String(entry.target || '').replace(/^.*#/, '#')} as an agent`
     case 'comment_resolved':
       return `resolved comment ${String(entry.target || '').replace(/^.*#/, '#')}`
     case 'comment_reopened':
@@ -153,6 +157,14 @@ export function describeAudit(entry) {
       return `connected the agent ${d.name || target}${d.machine ? ` (${d.machine})` : ''}, for themselves only`
     case 'agent_first_seen':
       return `was first seen as the agent ${d.name || target}`
+    case 'agent_hidden':
+      return d.reason === 'no_claim'
+        ? `stopped listing ${d.name || target} as an agent: its token has no claim access (hidden, not deleted)`
+        : `stopped listing the older agent ${d.name || target}: nothing heard from it in ${d.days || 90} days (hidden, not deleted)`
+    case 'agent_made':
+      return `made the token ${d.name || target} an agent${d.was === 'hidden' ? ' again' : ''}`
+    case 'token_claim_removed':
+      return `removed claim access from the token ${d.name || target}`
     case 'agent_renamed':
       return `renamed the agent ${d.from ? `${d.from} to ` : ''}${d.to || target}`
     case 'agent_identity_changed':
@@ -253,6 +265,8 @@ export function describeAudit(entry) {
       return 'deleted a chat'
     case 'chat_thread_agent_changed':
       return 'changed the agent of a chat'
+    case 'chat_thread_respond':
+      return d.respond === 'always' ? 'set a shared chat to answer every message' : 'set a shared chat to answer mentions only'
     // Settings and exports.
     case 'agent_policy_changed':
       return `changed the agent policy of ${d.name || target}${Array.isArray(d.changed) && d.changed.length ? ` (${d.changed.join(', ')})` : ''}`

@@ -39,9 +39,10 @@ import { CARD_HASH_RE, CARD_ID_RE, cardContent, cardHash, cardSubjectHash, cardT
 import { checkStorageQuota } from './comment-files.js'
 import { FRAME_LIMITS, cleanEvent, cleanReply, usageOf } from './chat-frames.js'
 import { createPermissionStore, permissionView } from './chat-permissions.js'
-import { buildJob } from './chat-job.js'
-import { INTERRUPTED_MESSAGE } from './chat-store.js'
-import { agentPolicy } from './agent-policy.js'
+import { JobError, buildJob } from './chat-job.js'
+import { INTERRUPTED_MESSAGE, threadRespond } from './chat-store.js'
+import { agentPolicy, narrowingOf } from './agent-policy.js'
+import { cleanCapabilitySummary } from '../agent/capability-render.js'
 import { LINK_KINDS, LINK_TURNS_MAX } from './agents.js'
 import { rowToComment } from './comments.js'
 import { transaction } from './db.js'
@@ -119,6 +120,29 @@ export function createAgentLinks({ hub = null } = {}) {
 // What the live events of a turn add up to so far: the text and the cards
 // as last seen. Kept when a turn is cut short, so the thread shows what the
 // agent had written.
+// Whether a job gives the machine text by someone who is not an author of
+// its turn: the board's open comments (chat-job.js commentEntry, by
+// authorHandle), checked against the job's trust block. A comment with no
+// handle (a token's, an import, a guest's) is someone else's too.
+export function sendsOutside(job) {
+  const comments = Array.isArray(job?.context?.comments) ? job.context.comments : []
+  if (!comments.length) return false
+  const handles = new Set((job?.trust?.authors || []).map((author) => author?.handle).filter((handle) => typeof handle === 'string'))
+  return comments.some((item) => typeof item?.authorHandle !== 'string' || !handles.has(item.authorHandle))
+}
+
+// Whether a turn's end taints its thread (Q7 R2), fail closed: the machine
+// says so (`outsideText: true`), or its job gave it other people's text and
+// the machine did not say it dropped it (`outsideText: false`, sent by a
+// machine of 1.4.0 or later on every answer). A missing field, an older
+// machine, and every end without an answer (a lost link, a revoke, a Stop
+// whose answer came too late) count as "kept it". `said`: the answer's
+// field, undefined when there is no answer.
+export function outsideTextOf(live, said) {
+  if (said === true) return true
+  return live?.outsideSent === true && said !== false
+}
+
 export function partialOf(turn) {
   let text = ''
   const cards = new Map()
@@ -246,11 +270,16 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
       ...(threadId.startsWith('chat-') ? {} : { thread: threadId }),
     })
   // Ends a turn without the machine's answer. `row`: its chat_turns row.
+  // A turn whose job gave the machine other people's text ends without its
+  // answer saying it dropped that text: what it streamed so far is stored, so
+  // the thread is tainted (Q7 R2). Without a live turn (a server restart),
+  // nothing it streamed is kept, and nothing is stored but the notice.
   function interrupt(t, row, { state = 'interrupted', message = INTERRUPTED_MESSAGE, agentName = null } = {}) {
     const live = hub.get(row.id)
     const stored = transaction(db, () => {
       cancelCards(t, row, live)
       const made = chatFor(t).interrupt(row, { state, message, agentName, partial: live ? partialOf(live) : null })
+      if (made && outsideTextOf(live, undefined)) chatFor(t).trust(row.project_id, row.board_id, row.thread_id, [{ kind: 'outside' }])
       if (made) releaseFix(t, row, 'needs-human', { interrupted: true })
       return made
     })
@@ -393,9 +422,55 @@ export function cleanHello(body) {
       images: false,
       version: input.version || null,
       maxTurns,
-      policy: { audience: policy.audience === 'owner' ? 'owner' : 'server', approvals, commands, auto },
+      policy: {
+        audience: policy.audience === 'owner' ? 'owner' : 'server',
+        approvals,
+        commands,
+        auto,
+        // Whether a thread set to answer every message is honored there ("thread"), or mentions only.
+        respond: policy.respond === 'thread' ? 'thread' : 'mention',
+      },
+      // What each trust tier may do on that machine, as line states (capability-render.js).
+      // Display only: the machine decides every turn itself.
+      summary: cleanCapabilitySummary(input.capabilitySummary),
     },
+    // Kept in memory beside the agent's presence (agent-presence.js), never in the database.
+    instructions: cleanInstructions(input.instructions),
+    // Which hello of this link it is: an older one arriving late does not replace a newer list.
+    seq: Number.isSafeInteger(input.seq) && input.seq >= 0 ? input.seq : null,
   }
+}
+
+// The instruction files a machine says its sessions read: at most 12, each
+// { scope, path, bytes, sha }. A relative path only (never an absolute or a
+// home path, never "..", no control characters), a short hex hash, a size.
+// No content is ever taken. An entry that is not all of that is dropped.
+export const INSTRUCTIONS_MAX = 12
+const INSTRUCTION_SCOPES = ['project', 'agent-config']
+const SHA_RE = /^[a-f0-9]{8,64}$/
+export function cleanInstructionPath(value) {
+  if (typeof value !== 'string' || !value || value.length > 200) return null
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f\\]/.test(value)) return null
+  // Other control and format characters too: bidi overrides, zero-width marks.
+  if (/[\p{Cc}\p{Cf}]/u.test(value)) return null
+  if (value.startsWith('/') || value.startsWith('~') || /^[A-Za-z]:/.test(value)) return null
+  const parts = value.split('/')
+  if (parts.some((part) => !part || part === '.' || part === '..')) return null
+  return value
+}
+export function cleanInstructions(list) {
+  if (!Array.isArray(list)) return []
+  const out = []
+  for (const item of list.slice(0, INSTRUCTIONS_MAX)) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const file = cleanInstructionPath(item.path)
+    if (!file || !INSTRUCTION_SCOPES.includes(item.scope)) continue
+    if (!Number.isSafeInteger(item.bytes) || item.bytes < 0 || item.bytes > 1024 * 1024) continue
+    if (typeof item.sha !== 'string' || !SHA_RE.test(item.sha)) continue
+    out.push({ scope: item.scope, path: file, bytes: item.bytes, sha: item.sha })
+  }
+  return out
 }
 
 export function mountAgentLink(
@@ -497,7 +572,13 @@ export function mountAgentLink(
       const agents = agentsFor(req.t)
       // What the machine allows now, against what it allowed before: a change
       // is audited, and a stored "always allow" it no longer backs is reset.
+      // Which hello of which process this is: an older one of the same process
+      // arriving late does not replace what a newer one said (agents.js hello).
+      hello.capabilities.link = linkId
+      hello.capabilities.seq = hello.seq
       const row = transaction(db, () => agents.helloPolicy(req.agent, agents.hello(req.agent, hello), said(req)))
+      // Which instruction files its sessions read (names and hashes): in memory, per link.
+      agentPresence?.setInstructions(req.t.workspaceId, req.agent.id, hello.instructions, { link: linkId, seq: hello.seq })
       res.json({
         agent: {
           id: row.id,
@@ -507,7 +588,13 @@ export function mountAgentLink(
           // Who may use it, as in effect now (the server's setting, narrowed
           // by what this machine just said).
           audience: agents.audienceOf(row).text,
+          // The account that connected it, by handle: the machine pins it and
+          // counts a turn's author as "the owner" only under that handle.
+          owner: { handle: handleOf(req, req.agent.created_by) },
         },
+        // This project's ceiling under the machine's (agent-policy.js narrowingOf).
+        // Each turn's job carries it again, per board: a change applies from the next turn.
+        narrowing: narrowingOf(req.t, req.project.id),
         limits: {
           batchBytes: FRAME_LIMITS.batchBytes,
           batchEvents: FRAME_LIMITS.batchEvents,
@@ -652,6 +739,130 @@ export function mountAgentLink(
     }),
   )
 
+  // A member's handle, or null.
+  const handleOf = (req, userId) =>
+    userId
+      ? req.t.get('SELECT u.handle FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = :ws AND m.user_id = :user', {
+          user: userId,
+        })?.handle || null
+      : null
+  // Who wrote this turn: the one answer both the turn's tier (the trust
+  // block's `authors`, capabilities.js cleanTrust) and the thread's trust
+  // state (thread-trust.js, extensions) read, so the two can never disagree
+  // about whose text reached the agent (Q7 F1). A list of thread-trust
+  // events, a superset of the text the job carries, never fewer:
+  //   - the thread's own comment and every reply to it (a reply the job
+  //     leaves out still counts), whether the job could read it or not
+  //   - every comment a mention in the job stands for: its id, the comment
+  //     in its data, and each of a person mention's open comments (an older
+  //     message's mention comes without its data: its id still names it)
+  //   - the person messages of the thread in the agent's audience (the only
+  //     ones the job carries), and another agent's answer there (`agent`)
+  // A comment or reply by a member is a `person` event with their user id;
+  // one by another token (an agent), an import or nobody known is
+  // `outside`. A share link guest's text never enters a job. The board's
+  // open comments listed in the job are left out: the machine drops them
+  // from every turn above "open" (src/remote/agent-link.js).
+  function turnAuthorship(req, ctx, row, rows, job, inAudience) {
+    const events = []
+    const ids = new Set()
+    const threadNumber = Number(/^comment-(\d+)$/.exec(row.thread_id)?.[1] || 0)
+    if (threadNumber) ids.add(threadNumber)
+    const context = job?.context || {}
+    if (context.comment?.id) ids.add(Number(context.comment.id))
+    for (const message of Array.isArray(job?.messages) ? job.messages : []) {
+      for (const mention of Array.isArray(message.mentions) ? message.mentions : []) {
+        const data = mention?.data || {}
+        if (['comment', 'element'].includes(mention?.kind) && mention.id !== undefined) ids.add(Number(mention.id))
+        if (data.comment?.id) ids.add(Number(data.comment.id))
+        for (const item of Array.isArray(data.openComments) ? data.openComments : []) ids.add(Number(item?.id))
+      }
+    }
+    for (const id of ids) {
+      if (!Number.isSafeInteger(id) || id < 1) continue
+      let stored = null
+      try {
+        stored = ctx.comments.get(id)
+      } catch {
+        stored = null
+      }
+      if (!stored) continue
+      if (stored.author_share_id) continue
+      // An imported comment is someone else's text, whoever brought it in.
+      const person = stored.author_user_id && !stored.author_token_id && !stored.imported && !stored.imported_by
+      events.push(person ? { kind: 'person', id: stored.author_user_id } : { kind: 'outside' })
+      // The thread's own comment reaches the turn with its replies.
+      if (id !== threadNumber && id !== Number(context.comment?.id)) continue
+      let replies = []
+      try {
+        replies = JSON.parse(stored.replies || '[]')
+      } catch {
+        replies = [null]
+      }
+      for (const reply of Array.isArray(replies) ? replies : [null]) {
+        if (reply?.share) continue
+        if (reply?.user) events.push({ kind: 'person', id: reply.user })
+        else if (reply?.token !== req.token.id) events.push({ kind: 'outside' })
+      }
+    }
+    for (const message of rows) {
+      if (message.role === 'user' && inAudience(message.author_user_id)) events.push({ kind: 'person', id: message.author_user_id })
+      // Another agent's answer in the thread reaches this turn as its history.
+      else if (message.role === 'assistant' && message.agent_id && message.agent_id !== req.agent.id)
+        events.push({ kind: 'agent', own: false })
+    }
+    return events
+  }
+  // One author of the trust block from a user id: { handle, owner, member }.
+  const authorOf = (req, user) => {
+    const member = Boolean(req.t.get('SELECT 1 FROM memberships WHERE workspace_id = :ws AND user_id = :user', { user }))
+    return { handle: member ? handleOf(req, user) : null, owner: member && user === req.agent.created_by, member }
+  }
+  const NOBODY = Object.freeze({ handle: null, owner: false, member: false })
+  // The trust block of a fix, comment or chat turn, from turnAuthorship and
+  // the thread's trust state after it (kept: a thread that ever carried
+  // someone's text stays so, Q7 F2). Its authors are every person of this
+  // turn and every person the thread ever carried (pruned messages and all),
+  // and an author without a handle when the thread is tainted or this turn
+  // carries text nobody can vouch for: such a turn is never above "open".
+  // Guest text never enters a job, so `guests` is false: said explicitly,
+  // as the machine reads a missing flag as guests. The machine decides the
+  // tier, and pins who "the owner" is to the handle it heard at hello.
+  // null: no author at all (the machine reads the turn as "open").
+  function turnTrust(req, events, state) {
+    const users = new Set()
+    let outside = state.tainted === true
+    for (const event of events) {
+      if (event.kind === 'person' && typeof event.id === 'string') users.add(event.id)
+      else outside = true
+    }
+    for (const user of state.authors) users.add(user)
+    const authors = [...users].map((user) => authorOf(req, user))
+    if (outside) authors.push({ ...NOBODY })
+    return authors.length ? { authors, guests: false, thread: threadTrustBlock(req, state) } : null
+  }
+  // The thread's trust state as the machine reads it (capabilities.js
+  // cleanThreadTrust): tainted, and each author as { handle, owner, member }.
+  function threadTrustBlock(req, state) {
+    return {
+      tainted: state.tainted === true,
+      authors: state.authors.map((user) => authorOf(req, user)),
+    }
+  }
+
+  // The project's and the board's ceiling for a running turn, as it is now:
+  // the machine asks again before each command, so a setting tightened
+  // mid-turn applies to the next command, not only the next turn.
+  router.get(
+    '/turns/:id/narrowing',
+    handle((req, res) => {
+      const row = ownTurn(req)
+      const live = liveTurn(req, row)
+      notAnothers(req, live)
+      res.json({ narrowing: narrowingOf(req.t, req.project.id, row.board_id) })
+    }),
+  )
+
   router.get(
     '/turns/:id',
     handle((req, res) => {
@@ -673,89 +884,127 @@ export function mountAgentLink(
             },
           )
         : null
-      const job = buildJob({
-        ctx,
-        turn: row,
-        agent: req.agent,
-        rows,
-        // The same rule as sending it a comment: in its audience, and
-        // trusted by the project's agent policy.
-        inAudience: (userId) =>
-          Boolean(userId) && agents.inAudience(req.agent, userId) && agents.trusted(req.project.id, row.board_id, userId),
-        asker: {
-          name: person?.display_name || null,
-          handle: person?.handle || null,
-          owner: Boolean(row.started_by) && row.started_by === req.agent.created_by,
-        },
-        // The approval rule in effect, per kind ("auto" only where this
-        // agent's machine said so itself; the machine checks again).
-        approvals: agents.approvalRules(req.agent),
-        // A comment reaches this agent only when the person asking wrote it,
-        // or the agent holds it, or its author is in the agent's audience
-        // and the token API would show it to this agent's token (sent to an
-        // agent, and not to another one). An imported human comment must be
-        // the exact vouched content this agent claimed for this turn.
-        commentVisible: (comment) => {
-          let stored
-          try {
-            stored = ctx.comments.get(comment.id)
-          } catch {
-            return false
-          }
-          if (stored.author_share_id || stored.author_token_id) return false
-          if (stored.imported || stored.imported_by) {
-            if (
-              !['comment', 'fix'].includes(row.kind) ||
-              stored.number !== row.comment_number ||
-              !['queued', 'working'].includes(stored.agent_status) ||
-              !policyFor(req.t).state(req.project.id, ctx.board.id, stored).dispatchable
-            )
+      const thread = store.thread(req.project.id, row.board_id, row.thread_id)
+      const inAudience = (userId) =>
+        Boolean(userId) && agents.inAudience(req.agent, userId) && agents.trusted(req.project.id, row.board_id, userId)
+      let job
+      try {
+        job = buildJob({
+          ctx,
+          turn: row,
+          agent: req.agent,
+          rows,
+          respond: threadRespond(thread),
+          // The project's and this board's ceiling under the machine's (agent-policy.js narrowingOf).
+          narrowing: narrowingOf(req.t, req.project.id, row.board_id),
+          // The same rule as sending it a comment: in its audience, and
+          // trusted by the project's agent policy.
+          inAudience,
+          asker: {
+            name: person?.display_name || null,
+            handle: person?.handle || null,
+            owner: Boolean(row.started_by) && row.started_by === req.agent.created_by,
+          },
+          // The approval rule in effect, per kind ("auto" only where this
+          // agent's machine said so itself; the machine checks again).
+          approvals: agents.approvalRules(req.agent),
+          // A comment reaches this agent only when the person asking wrote it,
+          // or the agent holds it, or its author is in the agent's audience
+          // and the token API would show it to this agent's token (sent to an
+          // agent, and not to another one). An imported human comment must be
+          // the exact vouched content this agent claimed for this turn.
+          commentVisible: (comment) => {
+            let stored
+            try {
+              stored = ctx.comments.get(comment.id)
+            } catch {
               return false
-            return Boolean(
-              req.t.get(
-                `SELECT 1 FROM agent_claims c JOIN agent_runs r ON r.workspace_id = c.workspace_id AND r.claim_id = c.id
+            }
+            if (stored.author_share_id || stored.author_token_id) return false
+            if (stored.imported || stored.imported_by) {
+              if (
+                !['comment', 'fix'].includes(row.kind) ||
+                stored.number !== row.comment_number ||
+                !['queued', 'working'].includes(stored.agent_status) ||
+                !policyFor(req.t).state(req.project.id, ctx.board.id, stored).dispatchable
+              )
+                return false
+              return Boolean(
+                req.t.get(
+                  `SELECT 1 FROM agent_claims c JOIN agent_runs r ON r.workspace_id = c.workspace_id AND r.claim_id = c.id
                  WHERE c.workspace_id = :ws AND c.project_id = :project AND c.board_id = :board
                    AND c.comment_number = :number AND c.token_id = :token AND c.hash = :hash AND c.ended_at IS NULL AND r.id = :run`,
-                {
-                  project: req.project.id,
-                  board: ctx.board.id,
-                  number: stored.number,
-                  token: req.token.id,
-                  hash: stored.dispatch_hash,
-                  run: row.run_id,
-                },
-              ),
+                  {
+                    project: req.project.id,
+                    board: ctx.board.id,
+                    number: stored.number,
+                    token: req.token.id,
+                    hash: stored.dispatch_hash,
+                    run: row.run_id,
+                  },
+                ),
+              )
+            }
+            if (!stored.author_user_id) return false
+            if (row.started_by && stored.author_user_id === row.started_by) return true
+            if (agents.holds(req.agent, req.project.id, stored)) return true
+            if (
+              !agents.inAudience(req.agent, stored.author_user_id) ||
+              !agents.trusted(req.project.id, row.board_id, stored.author_user_id)
             )
-          }
-          if (!stored.author_user_id) return false
-          if (row.started_by && stored.author_user_id === row.started_by) return true
-          if (agents.holds(req.agent, req.project.id, stored)) return true
-          if (!agents.inAudience(req.agent, stored.author_user_id) || !agents.trusted(req.project.id, row.board_id, stored.author_user_id))
-            return false
-          return (
-            policyFor(req.t).state(req.project.id, ctx.board.id, { ...stored, status: 'open' }).dispatchable &&
-            agents.workCheck(req.agent, req.project.id, stored).ok
-          )
-        },
-        // The thread's comment as this token reads it: never a guest's, its
-        // replies only from people in the agent's audience, and no file URLs.
-        commentItem: (number) => {
-          let comment
-          try {
-            comment = rowToComment(ctx.comments.get(number))
-          } catch {
-            return null
-          }
-          if (comment.authorGuest) return null
-          const item = remoteItem(req, ctx, contextFor(ctx), dispatchView(req.t, req.project.id, ctx.board.id, comment))
-          // No file URLs: nothing is downloaded for a chat turn.
-          delete item.files
-          for (const reply of item.replies || []) delete reply.files
-          return item
-        },
-      })
+              return false
+            return (
+              policyFor(req.t).state(req.project.id, ctx.board.id, { ...stored, status: 'open' }).dispatchable &&
+              agents.workCheck(req.agent, req.project.id, stored).ok
+            )
+          },
+          // The thread's comment as this token reads it: never a guest's, its
+          // replies only from people in the agent's audience, and no file URLs.
+          commentItem: (number) => {
+            let comment
+            try {
+              comment = rowToComment(ctx.comments.get(number))
+            } catch {
+              return null
+            }
+            if (comment.authorGuest) return null
+            const item = remoteItem(req, ctx, contextFor(ctx), dispatchView(req.t, req.project.id, ctx.board.id, comment))
+            // No file URLs: nothing is downloaded for a chat turn.
+            delete item.files
+            for (const reply of item.replies || []) delete reply.files
+            return item
+          },
+        })
+      } catch (error) {
+        // Its question is gone, or is not one this agent may read: the turn
+        // ends here, said in the thread, instead of answering another message.
+        if (!(error instanceof JobError)) throw error
+        chat.interrupt(req.t, row, { message: error.message, agentName: req.agent.name })
+        throw new HttpError(409, error.code, error.message)
+      }
+      // Who wrote the text of the turn (the machine works out its tier from
+      // it), and the thread's trust with this job's text counted in: one
+      // answer for both (turnAuthorship). Chat turns too (1.4.0): a solo chat
+      // turn may run read-style commands and the browser. No trust block:
+      // the machine reads the turn as "open" and the thread as tainted.
+      if (['fix', 'comment', 'chat'].includes(row.kind)) {
+        const events = turnAuthorship(req, ctx, row, rows, job, inAudience)
+        const state = store.trust(req.project.id, row.board_id, row.thread_id, events)
+        const trust = turnTrust(req, events, state)
+        if (trust) job.trust = trust
+      }
+      // Which life of the thread this is: a thread deleted and started again
+      // under the same id is another one, and the machine starts its agent
+      // session afresh for it (acp.js sessionKey).
+      if (thread?.created_at) job.turn.generation = String(thread.created_at).slice(0, 40)
       if (Buffer.byteLength(JSON.stringify(job)) > FRAME_LIMITS.jobBytes)
         throw new HttpError(413, 'job_too_large', 'This conversation is too large to send to the agent. Start a new chat.')
+      // Whether this job gives the machine other people's text that is not
+      // in its trust block: the board's open comments by anyone who is not an
+      // author of the turn (only an open turn keeps them). Kept on the live
+      // turn: unless the machine's answer says it dropped them, the thread is
+      // tainted however the turn ends (Q7 R2, outsideTextOf).
+      live.outsideSent = sendsOutside(job)
       // The process that fetches the job is the one that answers it.
       live.linkId = linkIdOf(req)
       if (live.state === 'queued') {
@@ -844,6 +1093,11 @@ export function mountAgentLink(
         // A finished fix leaves its comment where it stands at once, should the
         // machine go away before it says so itself (it posts its reply next).
         chat.releaseFix(req.t, row, reply.summary ? 'branch-ready' : 'needs-human')
+        // The machine was given other people's text this server did not count
+        // as the turn's authors (an open turn's board comments), and its answer
+        // may repeat it: the thread carries it from now on (Q7 N2). A machine
+        // can only make its own thread stricter this way.
+        if (outsideTextOf(live, req.body?.outsideText)) store.trust(row.project_id, row.board_id, row.thread_id, [{ kind: 'outside' }])
         if (reply.summary) {
           const detail = {
             project: row.project_id,
@@ -875,13 +1129,15 @@ export function mountAgentLink(
   // ---- Permission cards ----
 
   // An answer as the machine hears it. `by.owner`: the person who connected
-  // this agent answered (a machine set to "owner" takes no other "allow").
+  // this agent answered (a machine set to "owner" takes no other "allow");
+  // `by.handle`: who answered, which that machine checks against the owner
+  // it pinned.
   const answerFrame = (req, card) => ({
     turn: card.turn_id,
     card: card.id,
     decision: card.state === 'approved' ? 'allow' : 'deny',
     hash: card.card_hash,
-    by: { owner: Boolean(card.answered_by) && card.answered_by === req.agent.created_by },
+    by: { owner: Boolean(card.answered_by) && card.answered_by === req.agent.created_by, handle: handleOf(req, card.answered_by) },
   })
   const auditCard = (req, action, row, card, extra = {}) =>
     said(req)(action, row.id, {
@@ -927,16 +1183,27 @@ export function mountAgentLink(
           card: id,
           decision: 'deny',
           hash: data.hash,
-          by: { owner: false },
+          by: { owner: false, handle: null },
         })
       const event = cleanEvent({ name: 'tool', data: { ...data, kind: 'permission', state: 'denied' } })
       if (event) hub.push(live, event[0], event[1])
     }
     const content = cardContent(data)
     if (!id || !content || agents.editMode(req.agent) === 'none') return refuse()
-    // Edits (and commands) in a fix; "Push this fix" in a fix or when it is asked again. Nothing in a chat.
-    if (!(row.kind === 'fix' || (row.kind === 'push' && content.name === 'push'))) return refuse()
+    // Edits (and commands) in a fix; "Push this fix" in a fix or when it is
+    // asked again; a read-style command in a chat or comment turn (1.4.0:
+    // the machine offers those turns only commands that change no files).
+    if (!(
+      row.kind === 'fix' ||
+      (row.kind === 'push' && content.name === 'push') ||
+      (['chat', 'comment'].includes(row.kind) && content.name === 'command')
+    ))
+      return refuse()
     if (content.name === 'execute' && !agents.machinePolicy(req.agent).commands.includes(content.detail)) return refuse()
+    // A command Shapewall runs for the agent (exec-mcp): never where this
+    // project (or board) took commands away. The machine decided it may ask
+    // (its resolved capabilities) and checks the answer again.
+    if (content.name === 'command' && narrowingOf(req.t, req.project.id, row.board_id)?.shell === false) return refuse()
     if (cardHash(row.id, content) !== data.hash) return refuse()
     // How long it waits is a length of time, counted here from now on this
     // server's clock (the machine counts the same length on its own), and
@@ -977,7 +1244,8 @@ export function mountAgentLink(
     // this agent's rule here is "always allow" for that kind too.
     if (data?.state !== 'approved' || row.kind !== 'fix') return false
     const content = cardContent({ ...data, ttlMs: 1000 })
-    if (content?.name === 'push') return false
+    // Never "allowed automatically" on the machine's word: a push, or a command Shapewall runs.
+    if (content?.name === 'push' || content?.name === 'command') return false
     const agents = agentsFor(req.t)
     if (!content || agents.approvalRules(req.agent)[content.name === 'edit' ? 'edits' : 'commands'] !== 'auto') return false
     if (content.name === 'execute' && !agents.machinePolicy(req.agent).commands.includes(content.detail)) return false

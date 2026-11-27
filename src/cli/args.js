@@ -39,6 +39,7 @@ const BOOLEAN_FLAGS = new Set([
   'status',
   'pass-token',
   'takeover',
+  'browser-no-sandbox',
   'include-guests',
   'dry-run',
   'chat',
@@ -69,6 +70,11 @@ const BOOLEAN_FLAGS = new Set([
   'ci',
   'fail-on-change',
   'allow-start',
+  'claude',
+  'codex',
+  'remove',
+  'write',
+  'no-agent-docs',
 ])
 // Old flag spellings each command still takes, hidden from its help: the
 // value moves to the new name and a one-line warning says to switch. null:
@@ -82,7 +88,11 @@ export const FLAG_ALIASES = {
 const REPEATABLE = new Set(['only', 'allowed-host', 'exclude', 'allow-host', 'trusted'])
 // Flags that take a value but also work alone ("init --sitemap": the base
 // URL's sitemap.xml). Alone, the flag is true.
-const OPTIONAL_VALUE = new Set(['sitemap'])
+const OPTIONAL_VALUE = new Set(['sitemap', 'compare'])
+// A flag that is a plain switch elsewhere but takes an optional value for
+// one command: "events --follow" keeps printing, "open --follow [AGENT]"
+// opens the board following an agent (alone: any agent).
+const COMMAND_OPTIONAL_VALUE = { open: new Set(['follow']) }
 
 // The flags each command reads. Anything else is a typo worth stopping for:
 // "capture --onyl home" would otherwise capture every page.
@@ -116,7 +126,7 @@ export const COMMAND_FLAGS = {
   'buzz-bridge': ['bridge-config'],
   settings: ['port', 'open'],
   auth: AUTH_FLAGS,
-  init: ['base-url', 'sitemap', 'no-discover', 'force', 'limit', 'group', 'exclude', 'ci'],
+  init: ['base-url', 'sitemap', 'no-discover', 'force', 'limit', 'group', 'exclude', 'ci', 'no-agent-docs'],
   sitemap: ['limit', 'group', 'exclude', 'board', 'dry-run', 'json'],
   capture: ['board', 'only', 'env', 'json', 'check-external'],
   // Every flag any `checks` action takes; SUBCOMMAND_FLAGS narrows it per action.
@@ -210,6 +220,21 @@ export const COMMAND_FLAGS = {
     'allow-path',
     'auto',
     'base',
+    'browser-profile',
+    'browser-no-sandbox',
+    // agent setup, agent docs
+    'claude',
+    'codex',
+    'scope',
+    'force',
+    'dry-run',
+    'remove',
+    'yes',
+    'write',
+    'print',
+    'instructions',
+    'agent-config',
+    'respond',
     ...REMOTE_FLAGS,
   ],
   github: ['board', 'json'],
@@ -233,12 +258,13 @@ export const COMMAND_FLAGS = {
     'board',
     'json',
   ],
-  mcp: ['read-only', 'no-capture', ...REMOTE_FLAGS],
+  mcp: ['read-only', 'no-capture', 'board', ...REMOTE_FLAGS],
+  open: ['board', 'page', 'comment', 'viewport', 'compare', 'follow', 'print', 'json', ...REMOTE_FLAGS],
   notify: ['json', 'to', 'board'],
   doctor: ['install-browser', 'port', 'agent-acp', 'json', 'no-launch'],
   variant: ['url', 'path', 'title', 'note', 'source', 'id', 'viewport', 'board', 'json'],
   export: ['out', 'no-comments', 'browser-comments', 'no-index', 'include-checks'],
-  push: ['remote', 'token-file', 'board', 'include-checks'],
+  push: ['remote', 'token-file', 'board', 'include-checks', 'page'],
   share: ['remote', 'token-file', 'board', 'dry-run', 'no-comments', 'include-checks'],
   login: ['remote', 'project', 'workspace'],
   join: ['remote', 'invite'],
@@ -384,17 +410,19 @@ export function parseArgs(argv, { strict = false } = {}) {
       throw unknownFlag(key, scope.name, scope.flags)
     }
     seen.push(key)
+    const ownValue = Boolean(command && COMMAND_OPTIONAL_VALUE[command]?.has(key))
+    const boolean = BOOLEAN_FLAGS.has(key) && !ownValue
     if (eq >= 0) {
-      if (BOOLEAN_FLAGS.has(key)) {
+      if (boolean) {
         if (value === 'true' || value === 'false') value = value === 'true'
         else if (!['tailscale', 'lan'].includes(key)) throw new Error(`--${key} accepts only true or false.`)
       }
-    } else if (BOOLEAN_FLAGS.has(key)) {
+    } else if (boolean) {
       value = true
     } else {
       value = argv[index + 1]
       if (value === undefined || value.startsWith('--')) {
-        if (!OPTIONAL_VALUE.has(key)) throw new Error(`--${key} needs a value`)
+        if (!OPTIONAL_VALUE.has(key) && !ownValue) throw new Error(`--${key} needs a value`)
         value = true
       } else index += 1
     }

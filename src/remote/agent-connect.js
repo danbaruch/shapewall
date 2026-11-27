@@ -20,16 +20,22 @@ import { KNOWN_AGENTS, detectAgents } from '../agent/acp/detect.js'
 import { acpAgentKind } from '../agent/acp/command.js'
 import { ACP_DEFAULTS, acpHandshake, adapterName, adapterWarning } from '../agent/backends/acp.js'
 import { createBackend } from '../agent/backends/index.js'
+import { inside } from '../agent/acp/sandbox.js'
 import { agentSettings } from '../agent/config.js'
-import { REMOTE_FIX_PREAMBLE, REMOTE_PREAMBLE } from '../agent/context.js'
-import { DEFAULT_OUTPUT_DIR, authFiles, findConfigFile, loadConfig } from '../config.js'
-import { AGENT_SLUG_RE, forgetAgentCredential, readAgentCredential, saveAgentCredential } from './credentials.js'
+import { agentConfigDir, createInstructionsNote, instructionsLines, instructionsSummary, loadInstructions } from '../agent/instructions.js'
+import { REMOTE_FIX_PREAMBLE, remotePreamble } from '../agent/context.js'
+import { DEFAULT_OUTPUT_DIR, authFiles, findConfigFile, loadConfig, storageStateFiles } from '../config.js'
+import { closeSandbox } from '../agent/sandbox-exec.js'
+import { AGENT_SLUG_RE, forgetAgentCredential, pinAgentOwner, readAgentCredential, saveAgentCredential } from './credentials.js'
 import { fixRoot, sweepFixes } from './agent-fix.js'
 import { fatalLinkError, runAgentLink } from './agent-link.js'
 import {
   POLICY_APPROVALS,
   POLICY_AUDIENCES,
   POLICY_AUTO_KINDS,
+  POLICY_INSTRUCTIONS,
+  POLICY_RESPOND,
+  cleanAgentConfig,
   cleanAllowPath,
   cleanBase,
   cleanCommand,
@@ -41,6 +47,8 @@ import {
 } from './agent-policy-file.js'
 import { createRemote, remoteOrigin } from './remote.js'
 import { safeOut, terminalSafe } from './terminal.js'
+import { hostPlatform, machineView, markBrowserProfile } from '../agent/capabilities.js'
+import { policyExtensions } from '../agent/agent-config-folder.js'
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version
 const TOKEN_RE = /^swp_[A-Za-z0-9_-]{43}$/
@@ -171,10 +179,76 @@ export function profileProblems(kind, root, env = process.env, { managedFile = '
 // the only commands they run. None yet: Claude Code, started with its shell
 // tool, runs commands it takes to be read-only without asking (acp.js).
 export const COMMANDS_PROVEN = []
-const NO_COMMANDS =
+export const NO_COMMANDS =
   'Commands cannot be allowed for Claude Code in this release: started with its shell tool it runs commands it takes to be read-only (ls, cat) without asking, and those can read outside the project. Edits work without it.'
 
-export function policyChanges(flags, saved, kind = null) {
+const isDir = (dir) => {
+  try {
+    return fs.statSync(dir).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+// The agent config folder in effect for a connection, checked: { dir, note }.
+// The saved setting (null: the default folder, read only when it exists;
+// "none"; or a path). Never the person's own Claude Code folder, never
+// inside the project (a fix copy would carry it), never created here.
+export function agentConfigFor(policy, slug, { env = process.env, projectDir }) {
+  const fallback = path.join(path.dirname(policyFile(env)), 'agent-config', slug)
+  const dir = agentConfigDir(policy.instructions === 'all' ? policy.agentConfig : 'none', fallback)
+  if (!dir) return { dir: null }
+  if (!isDir(dir)) throw new Error(`The agent config folder ${dir} is not there. Make it, or run again with --agent-config none.`)
+  const real = (file) => {
+    try {
+      return fs.realpathSync(file)
+    } catch {
+      return path.resolve(file)
+    }
+  }
+  const within = (outer, inner) => inside(real(outer), real(inner))
+  const home = env.HOME || os.homedir()
+  const claudeDirs = [path.join(home, '.claude'), env.CLAUDE_CONFIG_DIR].filter(Boolean)
+  if (claudeDirs.some((claude) => within(claude, dir) || within(dir, claude)))
+    throw new Error(
+      `The agent config folder ${dir} is (or holds) Claude Code's own settings folder. A connected agent never reads that: pick a folder of its own (--agent-config DIR).`,
+    )
+  if (within(projectDir, dir) || within(dir, projectDir))
+    throw new Error(
+      `The agent config folder ${dir} is inside the project (or holds it): a fix's copy of the project could change it. Pick a folder outside the project (--agent-config DIR).`,
+    )
+  return { dir: real(dir) }
+}
+
+// What `agent connect` says about the agent config folder's extensions.
+export function extensionLines({ found, names, error }, policy, kind = 'claude') {
+  if (error) return [`Extensions: none. ${error}`]
+  if (!found) return []
+  if (kind !== 'claude') return [`Extensions: off. Only Claude Code takes them, so nothing from ${found.dir} reaches this agent.`]
+  const lines = []
+  if (!names.skills.length && !names.servers.length)
+    lines.push(`Extensions: none in ${found.dir} (skills/NAME/SKILL.md, MCP servers in .claude.json).`)
+  else {
+    const what = [
+      names.skills.length ? `skills ${names.skills.join(', ')}` : null,
+      names.servers.length ? `MCP servers ${names.servers.join(', ')}` : null,
+    ].filter(Boolean)
+    lines.push(`Extensions from ${found.dir}: ${what.join('; ')}. Only on trusted turns of threads that never carried outside text.`)
+    const m = machineView(policy)
+    const allowed = m.allowTool.filter((tool) => names.servers.some((server) => tool.startsWith(`mcp__${server}__`)))
+    if (names.servers.length)
+      lines.push(
+        allowed.length
+          ? `Tools it may call: ${allowed.join(', ')}. Every other tool of those servers is refused.`
+          : 'None of their tools is allowed yet: shapewall agent set allow-tool mcp__SERVER__TOOL (exact names).',
+      )
+    if (!m.extensionsFor.length) lines.push('Extensions are off for every turn: shapewall agent set extensions-for owner')
+  }
+  for (const item of found.skipped) lines.push(`Not loaded: ${item.what} (${item.why}).`)
+  return lines
+}
+
+export function policyChanges(flags, saved, kind = null, { cwd = process.cwd(), env = process.env } = {}) {
   const changes = {}
   const commandsOk = kind === null || COMMANDS_PROVEN.includes(kind)
   if (flags.audience !== undefined) {
@@ -231,11 +305,45 @@ export function policyChanges(flags, saved, kind = null) {
       throw new Error('--base: a branch name, such as main ("head": the commit the checkout is on)')
     changes.base = flags.base === 'head' ? null : flags.base
   }
+  if (flags.instructions !== undefined) {
+    if (!POLICY_INSTRUCTIONS.includes(flags.instructions))
+      throw new Error(
+        '--instructions: "all" (the project\'s CLAUDE.md or AGENTS.md and the agent config folder\'s, the default), "project" or "none"',
+      )
+    changes.instructions = flags.instructions
+  }
+  if (flags['agent-config'] !== undefined) {
+    const given = flags['agent-config']
+    const dir = cleanAgentConfig(given === 'none' ? 'none' : typeof given === 'string' && given ? path.resolve(cwd, given) : null)
+    if (!dir) throw new Error('--agent-config: a folder on this machine for this agent\'s own CLAUDE.md ("none": no such folder)')
+    if (dir !== 'none' && !isDir(dir))
+      throw new Error(`--agent-config: ${dir} is not a folder. Make it first: Shapewall does not create it.`)
+    changes.agentConfig = dir
+  }
+  if (flags.respond !== undefined) {
+    if (!POLICY_RESPOND.includes(flags.respond))
+      throw new Error(
+        '--respond: "thread" (in a shared thread, an @mention or Send to agent, or every message where the person who connected it set that; the default) or "mention" (an @mention or Send to agent only)',
+      )
+    changes.respond = flags.respond
+  }
   if (flags['git-remote'] !== undefined) {
     if (flags['git-remote'] !== 'none' && !cleanRemote(flags['git-remote']))
       throw new Error('--git-remote: a remote name, such as origin ("none": never push)')
     changes.remote = flags['git-remote'] === 'none' ? null : flags['git-remote']
   }
+  // The agent browser. A profile is a NAME in Shapewall's own profile folder
+  // ($XDG_STATE_HOME/shapewall/agent-browser-profiles), made here new or
+  // empty; never a browser's own profile or a folder elsewhere.
+  if (flags['browser-profile'] !== undefined) {
+    const given = flags['browser-profile']
+    if (given === 'none') changes.browserProfile = null
+    else if (typeof given !== 'string' || !given)
+      throw new Error('--browser-profile: a name such as staging-login for the agent browser\'s own saved profile ("none": no profile)')
+    else changes.browserProfile = markBrowserProfile(given, { env })
+  }
+  // Chromium's own sandbox may be skipped where it cannot start (solo and team turns only).
+  if (flags['browser-no-sandbox'] !== undefined) changes.browserNoSandbox = flags['browser-no-sandbox'] === true
   return changes
 }
 
@@ -271,11 +379,16 @@ export async function agentConnect(
   const policyNow = readMachinePolicy(origin, slug, env, {
     warn: (text) => log(`Not understood, so read as the narrowest setting: ${text}`),
   })
-  const changes = policyChanges(flags, policyNow, kind)
+  const changes = policyChanges(flags, policyNow, kind, { cwd, env })
+  // The agent config folder is checked before the policy file is written: a refused folder is never saved.
+  if (changes.agentConfig !== undefined || changes.instructions !== undefined)
+    agentConfigFor({ ...policyNow, ...changes }, slug, { env, projectDir: config.dir })
 
   // ---- The agent's token: its own, never the saved login's ----
   let token = env.SHAPEWALL_TOKEN || ''
   let source = token ? 'env' : null
+  // The handle of the account that approved this connection, when it was saved with the token.
+  let ownerHandle = null
   if (typeof flags['token-file'] === 'string') {
     token = fs.readFileSync(flags['token-file'], 'utf8').trim()
     source = 'file'
@@ -285,6 +398,7 @@ export async function agentConnect(
     if (saved) {
       token = saved.token
       source = 'agent'
+      ownerHandle = typeof saved.owner === 'string' ? saved.owner : null
     }
   }
   if (!token) {
@@ -312,6 +426,8 @@ export async function agentConnect(
             workspace: result.workspace || null,
             project: result.project || null,
             agent: result.agent || null,
+            // The approving account's handle: what "the owner" is pinned to on this machine.
+            owner: typeof result.agent?.owner?.handle === 'string' ? result.agent.owner.handle : null,
             scopes: Array.isArray(result.scopes) ? result.scopes : [],
             expiresAt: result.expiresAt || null,
             savedAt: new Date().toISOString(),
@@ -322,6 +438,7 @@ export async function agentConnect(
           `Approved as "${result.agent?.name || result.tokenName}" for ${result.workspace?.name || 'the workspace'} / ${result.project?.name || 'the project'}.`,
         )
         out(`Its token is saved in ${file} (only you can read it). Run the same command to connect again.`)
+        ownerHandle = typeof result.agent?.owner?.handle === 'string' ? result.agent.owner.handle : null
         return result.token
       },
     })
@@ -354,6 +471,29 @@ export async function agentConnect(
     )
   for (const line of profile.notes) log(line)
 
+  // ---- Instruction files (src/agent/instructions.js) ----
+  // Read here for the list the board is shown; each session reads them again
+  // when it starts (a fix from its own copy of the project).
+  const configDir = agentConfigFor(policy, slug, { env, projectDir: config.dir }).dir
+  const instructions = { mode: policy.instructions, configDir }
+  const loaded = loadInstructions({ root: config.dir, ...instructions })
+  for (const line of instructionsLines(loaded)) log(terminalSafe(line))
+  if (!loaded.files.length)
+    log(
+      policy.instructions === 'none'
+        ? 'Instructions: off on this machine (--instructions none).'
+        : 'Instructions: none found (CLAUDE.md or AGENTS.md in the project, or in the agent config folder).',
+    )
+  const instructionsNote = createInstructionsNote(instructionsSummary(loaded))
+
+  // ---- Extensions (src/agent/agent-config-folder.js) ----
+  // Skills and MCP servers, only from a folder this machine names itself
+  // (--agent-config DIR), never the default one, ~/.claude or the checkout.
+  // Read once here; each turn gets them only when its capabilities say so
+  // (a trusted turn on a thread that never carried outside text).
+  const extensions = policyExtensions(policy.agentConfig, { projectDir: config.dir, outputDir: config.outputDir, env })
+  for (const line of extensionLines(extensions, policy, kind)) log(terminalSafe(line))
+
   // ---- Can a session be opened at all? ----
   // Asked of the agent now, the way a question from the board would start it
   // (no prompt is sent, so nothing is spent): an adapter that cannot open the
@@ -368,9 +508,13 @@ export async function agentConnect(
       `${label} could not open ${what} on this machine, so it is not connected${said && !result.message.includes(said) ? ` (adapter: ${terminalSafe(said)})` : ''}. ${terminalSafe(result.message)}`,
     )
   }
-  const opened = await opens('a read-only session', { readOnly: true })
+  const opened = await opens('a read-only session', { readOnly: true, instructions })
   if (edits)
-    await opens('a session for edits', { readOnly: false, remoteEdit: { commands: policy.commands, allowPaths: policy.allowPaths } })
+    await opens('a session for edits', {
+      readOnly: false,
+      remoteEdit: { commands: policy.commands, allowPaths: policy.allowPaths },
+      instructions,
+    })
   const adapter = terminalSafe(adapterName(opened.agentInfo) || 'an adapter that does not say its version')
   const untested = adapterWarning(kind, opened.agentInfo, label)
   if (untested) log(`Warning: ${terminalSafe(untested)}`)
@@ -379,12 +523,20 @@ export async function agentConnect(
   const backend = createBackend(
     // Read and answer only (src/agent/backends/acp.js readOnly), with the
     // connected agent's own first words. Images are not sent to it yet.
-    { ...settings, readOnly: true, preamble: REMOTE_PREAMBLE, vision: false },
+    {
+      ...settings,
+      readOnly: true,
+      preamble: remotePreamble(askedOf(policy, kind)),
+      vision: false,
+      // Each chat session reads the files afresh; a different set is told to the board (hello).
+      instructions: { ...instructions, onLoad: (read) => instructionsNote.update(instructionsSummary(read)) },
+    },
     {
       env,
       root: config.dir,
       protect: [config.outputDir],
       sensitivePaths: () => authFiles(config),
+      denyRead: storageStateFiles(config),
       limits: { processesMax: Math.max(concurrency, 2) },
       log: (line) => log(line),
     },
@@ -401,6 +553,8 @@ export async function agentConnect(
           remoteEdit: { commands: policy.commands, allowPaths: policy.allowPaths },
           preamble: REMOTE_FIX_PREAMBLE,
           vision: false,
+          // Read from the fix's own copy (the base commit) when its session starts.
+          instructions,
         },
         {
           env,
@@ -408,6 +562,7 @@ export async function agentConnect(
           root: config.dir,
           protect: [config.outputDir],
           sensitivePaths: () => authFiles(config),
+          denyRead: storageStateFiles(config),
           limits: { processesMax: Math.max(concurrency, 2) },
           log: (line) => log(line),
         },
@@ -420,6 +575,8 @@ export async function agentConnect(
   process.once('SIGINT', stop)
   process.once('SIGTERM', stop)
   const remote = createRemote({ origin, token, source, fetchImpl })
+  // What the policy file said that was not understood, said once while this runs.
+  const warnedAgain = new Set()
   let ended = null
   try {
     ended = await runAgentLink({
@@ -428,9 +585,33 @@ export async function agentConnect(
       source,
       backend,
       editBackend,
-      fix: edits ? { config, env, fetchImpl } : null,
+      fix: edits ? { config, env, fetchImpl, instructions } : null,
+      instructions: instructionsNote,
+      // One platform answer (the sandbox probe) for the hello and every turn.
+      capabilities: { config, platform: hostPlatform() },
+      extensions: extensions.found ? extensions : null,
+      // Who "the owner" is on this machine: the approving account (saved with the token),
+      // else the first handle the server names at hello (agent-link.js pins it).
+      owner: ownerHandle,
+      // A saved token without an owner keeps the first one the server names.
+      onOwner: (handle) => {
+        if (source === 'agent' && pinAgentOwner(origin, slug, handle, env, token))
+          log(`saved ${handle} as the account that connected this agent`)
+      },
       hello: { kind, machine: os.hostname().split('.')[0] || 'this computer', version: VERSION, maxTurns: concurrency },
       policy,
+      // `agent set` while this runs: read again before each turn, and only
+      // a narrower value applies before the next connect (agent-link.js).
+      reloadPolicy: () => {
+        const read = readMachinePolicy(origin, slug, env, {
+          warn: (text) => {
+            if (warnedAgain.has(text)) return
+            warnedAgain.add(text)
+            log(`Not understood, so read as the narrowest setting: ${text}`)
+          },
+        })
+        return COMMANDS_PROVEN.includes(kind) ? read : { ...read, commands: [], auto: read.auto.filter((item) => item !== 'commands') }
+      },
       remote,
       takeover: Boolean(flags.takeover),
       signal: controller.signal,
@@ -466,6 +647,8 @@ export async function agentConnect(
     signal?.removeEventListener('abort', stop)
     backend.close?.()
     editBackend?.close?.()
+    // The sandbox runtime's proxies, if a fix started them.
+    await closeSandbox()
   }
   log(ended?.takenOver ? 'Another "shapewall agent connect" took over this agent (--takeover). This one stopped.' : 'Disconnected.')
   return 0

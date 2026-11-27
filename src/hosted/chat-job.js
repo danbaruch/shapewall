@@ -26,6 +26,14 @@ import { listJourneys } from '../journeys.js'
 import { commentText } from '../comment-fields.js'
 import { commentMentions } from '../mentions.js'
 
+// A job that cannot be built as asked (its question is gone): the turn ends.
+export class JobError extends Error {
+  constructor(code, message) {
+    super(message)
+    this.code = code
+  }
+}
+
 export const JOB_LIMITS = { history: 40, comments: 60, text: 8000, person: 10 }
 
 // A Git commit id (SHA-1 or SHA-256).
@@ -46,10 +54,18 @@ const pageOf = (page) => ({
   viewports: page.viewports,
 })
 
+// The member handle a comment is by, for the machine's own check of whose
+// text a solo or team turn quotes (src/remote/agent-job.js withholdOutside):
+// null for one a token (an agent) wrote or one that was imported, which no
+// handle vouches for.
+const authorHandleOf = (comment) =>
+  !comment.authorAgent && !comment.imported && typeof comment.authorHandle === 'string' ? comment.authorHandle : null
+
 // A comment as a list entry: who, where, what. Never a guest's.
 const commentEntry = (comment) => ({
   id: comment.id,
   author: comment.author || null,
+  authorHandle: authorHandleOf(comment),
   pageId: comment.pageId,
   viewport: comment.viewport,
   status: comment.status,
@@ -78,7 +94,7 @@ function mentionData(ctx, comments, mention) {
       element: { selector: comment.anchor?.selector || null, text: comment.anchor?.text || null },
       page: page ? { id: page.id, title: page.title, path: page.path } : { id: comment.pageId },
       viewport: comment.viewport,
-      comment: { id: comment.id, body: cut(commentText(comment), 600), status: comment.status },
+      comment: { id: comment.id, authorHandle: authorHandleOf(comment), body: cut(commentText(comment), 600), status: comment.status },
     }
   }
   if (mention.kind === 'journey') {
@@ -108,6 +124,7 @@ function mentionData(ctx, comments, mention) {
         id: comment.id,
         page: comment.pageId,
         author: comment.author || null,
+        authorHandle: authorHandleOf(comment),
         body: cut(commentText(comment), 300),
       })),
       more: Math.max(0, theirs.length - JOB_LIMITS.person) || undefined,
@@ -122,7 +139,37 @@ function mentionData(ctx, comments, mention) {
 // read it (replies filtered to its audience), or null.
 // `commentVisible(comment)`: whether this agent may read that comment.
 // `approvals`: the approval rule in effect per kind of request, for a fix.
-export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentItem, commentVisible, approvals = null }) {
+// `respond`: the thread's stored setting ("mention" or "always"), for the
+// machine's own check of why this turn started (src/agent/triggers.js).
+// `narrowing`: the project's (and board's) ceiling under the machine's
+// policy, { maxTier, shell, browser } (agent-policy.js narrowingOf).
+// `trust`: who wrote the text of the turn ({ authors, guests, thread }), or
+// null. The server adds it after the job is built (agent-link.js
+// turnAuthorship reads the built job, so the tier and the thread's trust
+// count the same text); the machine decides the tier from it.
+export function buildJob({
+  ctx,
+  turn,
+  agent,
+  rows: allRows,
+  inAudience,
+  asker,
+  commentItem,
+  commentVisible,
+  approvals = null,
+  respond = 'mention',
+  narrowing = null,
+  trust = null,
+}) {
+  // The conversation up to the message that started this turn, never past
+  // it: a message written while the turn waited for the machine is not the
+  // question (it may be people talking, or the next question, for later).
+  const at = allRows.findIndex((row) => row.id === turn.user_message_id)
+  // A chat turn answers its own message, or nothing: when that message is
+  // gone (pruned, removed) the newest message left is not the question.
+  if (turn.kind === 'chat' && at < 0)
+    throw new JobError('trigger_gone', 'The message that asked for this answer is no longer in the thread.')
+  const rows = at >= 0 ? allRows.slice(0, at + 1) : allRows
   const board = ctx.board
   const all = ctx.comments.list({})
   const comments = all.filter((comment) => !comment.authorGuest && commentVisible(comment))
@@ -137,6 +184,9 @@ export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentIte
   const kept = rows
     .filter((row) => (row.role === 'user' ? inAudience(row.author_user_id) : row.agent_id === agent.id))
     .slice(-JOB_LIMITS.history)
+  // ...and the question is the last message the agent gets, or no turn.
+  if (turn.kind === 'chat' && kept.at(-1)?.id !== turn.user_message_id)
+    throw new JobError('trigger_gone', 'The message that asked for this answer is not one this agent may read.')
   // The newest few person messages carry their mentions and files in full;
   // older ones a line each, as on a local board.
   const full = new Set(
@@ -147,9 +197,14 @@ export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentIte
   )
   const messages = kept.map((row) => {
     const body = parse(row)
-    if (row.role === 'assistant') return { role: 'assistant', text: String(body.text || '').slice(0, 100_000) }
+    if (row.role === 'assistant') return { id: row.id, role: 'assistant', text: String(body.text || '').slice(0, 100_000) }
     return {
+      id: row.id,
       role: 'user',
+      // Whether this message asked the agent (started a turn): false for one
+      // posted for the people in the thread (chat-routes.js postOnly). The
+      // machine uses it to hand a session what it missed (acp.js promptBlocks).
+      asked: !body.posted,
       text: String(body.text || '').slice(0, JOB_LIMITS.text),
       author: body.author?.name || null,
       mentions: (Array.isArray(body.mentions) ? body.mentions : []).slice(0, 8).map((mention) => ({
@@ -170,6 +225,8 @@ export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentIte
     }
   })
   const commentNumber = /^comment-(\d+)$/.exec(turn.thread_id)?.[1]
+  // Why the turn started, as the server stored it with the message.
+  const asked = parse(rows.find((row) => row.id === turn.user_message_id) || {})
   // "Push this fix" names the fix it was asked on (chat-routes.js startPush).
   const pushed = turn.kind === 'push' ? parse(rows.find((row) => row.id === turn.user_message_id) || {}) : null
   const commit = typeof pushed?.commit === 'string' && COMMIT_RE.test(pushed.commit) ? pushed.commit : null
@@ -183,10 +240,20 @@ export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentIte
       thread: turn.thread_id,
       comment: commentNumber ? Number(commentNumber) : null,
       ...(commit ? { commit } : {}),
+      // What the machine checks before it answers a chat turn (agent-link.js).
+      trigger: {
+        ask: asked.ask === true || asked.fix === true || asked.push === true,
+        respond: respond === 'always' ? 'always' : 'mention',
+        // The message that started it: the machine checks it is the last one.
+        messageId: turn.user_message_id || null,
+      },
     },
     agent: { id: agent.id, name: agent.name },
+    // What this project lets the machine allow, at most; null: no narrowing.
+    narrowing: narrowing ? { maxTier: narrowing.maxTier, shell: narrowing.shell, browser: narrowing.browser } : null,
     // Who asked. `owner`: the person who connected this agent.
     asker,
+    ...(trust ? { trust } : {}),
     ...(turn.kind === 'fix'
       ? {
           approvals: {

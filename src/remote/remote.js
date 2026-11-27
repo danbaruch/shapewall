@@ -136,18 +136,26 @@ export function createRemote({ origin, token, source = null, fetchImpl = fetch, 
   const one = (boardId, id, rest, guests) => `${board(boardId)}/comments/${enc(id)}${rest}${guests ? '?guests=1' : ''}`
 
   // A file URL from a comment (files.screenshot, a comment image) as bytes.
-  // Only this origin's API; of the query only the guests opt-in is kept (a
-  // share link guest's image is served with it).
+  // Only this origin's API; of the query only the guests opt-in (a share
+  // link guest's image is served with it) and a capture version (the
+  // current capture as the history listed it, else a 409) are kept.
   async function download(url, { signal } = {}) {
     const target = new URL(url)
     if (target.origin !== origin || !target.pathname.startsWith('/api/v1/boards/')) throw new Error('not a file of this Shapewall')
-    return call('GET', `${target.pathname}${target.searchParams.get('guests') === '1' ? '?guests=1' : ''}`, { signal })
+    const query = new URLSearchParams()
+    if (target.searchParams.get('guests') === '1') query.set('guests', '1')
+    const version = target.searchParams.get('version')
+    if (version && /^[\w.-]{1,40}$/.test(version)) query.set('version', version)
+    return call('GET', `${target.pathname}${query.size ? `?${query}` : ''}`, { signal })
   }
 
   return {
     origin,
     project: () => call('GET', '/api/v1/project'),
     pages: (boardId) => call('GET', `${board(boardId)}/pages`),
+    // A page's capture history, newest first (current and kept versions).
+    pageVersions: (boardId, pageId, { viewport = null, signal } = {}) =>
+      call('GET', `${board(boardId)}/pages/${enc(pageId)}/versions${viewport ? `?viewport=${enc(viewport)}` : ''}`, { signal }),
     // Guest comments (share links) only with `guests: true`.
     comments: (boardId, { status = 'open', page = null, mention = null, guests = false, signal } = {}) => {
       const query = new URLSearchParams({ status })
@@ -162,12 +170,17 @@ export function createRemote({ origin, token, source = null, fetchImpl = fetch, 
     // Replies are signed with the token's name on the server (no author here).
     reply: (boardId, id, { body, guests = false, signal }) =>
       call('POST', one(boardId, id, '/replies', guests), { json: { body }, signal }),
+    // A new comment ({ page, body, viewport?, x?, y?, anchor? }), signed with the token's name on the server.
+    addComment: (boardId, { page, body, viewport, x, y, anchor }) =>
+      call('POST', `${board(boardId)}/comments`, { json: { page, body, viewport, x, y, anchor } }),
     setAgentStatus: (boardId, id, agentStatus, { onlyFrom = null, guests = false, signal } = {}) =>
       call('POST', one(boardId, id, '/agent-status', guests), { json: { agentStatus, onlyFrom }, signal }),
     resolve: (boardId, id, { note, fixRef, agentStatus, guests = false } = {}) =>
       call('POST', one(boardId, id, '/resolve', guests), { json: { note, fixRef, agentStatus } }),
     reopen: (boardId, id, { guests = false } = {}) => call('POST', one(boardId, id, '/reopen', guests), { json: {} }),
     startPush: (definition) => call('POST', '/api/v1/pushes', { json: definition }),
+    // A push of only these pages and viewports ({ <page>: [<viewport>] }) to a board already pushed.
+    startPagePush: (boardId, pages) => call('POST', '/api/v1/pushes', { json: { mode: 'pages', board: boardId, pages } }),
     pushFile: (pushId, area, name, bytes) =>
       call('PUT', `/api/v1/pushes/${enc(pushId)}/files/${enc(area)}/${enc(name)}`, {
         body: bytes,

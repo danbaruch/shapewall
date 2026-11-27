@@ -1142,21 +1142,121 @@ test('a token from an older build becomes an agent once, whoever sees it first, 
     /token_id TEXT NOT NULL UNIQUE/,
     'the database refuses a second row for one token',
   )
-  // Seen first by the console, by the board, by its own token: an entry each time.
+  // The console and the board no longer make an agent of a token nobody
+  // uses (1.4.0): its own call does, once. The Tokens page lists it until then.
   forget()
-  assert.ok((await consoleAgents()).agents.some((agent) => agent.name === 'Late one' && agent.audience.inherited))
-  forget()
-  assert.ok((await boardAgents(bo)).agents.some((agent) => agent.name === 'Late one'))
-  forget()
+  assert.ok(!(await consoleAgents()).agents.some((agent) => agent.name === 'Late one'))
+  assert.ok(!(await boardAgents(bo)).agents.some((agent) => agent.name === 'Late one'))
+  assert.equal(hosted.db.prepare('SELECT COUNT(*) AS n FROM agents WHERE token_id = ?').get(made.id).n, 0, 'a list makes no row')
+  assert.ok((await api(ada, 'GET', consoleUrl('/claim-tokens'))).json.tokens.some((token) => token.id === made.id && !token.hidden))
   assert.equal((await tokenCall(hosted, made.token, 'GET', '/api/v1/project')).status, 200)
+  assert.ok((await consoleAgents()).agents.some((agent) => agent.name === 'Late one' && agent.audience.inherited))
   assert.deepEqual(
     firstSeen().map((row) => [row.user, row.by, row.name]),
-    [
-      [ada.user.id, null, 'Late one'],
-      [bo.user.id, null, 'Late one'],
-      [null, made.id, 'Late one'],
-    ],
+    [[null, made.id, 'Late one']],
   )
+  assert.equal((await api(ada, 'DELETE', consoleUrl(`/tokens/${made.id}`))).status, 200)
+})
+
+test('an older watcher nobody used in 90 days is hidden, not deleted; the Tokens page makes it an agent again or removes its claim access', async () => {
+  const days = (n) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString()
+  const fromOlderBuild = async (name) => {
+    const made = await makeToken(ada, name)
+    hosted.db.prepare('DELETE FROM agents WHERE token_id = ?').run(made.id)
+    return made
+  }
+  const age = (made, n) => {
+    hosted.db.prepare('UPDATE api_tokens SET last_used_at = ?, created_at = ? WHERE id = ?').run(days(n), days(n + 10), made.id)
+    hosted.db.prepare('UPDATE agents SET last_seen_at = ?, created_at = ? WHERE token_id = ?').run(days(n), days(n + 10), made.id)
+  }
+  const audits = (action, target) =>
+    hosted.db
+      .prepare('SELECT detail FROM audit_log WHERE action = ? AND target = ?')
+      .all(action, target)
+      .map((row) => JSON.parse(row.detail))
+  const claimTokens = async () => (await api(ada, 'GET', consoleUrl('/claim-tokens'))).json.tokens
+  const listedNames = async () => (await consoleAgents()).agents.map((agent) => agent.name)
+
+  // Dusty: used once by an older build's token (an inherited watcher), then silent for 100 days.
+  const dusty = await fromOlderBuild('Dusty')
+  assert.equal((await tokenCall(hosted, dusty.token, 'GET', '/api/v1/project')).status, 200)
+  const row = hosted.db.prepare('SELECT id, audience_inherited, kind FROM agents WHERE token_id = ?').get(dusty.id)
+  assert.deepEqual([row.audience_inherited, row.kind], [1, 'watcher'])
+  assert.ok((await listedNames()).includes('Dusty'), 'used just now: listed')
+  age(dusty, 100)
+  assert.ok(!(await listedNames()).includes('Dusty'), 'silent for 100 days: not listed')
+  assert.ok(!(await boardAgents(bo)).agents.some((agent) => agent.name === 'Dusty'), 'nor on the board')
+  await consoleAgents()
+  assert.equal(hosted.db.prepare('SELECT COUNT(*) AS n FROM agents WHERE id = ?').get(row.id).n, 1, 'hidden, not deleted')
+  const hidden = audits('agent_hidden', row.id)
+  assert.equal(hidden.length, 1, 'one audit line, however often it is listed')
+  assert.deepEqual([hidden[0].name, hidden[0].reason, hidden[0].days], ['Dusty', 'inactive', 90])
+  assert.ok((await consoleAgents()).claimTokens >= 1)
+  assert.ok((await claimTokens()).some((token) => token.id === dusty.id && token.hidden && token.agentId === row.id))
+  const everywhere = (await api(ada, 'GET', `/api/workspaces/${ws}/claim-tokens`)).json.tokens
+  assert.ok(everywhere.some((token) => token.id === dusty.id && token.projectName === 'Site'))
+
+  // A watcher made by a login (not inherited) is never hidden by age.
+  const recent = await makeToken(ada, 'Made by a login')
+  age(recent, 200)
+  assert.ok((await listedNames()).includes('Made by a login'))
+
+  // A member may not change either; an admin makes Dusty an agent again, for good.
+  assert.equal((await api(cy, 'POST', consoleUrl(`/claim-tokens/${dusty.id}/agent`), {})).status, 403)
+  const madeAgent = await api(bo, 'POST', consoleUrl(`/claim-tokens/${dusty.id}/agent`), {})
+  assert.equal(madeAgent.status, 200, madeAgent.text)
+  assert.equal(madeAgent.json.agent.id, row.id, 'the same agent, its history kept')
+  assert.ok((await listedNames()).includes('Dusty'))
+  assert.deepEqual(
+    audits('agent_made', row.id).map((item) => [item.was, item.audience]),
+    [['hidden', 'trusted']],
+  )
+  assert.ok(!(await claimTokens()).some((token) => token.id === dusty.id))
+  assert.equal((await api(bo, 'POST', consoleUrl(`/claim-tokens/${dusty.id}/agent`), {})).status, 404, 'once only')
+
+  // Quiet: never used at all. Removing claim access leaves its other scopes, and it can no longer take work.
+  const quiet = await fromOlderBuild('Quiet')
+  assert.ok((await claimTokens()).some((token) => token.id === quiet.id && !token.hidden))
+  const removed = await api(bo, 'DELETE', consoleUrl(`/claim-tokens/${quiet.id}/claim`))
+  assert.equal(removed.status, 200, removed.text)
+  assert.deepEqual(removed.json.scopes, ['read', 'reply', 'status'])
+  assert.equal(audits('token_claim_removed', quiet.id).length, 1)
+  assert.ok(!(await claimTokens()).some((token) => token.id === quiet.id))
+  assert.equal(hosted.db.prepare('SELECT COUNT(*) AS n FROM agents WHERE token_id = ?').get(quiet.id).n, 0)
+  const open = await comment(ada, 'Quiet may not take this')
+  assert.equal((await take(quiet.token, open.id)).json.error.code, 'missing_scope')
+  await api(ada, 'POST', boardUrl(`/comments/${open.id}/resolve`), {})
+
+  for (const made of [dusty, recent, quiet]) assert.equal((await api(ada, 'DELETE', consoleUrl(`/tokens/${made.id}`))).status, 200)
+})
+
+test('Q7 F8: an agent hidden, used again and then quiet once more is said hidden again', async () => {
+  const days = (n) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString()
+  const made = await makeToken(ada, 'Comeback')
+  hosted.db.prepare('DELETE FROM agents WHERE token_id = ?').run(made.id)
+  const age = (n) => {
+    hosted.db.prepare('UPDATE api_tokens SET last_used_at = ?, created_at = ? WHERE id = ?').run(days(n), days(n + 300), made.id)
+    hosted.db.prepare('UPDATE agents SET last_seen_at = ?, created_at = ? WHERE token_id = ?').run(days(n), days(n + 300), made.id)
+  }
+  const listed = async () => (await consoleAgents()).agents.some((agent) => agent.name === 'Comeback')
+  const hidden = (id) => hosted.db.prepare("SELECT at FROM audit_log WHERE action = 'agent_hidden' AND target = ? ORDER BY id").all(id)
+  assert.equal((await tokenCall(hosted, made.token, 'GET', '/api/v1/project')).status, 200)
+  const row = hosted.db.prepare('SELECT id FROM agents WHERE token_id = ?').get(made.id)
+  // Quiet for 200 days: hidden, said once however often it is listed.
+  age(200)
+  assert.equal(await listed(), false)
+  await consoleAgents()
+  assert.equal(hidden(row.id).length, 1)
+  // That was long ago; it came back since (used 100 days ago), and has been quiet again for 100 days.
+  hosted.db.prepare("UPDATE audit_log SET at = ? WHERE action = 'agent_hidden' AND target = ?").run(days(150), row.id)
+  assert.equal((await tokenCall(hosted, made.token, 'GET', '/api/v1/project')).status, 200)
+  assert.equal(await listed(), true, 'used again: listed')
+  age(100)
+  assert.equal(await listed(), false)
+  await consoleAgents()
+  assert.equal(hidden(row.id).length, 2, 'hidden again, and said again')
+  await consoleAgents()
+  assert.equal(hidden(row.id).length, 2, 'once for this time')
   assert.equal((await api(ada, 'DELETE', consoleUrl(`/tokens/${made.id}`))).status, 200)
 })
 
@@ -1309,7 +1409,7 @@ test('migration 12: the claim tokens of a 0.3.4 database become watcher agents t
   let db = await openDatabase(file)
   // Migrations 13 (connected agents) and 14 (approvals from the board) were applied before and stay;
   // 15 (usage and activity) adds its columns to the usage records again.
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 21)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 23)
   // Migration 21: the legacy "comment" scope became what it always meant.
   assert.deepEqual(JSON.parse(db.prepare("SELECT scopes FROM api_tokens WHERE name = 'Old comment token'").get().scopes), [
     'read',

@@ -33,13 +33,18 @@ A few pages are written for the site and live only there; they are linked below 
 
 ## 4. Steering agents
 
-| Guide                                    | What it covers                                                                                     |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| [agent-workflow.md](agent-workflow.md)   | Comments as instructions: the loop, the JSON an agent reads, `shapewall watch` and the MCP server. |
-| [agent-recipes.md](agent-recipes.md)     | Copy-paste commands for Claude Code, Codex, goose, Ollama and chat bots.                           |
-| [agents.md](agents.md)                   | The board's chat panel: connect a model or an agent CLI, work on a branch, images and voice.       |
-| [starter-agent.md](starter-agent.md)     | `shapewall agent sandbox` (experimental): one comment at a time in a container, budgets, a branch. |
-| [agent-hardening.md](agent-hardening.md) | Prompt injection through comments, the built-in defenses, least privilege, a sandbox checklist.    |
+| Guide                                                             | What it covers                                                                                               |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [agent-workflow.md](agent-workflow.md)                            | Comments as instructions: the loop, the JSON an agent reads, `shapewall watch` and the MCP server.           |
+| [agent-workflow.md](agent-workflow.md#your-agent-finds-the-board) | How an agent finds the board: the `AGENTS.md` section from `init`, and `shapewall agent setup`.              |
+| [agent-workflow.md](agent-workflow.md#links-to-the-board)         | Links to a page, a comment or a before and after (`shapewall open`), and following an agent.                 |
+| [plugins.md](plugins.md)                                          | The Claude Code and Codex plugin: the MCP server plus skills in one install (experimental).                  |
+| [agent-recipes.md](agent-recipes.md)                              | Copy-paste commands for Claude Code, Codex, goose, Ollama and chat bots.                                     |
+| [agents.md](agents.md)                                            | The board's chat panel: connect a model or an agent CLI, work on a branch, images and voice.                 |
+| [agents.md](agents.md#when-an-agent-answers)                      | When an agent answers in a shared thread: @mentions, Send to agent, and agent text that never starts a turn. |
+| [starter-agent.md](starter-agent.md)                              | `shapewall agent sandbox` (experimental): one comment at a time in a container, budgets, a branch.           |
+| [agent-capabilities.md](agent-capabilities.md)                    | What an agent may do on each turn: solo, team and open, named commands, the sandboxed shell, the browser.    |
+| [agent-hardening.md](agent-hardening.md)                          | Prompt injection through comments, the built-in defenses, least privilege, a sandbox checklist.              |
 
 ## 5. Teams and self-hosting
 
@@ -65,11 +70,11 @@ A few pages are written for the site and live only there; they are linked below 
 
 ## 7. Integrations
 
-| Guide                                | What it covers                                                                               |
-| ------------------------------------ | -------------------------------------------------------------------------------------------- |
-| [github.md](github.md)               | A comment as a GitHub issue, the pull requests that fix it, resolving on merge.              |
-| [notifications.md](notifications.md) | Comment events to a signed webhook, Slack, Discord, Telegram or email, with mentions routed. |
-| [buzz.md](buzz.md)                   | Optional bridge to coding agents that already sit in a self-hosted Buzz channel.             |
+| Guide                                | What it covers                                                                                          |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| [github.md](github.md)               | A comment as a GitHub issue, the pull requests that fix it, resolving on merge.                         |
+| [notifications.md](notifications.md) | Comment events to a signed webhook, Slack, Discord, Telegram or email, with mentions routed.            |
+| [buzz.md](buzz.md)                   | Optional bridge to coding agents in a self-hosted Buzz channel, and the board's tools for those agents. |
 
 ## Contributor docs (this repository only)
 

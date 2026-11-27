@@ -1,6 +1,6 @@
 {
   "name": "shapewall",
-  "version": "1.1.0",
+  "version": "1.4.1",
   "description": "See your whole app and steer your coding agents from it: every screen on desktop and phone, the flows between them, and comments your agent reads as instructions over JSON or MCP.",
   "license": "Apache-2.0 AND FSL-1.1-ALv2",
   "author": "Dan Baruch",
@@ -48,6 +48,7 @@
     "docs/monitoring.md",
     "docs/notifications.md",
     "docs/page-checks.md",
+    "docs/plugins.md",
     "docs/pull-requests.md",
     "docs/performance.md",
     "docs/stability.md",
@@ -70,6 +71,7 @@
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "check:text": "node scripts/check-release-text.mjs",
     "check:pack": "node scripts/check-pack.js",
     "fresh-install": "bash scripts/fresh-install.sh",
     "demo": "node scripts/demo.js",
@@ -94,6 +96,7 @@
   ],
   "dependencies": {
     "@agentclientprotocol/sdk": "2.4.0",
+    "@anthropic-ai/sandbox-runtime": "0.0.83",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@noble/curves": "2.4.0",
     "@scure/base": "2.4.0",

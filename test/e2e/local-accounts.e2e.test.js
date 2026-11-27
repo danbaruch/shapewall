@@ -145,6 +145,9 @@ for (const width of [1440, 390, 320])
     try {
       await page.goto(`${origin}/console#settings-token=fixture-owner`)
       await page.locator('[data-sw-local-console]').waitFor()
+      // The console shell renders before /api/boards answers; the project
+      // grid (all cards at once, from that one response) comes after it.
+      await page.locator('[data-sw-local-projects]').waitFor()
       assert.equal(await page.locator('[data-sw-local-project]').count(), setup.config.boards.length)
       await page.locator('[data-sw-profile-menu]').click()
       await page.locator('[data-sw-profile-item="account"]').click()

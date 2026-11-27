@@ -288,6 +288,17 @@ export function entryVersion(entry, manifest) {
   return Number.isFinite(time) ? versionId(new Date(time), '') : null
 }
 
+// When a capture version was taken, as an ISO time (its first 18 digits are
+// the UTC time to the millisecond), or null for anything else.
+export function versionTime(version) {
+  if (typeof version !== 'string' || !VERSION_RE.test(version)) return null
+  const v = version
+  const time = Date.parse(
+    `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}T${v.slice(9, 11)}:${v.slice(11, 13)}:${v.slice(13, 15)}.${v.slice(15, 18)}Z`,
+  )
+  return Number.isFinite(time) ? new Date(time).toISOString() : null
+}
+
 // The version currently shown for a page and viewport (default environment).
 export function currentVersion(config, boardId, pageId, viewport) {
   const manifest = readManifest(config, boardId)
@@ -593,14 +604,16 @@ export function validateCommentMedia(input) {
   return { images, drawing }
 }
 
-// `mention` keeps comments whose text or replies mention that handle.
+// `mention` keeps comments whose text or replies mention that handle, as
+// people wrote them: an agent's comment or reply never counts (it is a
+// filter that wakes agents, watch --mention; src/agent/triggers.js).
 export function listComments(config, boardId, { status = null, mention = null } = {}) {
   const { comments } = readCommentStore(config, boardId)
   const wanted = mention ? String(mention).replace(/^@/, '').toLowerCase() : null
   return comments
     .map(withAgentFields)
     .filter((comment) => !status || comment.status === status)
-    .filter((comment) => !wanted || comment.mentions.includes(wanted))
+    .filter((comment) => !wanted || commentMentions(comment, { people: true }).includes(wanted))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : b.id - a.id))
 }
 
@@ -693,7 +706,14 @@ async function logEvents(config, events) {
   return events
 }
 
-export async function createComment(config, board, input, { now = new Date() } = {}) {
+// `owner`: the server knows the board's owner made it (a request from this
+// machine's own browser, the owner account under `serve --accounts`, the
+// CLI outside an agent's run). Stored as byOwner, never read from `input`:
+// the "me" of the MCP list_comments filter goes by it, not by the name.
+// `agent`: an agent wrote it (the MCP add_comment tool, `comments add` inside
+// an agent's run). Stored as authorAgent, never read from `input`: an
+// agent's comment never wakes an agent (src/agent/triggers.js).
+export async function createComment(config, board, input, { now = new Date(), owner = false, agent = false } = {}) {
   const clean = validateCommentInput(config, board, input)
   const media = validateCommentMedia(input)
   const file = commentsFile(config, board.id)
@@ -725,7 +745,9 @@ export async function createComment(config, board, input, { now = new Date() } =
       replies: [],
       agentStatus: null,
       agentStatusAt: null,
+      byOwner: owner === true && agent !== true,
     }
+    if (agent === true) comment.authorAgent = true
     if (!comment.anchor) delete comment.anchor
     if (images.length) comment.images = images
     // The drawing belongs to the capture it was drawn on.
@@ -749,7 +771,12 @@ export async function createComment(config, board, input, { now = new Date() } =
 // clears it). Reopening clears the agent status too, so a reopened comment is
 // new work for `shapewall watch`, and counts the reopen (reopenCount, reopenedAt).
 // `actor` names who made the change in its events (null: nobody said).
-export async function updateComment(config, boardId, commentId, changes, { now = new Date(), actor = null } = {}) {
+// `by`: who writes the new text (body, resolution): "owner" (the server saw
+// the board's owner), "agent" (the board's own agent or an agent run of the
+// owner's), or null (anyone else, or not known). Text by anyone else makes
+// the comment no longer the owner's alone (byOwner false, Q7 audit), so its
+// words are never read as the owner's on a solo turn.
+export async function updateComment(config, boardId, commentId, changes, { now = new Date(), actor = null, by = null } = {}) {
   const id = Number(commentId)
   if (!Number.isSafeInteger(id) || id <= 0) throw new CommentError(404, 'unknown_comment', 'That comment does not exist.')
   if (!changes || typeof changes !== 'object') throw new CommentError(400, 'invalid_change', 'Nothing to change.')
@@ -775,7 +802,10 @@ export async function updateComment(config, boardId, commentId, changes, { now =
       comment.body = body
       // Shown as "edited" beside the time.
       comment.editedAt = now.toISOString()
+      if (by !== 'owner' && by !== 'agent' && comment.byOwner === true) comment.byOwner = false
     }
+    if (typeof changes.resolution === 'string' && changes.resolution.trim() && by !== 'owner' && by !== 'agent' && comment.byOwner === true)
+      comment.byOwner = false
     if (fixRef !== undefined) {
       if (fixRef) comment.fixRef = fixRef
       else delete comment.fixRef
@@ -997,6 +1027,10 @@ export async function addReply(config, boardId, commentId, input, { now = new Da
         // ("Ada"): the flag says it is an agent, since the name no longer
         // does. Only the server's own agent tools set it, never a request body.
         if (input?.agent === true) reply.agent = true
+        // An agent's reply the server did not see the owner's machine send (the
+        // agent header from anyone who reaches the board): still an agent's for
+        // waking agents, but its words are not the owner's (Q7 audit).
+        if (input?.agent === true && input?.unvouched === true) reply.unvouched = true
         if (images.length) reply.images = images
         if (media.drawing) {
           const board = config.boards?.find((item) => item.id === boardId)

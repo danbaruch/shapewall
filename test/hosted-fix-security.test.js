@@ -394,7 +394,7 @@ test('what a machine, or a stolen agent token, may claim: never "approved", neve
   // A chat turn is never a fix: a card in it is refused, whatever the agent's machine allows.
   const thread = `chat-${Math.random().toString(36).slice(2).padEnd(16, '0').slice(0, 16)}`
   hosted.rateLimiter.reset()
-  const chatting = ada.browser.post(agentUrl(`/threads/${thread}/messages`), { text: 'slowly' })
+  const chatting = ada.browser.post(agentUrl(`/threads/${thread}/messages`), { text: 'slowly', ask: true })
   const chatTurn = await until(() => hosted.app.locals.chat.hub.all().find((item) => item.threadId === thread), 'the chat turn')
   const inChat = askFrame(chatTurn.id)
   await inject(builder, chatTurn.id, [{ name: 'permission', data: inChat }], () =>
@@ -646,12 +646,9 @@ test('a server that says "allow without asking", and a comment that tells the ag
   assert.equal(fs.readFileSync(path.join(strict.dir, '.env'), 'utf8'), 'SECRET=1\n')
   assert.equal(fs.existsSync(path.join(strict.dir, '.git', 'hooks', 'pre-commit')), false)
   untouched(strict)
-  // What the agent's own environment held: none of Shapewall's variables, so no token.
+  // What the agent's own environment held: of Shapewall's variables only the agent mark (src/agent-run.js), so no token.
   const names = JSON.parse(final.text.split('\n')[0])
-  assert.deepEqual(
-    names.filter((name) => /^SHAPEWALL_|TOKEN/.test(name)),
-    [],
-  )
+  assert.deepEqual(names.filter((name) => /^SHAPEWALL_|TOKEN/.test(name)).sort(), ['SHAPEWALL_AGENT_HEADER', 'SHAPEWALL_AGENT_RUN'])
   assert.doesNotMatch(JSON.stringify(final), /should-never-reach-the-agent/)
 
   // "Auto" from the server alone is not auto: an edit and a listed command still wait for a person, here denied.

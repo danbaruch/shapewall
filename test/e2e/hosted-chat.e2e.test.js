@@ -35,6 +35,9 @@ let scout // a second agent, Ada's own
 const contexts = []
 const links = []
 const projectDir = tempDir('hosted-chat-e2e-code')
+// The connection's agent config folder (--agent-config), outside the project.
+const ownerConfig = tempDir('hosted-chat-e2e-agent-config')
+const hookMarker = path.join(tempDir('hosted-chat-e2e-hook'), 'hook-ran')
 
 const shot = async (page, name) =>
   SHOTS && page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: false, animations: 'disabled' })
@@ -75,7 +78,8 @@ const realErrors = (errors) => errors.filter((text) => !/Failed to load resource
 function startCli(extra = []) {
   const bin = tempDir('hosted-chat-e2e-bin')
   const adapter = path.join(bin, 'claude-agent-acp')
-  fs.writeFileSync(adapter, `#!/bin/sh\nexec "${process.execPath}" "${ACP_STUB}" --ro-modes "$@"\n`, { mode: 0o755 })
+  // --system-prompt: it takes the instruction files as an appended system prompt, as claude-agent-acp does.
+  fs.writeFileSync(adapter, `#!/bin/sh\nexec "${process.execPath}" "${ACP_STUB}" --ro-modes --system-prompt "$@"\n`, { mode: 0o755 })
   const child = spawn(process.execPath, [CLI, 'agent', 'connect', '--remote', hosted.origin, '--agent', 'claude', ...extra], {
     cwd: projectDir,
     env: {
@@ -103,9 +107,12 @@ function startCli(extra = []) {
   }
 }
 
+// Asks the agent: Send to agent in a shared thread (Send alone only posts
+// there), Send in a private chat.
 const say = async (page, text) => {
   await page.fill('[data-sw-chat-input]', text)
-  await page.click('[data-sw-chat-send]')
+  const ask = page.locator('[data-sw-chat-ask]')
+  await page.click((await ask.count()) ? '[data-sw-chat-ask]' : '[data-sw-chat-send]')
 }
 const lastAnswer = (page) => page.locator('[data-sw-chat-message="assistant"]').last()
 const answered = (page, pattern, ms = 30_000) =>
@@ -132,6 +139,15 @@ before(async () => {
   assert.ok(fs.existsSync(path.join(ROOT_DIR, 'dist', 'console', 'console.html')), 'run "npm run build" before the hosted chat e2e test')
   if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true })
   fs.writeFileSync(path.join(projectDir, 'notes.txt'), 'The hero button is blue.\n')
+  // The project's house rules and the owner's note for this agent (src/agent/instructions.js), and a
+  // project settings file whose hook must stay out of the session.
+  fs.writeFileSync(path.join(projectDir, 'CLAUDE.md'), 'HOUSE_RULE_SENTINEL: use tabs.\n')
+  fs.writeFileSync(path.join(ownerConfig, 'CLAUDE.md'), 'OWNER_NOTE_SENTINEL: answer in one line.\n')
+  fs.mkdirSync(path.join(projectDir, '.claude'), { recursive: true })
+  fs.writeFileSync(
+    path.join(projectDir, '.claude', 'settings.json'),
+    JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `touch ${hookMarker}` }] }] } }),
+  )
   hosted = await startHostedServer('hosted-chat-e2e', { clientDir: path.join(ROOT_DIR, 'dist', 'client') })
   ada = await signUp(hosted, { handle: 'ada', displayName: 'Ada' })
   ws = ada.workspaceId
@@ -170,7 +186,7 @@ test('connect: the command shows a code, an admin names the agent and approves i
   assert.ok((await page.textContent('[data-sw-connect-agent-chat]')).includes(`shapewall agent connect --remote ${hosted.origin}`))
   await shot(page, 'console-connect-card-1440-light')
 
-  cli = startCli(['--name', 'Builder'])
+  cli = startCli(['--name', 'Builder', '--agent-config', ownerConfig])
   await until(() => /[A-Z]{4}-[A-Z]{4}/.test(cli.state.out), `the code\n${cli.state.out}\n${cli.state.err}`)
   const code = /[A-Z]{4}-[A-Z]{4}/.exec(cli.state.out)[0]
   assert.match(cli.state.out, /To connect this agent, open/)
@@ -207,6 +223,18 @@ test('connect: the command shows a code, an admin names the agent and approves i
   assert.equal(builder.icon, 'owl')
   assert.equal(builder.audience.kind, 'trusted')
   assert.deepEqual(builder.token.scopes.sort(), ['agent', 'claim', 'read', 'reply', 'status'])
+  // Its instruction files: listed in the terminal and to the server by name and short hash, never their text.
+  assert.match(cli.state.err, /Instructions: CLAUDE\.md \(project\), \d+ bytes, sha256 [a-f0-9]{12}/)
+  assert.match(cli.state.err, /Instructions: CLAUDE\.md \(agent config\), \d+ bytes, sha256 [a-f0-9]{12}/)
+  assert.match(cli.state.err, /Left out of this session: the allow rules, hooks and default mode in \.claude\/settings\.json/)
+  assert.deepEqual(
+    builder.link.instructions.map((file) => [file.scope, file.path, /^[a-f0-9]{12}$/.test(file.sha)]),
+    [
+      ['project', 'CLAUDE.md', true],
+      ['agent-config', 'CLAUDE.md', true],
+    ],
+  )
+  assert.doesNotMatch(JSON.stringify(agents), /SENTINEL|hosted-chat-e2e-agent-config/)
 
   // The console shows what it is.
   await page.goto(`${hosted.origin}/w/${ws}/agents/${project.id}`)
@@ -215,6 +243,10 @@ test('connect: the command shows a code, an admin names the agent and approves i
   assert.match(row, /Claude Code/)
   assert.match(row, /Chats on the board, reads and answers only/)
   assert.match(row, /connected since/)
+  assert.match(
+    await page.textContent('[data-sw-agent-row="Builder"] [data-sw-agent-instructions]'),
+    /Instructions: CLAUDE\.md \(project, \d+ bytes, [a-f0-9]{12}\), CLAUDE\.md \(agent config, \d+ bytes, [a-f0-9]{12}\)/,
+  )
   await shot(page, 'console-agents-connected-1440-light')
   await page.goto(`${hosted.origin}/w/${ws}/agents`)
   await page.waitForSelector('[data-sw-overview-agent="Builder"] [data-sw-overview-connected]')
@@ -230,6 +262,17 @@ test('chat: pick the agent in the Agents panel, ask, and the answer streams in; 
   await row.waitFor()
   assert.equal(await row.getAttribute('data-sw-agent-state'), 'online')
   assert.match(await row.textContent(), /Reads and answers\. No edits, no commands\./)
+  assert.equal(
+    (await row.locator('[data-sw-hosted-agent-instructions]').textContent()).trim(),
+    'Instructions: CLAUDE.md (project), CLAUDE.md (agent config)',
+  )
+  // The board is told names only: sizes and hashes stay in the console.
+  const listed = (await ada.browser.get(`/w/${ws}/p/${project.id}/api/boards/sample/agents`)).json
+  const onBoard = (listed.agents || listed).find((agent) => agent.name === 'Builder')
+  assert.deepEqual(onBoard.link.instructions, [
+    { scope: 'project', path: 'CLAUDE.md' },
+    { scope: 'agent-config', path: 'CLAUDE.md' },
+  ])
   await shot(page, 'board-agents-panel-1440-light')
   await row.locator('[data-sw-hosted-agent-chat]').click()
   await page.waitForSelector('[data-sw-chat-input]')
@@ -245,6 +288,23 @@ test('chat: pick the agent in the Agents panel, ask, and the answer streams in; 
   assert.equal(await page.locator('[data-sw-chat-message="user"]').count(), 1)
   assert.ok((await lastAnswer(page).textContent()).includes(text.trim().slice(0, 20)))
   assert.deepEqual(realErrors(errors), [])
+})
+
+test('instructions: the session gets the project CLAUDE.md and the owner note as an appended system prompt, auto memory off, hooks left out', async () => {
+  const { page } = await open(ada)
+  await openAgents(page)
+  await page.locator('[data-sw-hosted-agent-name="Builder"] [data-sw-hosted-agent-chat]').click()
+  await page.waitForSelector('[data-sw-chat-input]')
+  // The stub says back what session/new carried.
+  await say(page, 'newparams')
+  await answered(page, /OWNER_NOTE_SENTINEL/)
+  await idle(page)
+  const text = await lastAnswer(page).textContent()
+  assert.ok(text.indexOf('HOUSE_RULE_SENTINEL') < text.indexOf('OWNER_NOTE_SENTINEL'), 'project first, then the owner note')
+  assert.match(text, /Shapewall rules, which take precedence/)
+  assert.match(text, /"autoMemoryEnabled":\s*false/)
+  assert.match(text, /"settingSources":\s*\[\]/)
+  assert.equal(fs.existsSync(hookMarker), false, 'the project hook did not run')
 })
 
 test('read and answer only: a file write and a command are refused on the machine, and the thread says so', async () => {
@@ -438,7 +498,7 @@ test('dark, and the phone: the Agents sheet, then the chat in its sheet', async 
     assert.match(asked, /on a new branch, never in that machine's checkout/)
     assert.match(asked, /Asked to allow edits without asking: that stays off until you switch it on/)
     assert.match(asked, /A fix starts from the branch main\./)
-    assert.match(asked, /Never runs a command for the board/)
+    assert.match(asked, /Runs a command only where that machine's own settings allow it/)
     assert.doesNotMatch(asked, /does not change files/i, 'never the read-only promise for a machine that asked for edits')
     await box.scrollIntoViewIfNeeded()
     await shot(view, name)
@@ -520,6 +580,56 @@ test('access ends with the chat open: demoted or signed out, the panel says so o
   }
 })
 
+test("triggers: a shared thread keeps a plain message and answers an @mention or Send to agent; the agent's own @mention never wakes it; a private chat answers every message", async () => {
+  const { page, errors } = await open(ada)
+  const boardThread = `/w/${ws}/p/${project.id}/api/agent/boards/sample/threads/board`
+  await page.goto(boardPage('&chat=board&ha=1'))
+  await page.waitForSelector('[data-sw-chat-input]')
+  await idle(page)
+  const answers = () => page.locator('[data-sw-chat-message="assistant"]').count()
+  const users = () => page.locator('[data-sw-chat-message="user"]').count()
+  const start = [await users(), await answers()]
+  assert.match(await page.textContent('[data-sw-chat-respond-line]'), /answers when you @mention it or press Send to agent/)
+  assert.equal(await page.getAttribute('[data-sw-chat-send]', 'aria-label'), 'Send to the thread')
+  // A plain message is posted for the people here: no turn, no answer.
+  await page.fill('[data-sw-chat-input]', 'hello team, nothing for the agent yet')
+  await page.click('[data-sw-chat-send]')
+  await until(async () => (await users()) === start[0] + 1, 'the plain message in the thread')
+  await page.waitForTimeout(1500)
+  assert.equal(await answers(), start[1], 'no answer to a plain message')
+  assert.equal((await ada.browser.get(boardThread)).json.running, false)
+  await shot(page, 'board-chat-posted-1440-light')
+  // An @mention wakes it. Its answer @mentions an agent too, and that never starts another turn.
+  await page.fill('[data-sw-chat-input]', '@agent reply @agent ping')
+  await page.click('[data-sw-chat-send]')
+  await answered(page, /@agent ping/)
+  await idle(page)
+  assert.equal(await answers(), start[1] + 1)
+  await page.waitForTimeout(2000)
+  assert.equal(await answers(), start[1] + 1, "the agent's own @mention starts no turn")
+  assert.equal((await ada.browser.get(boardThread)).json.running, false)
+  // Send to agent (Ctrl+Enter) asks without a mention.
+  await page.fill('[data-sw-chat-input]', 'stream')
+  await page.keyboard.press('Control+Enter')
+  await answered(page, /Hello from the stream/)
+  await idle(page)
+  assert.equal(await answers(), start[1] + 2)
+  // The server keeps to it too: a plain message is stored with no turn.
+  const posted = await ada.browser.post(`${boardThread}/messages`, { text: 'stream' })
+  assert.equal(posted.status, 200, posted.text)
+  assert.match(posted.text, /event: posted/)
+  assert.doesNotMatch(posted.text, /event: done/)
+  // A private chat answers every message, with Send alone.
+  await page.click('[data-sw-chat-new="header"]')
+  await page.waitForSelector('[data-sw-chat-input]')
+  assert.equal(await page.locator('[data-sw-chat-ask]').count(), 0)
+  await page.fill('[data-sw-chat-input]', 'stream')
+  await page.click('[data-sw-chat-send]')
+  await answered(page, /Hello from the stream/)
+  await idle(page)
+  assert.deepEqual(realErrors(errors), [])
+})
+
 test('offline: stopping the command takes the agent offline at once, and chat says so instead of sending', async () => {
   const { page } = await open(ada)
   await openAgents(page)
@@ -533,7 +643,10 @@ test('offline: stopping the command takes the agent offline at once, and chat sa
   assert.match(await page.textContent('[data-sw-chat-blocked]'), /Builder is offline/)
   assert.equal(await page.locator('[data-sw-chat-input]').count(), 0)
   await shot(page, 'board-chat-offline-1440-light')
-  const sent = await ada.browser.post(`/w/${ws}/p/${project.id}/api/agent/boards/sample/threads/board/messages`, { text: 'hello' })
+  const sent = await ada.browser.post(`/w/${ws}/p/${project.id}/api/agent/boards/sample/threads/board/messages`, {
+    text: 'hello',
+    ask: true,
+  })
   assert.equal(sent.status, 409, sent.text)
   assert.equal(sent.json.error.code, 'agent_offline')
   // Never handed to another agent silently: Scout (online, Ada's own) is offered, and choosing it is said in the thread.

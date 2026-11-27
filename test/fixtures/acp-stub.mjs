@@ -16,7 +16,13 @@
 //   "env"               -> the names of its environment variables, as JSON
 //   "caps"              -> the client capabilities it was given, as JSON
 //   "newparams"         -> the params of session/new, as JSON
+//   "exec TOOL [JSON]"  -> calls TOOL of the shapewall_exec server session/new named (exec-mcp.js), then
+//                          "exec TOOL ok|error: TEXT", or "exec: no exec tools in this session";
+//                          [[stub-exec:TOOL]] anywhere in the prompt does the same
 //   "pid"               -> its process id
+//   "extcall TOOL [FIRST]" -> asks session/request_permission for TOOL (an extension's MCP tool); with
+//                          FIRST, a completed tool call titled FIRST comes before it (a board tool, say).
+//                          Then "extcall TOOL: OPTION" (or "cancelled")
 //   "cwd"               -> its working folder, what is in it, and the session cwd
 //   "runenv N=V CMD..."  -> like run, with env for the terminal
 //   "echo"              -> every prompt block it got, as JSON
@@ -47,16 +53,20 @@
 //   "selfswitch ID"   -> the agent moves itself to mode ID and says so with
 //                        current_mode_update alone, then goes on talking
 // --agent-info=NAME@VERSION: what initialize says the adapter is.
+// --system-prompt: initialize advertises sessionCapabilities.systemPrompt (as
+// claude-agent-acp does); "newparams" then shows the appended prompt.
 // --new-fails=TEXT: session/new writes "stub stderr: TEXT" to stderr and
 // fails with TEXT. --new-exits: it writes to stderr and exits with code 7.
 
 import fs from 'node:fs'
 import process from 'node:process'
+import { spawn } from 'node:child_process'
 
 const MODE = process.env.STUB_ACP_MODE || ''
 const OPTIONS = process.argv.includes('--options')
 const RO_MODES = process.argv.includes('--ro-modes')
 const V106 = process.argv.includes('--v106')
+const SYSTEM_PROMPT = process.argv.includes('--system-prompt')
 const MODES = process.argv.includes('--modes') || RO_MODES || V106
 const SLOW_NEW = process.argv.includes('--slow-new')
 const argOf = (name) => process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3)
@@ -213,7 +223,11 @@ function handle(message) {
     const answer = () =>
       reply({
         protocolVersion: 1,
-        agentCapabilities: { loadSession: false, promptCapabilities: { image: MODE !== 'noimage', embeddedContext: true } },
+        agentCapabilities: {
+          loadSession: false,
+          promptCapabilities: { image: MODE !== 'noimage', embeddedContext: true },
+          ...(SYSTEM_PROMPT ? { sessionCapabilities: { systemPrompt: { mode: { override: {} } } } } : {}),
+        },
         agentInfo: AGENT_INFO
           ? {
               name: AGENT_INFO.slice(0, AGENT_INFO.lastIndexOf('@')),
@@ -293,11 +307,17 @@ function handle(message) {
 async function prompt({ sessionId, prompt: blocks }) {
   cancelled.delete(sessionId)
   if (MODE === 'promptauth') throw Object.assign(new Error('Authentication required'), { code: -32000 })
-  const last =
+  let last =
     [...blocks]
       .reverse()
       .find((block) => block.type === 'text')
       ?.text?.trim() || ''
+  // [[stub-exec:TOOL]] anywhere in the prompt (a comment's text in the board context, say): "exec TOOL".
+  const marked = blocks
+    .map((block) => block.text || '')
+    .join('\n')
+    .match(/\[\[stub-exec:([a-z_]+)\]\]/)
+  if (marked) last = 'exec ' + marked[1]
   const [word, ...rest] = last.split(/\s+/)
   if (last === 'unsupported model') {
     say(sessionId, "The 'unavailable-model' model is not supported when using Codex with a ChatGPT account.")
@@ -415,6 +435,24 @@ async function prompt({ sessionId, prompt: blocks }) {
     say(sessionId, JSON.stringify(Object.keys(process.env).sort()))
     return 'end_turn'
   }
+  if (word === 'exec') {
+    const entry = (newParams?.mcpServers || []).find((server) => server?.name === 'shapewall_exec')
+    if (!entry) {
+      say(sessionId, 'exec: no exec tools in this session')
+      return 'end_turn'
+    }
+    const tool = rest[0]
+    let args = {}
+    try {
+      args = rest.length > 1 ? JSON.parse(rest.slice(1).join(' ')) : {}
+    } catch {
+      args = {}
+    }
+    const answer = await execCall(entry, tool, args)
+    const text = (answer?.result?.content || []).map((part) => part.text || '').join('')
+    say(sessionId, 'exec ' + tool + (answer?.result?.isError ? ' error: ' : ' ok: ') + text.slice(0, 3000))
+    return 'end_turn'
+  }
   if (last === 'newparams') {
     say(sessionId, JSON.stringify(newParams))
     return 'end_turn'
@@ -427,8 +465,32 @@ async function prompt({ sessionId, prompt: blocks }) {
     say(sessionId, JSON.stringify({ cwd: process.cwd(), files: fs.readdirSync(process.cwd()), sessionCwd }))
     return 'end_turn'
   }
+  if (word === 'extcall') {
+    const [tool, first] = rest
+    if (first) {
+      update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call-board', title: first, kind: 'other', status: 'pending' })
+      update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'call-board', status: 'completed' })
+    }
+    const result = await request('session/request_permission', {
+      sessionId,
+      toolCall: { toolCallId: 'call-ext', title: tool, kind: 'other', rawInput: {} },
+      options: [
+        { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+        { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+      ],
+    })
+    say(sessionId, 'extcall ' + tool + ': ' + (result.outcome.outcome === 'selected' ? result.outcome.optionId : 'cancelled'))
+    return 'end_turn'
+  }
   if (last === 'pid') {
     say(sessionId, `pid ${process.pid}`)
+    return 'end_turn'
+  }
+  // "@agent reply TEXT": answers TEXT as it is (an @mention in it too), for
+  // the chat trigger tests: an agent's own mention never starts a turn.
+  const bare = last.replace(/^(@\S+\s+)+/, '')
+  if (bare.startsWith('reply ')) {
+    say(sessionId, bare.slice('reply '.length))
     return 'end_turn'
   }
   if (last === 'echo') {
@@ -507,4 +569,40 @@ async function prompt({ sessionId, prompt: blocks }) {
   }
   say(sessionId, 'Hello from the ACP stub.')
   return 'end_turn'
+}
+
+// One tools/call to the exec server, started as an adapter starts an MCP
+// server: its command, args and env, over stdio; closed after the answer.
+function execCall(entry, tool, args) {
+  return new Promise((resolve) => {
+    const env = Object.fromEntries((entry.env || []).map((item) => [item.name, item.value]))
+    const child = spawn(entry.command, entry.args, { env, stdio: ['pipe', 'pipe', 'ignore'] })
+    let buffer = ''
+    const done = (value) => {
+      child.kill()
+      resolve(value)
+    }
+    child.on('error', () => done(null))
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk
+      let index
+      while ((index = buffer.indexOf('\n')) >= 0) {
+        const message = JSON.parse(buffer.slice(0, index))
+        buffer = buffer.slice(index + 1)
+        if (message.id === 1) {
+          child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
+          child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: tool, arguments: args } }) + '\n')
+        } else if (message.id === 2) done(message)
+      }
+    })
+    child.stdin.write(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'stub', version: '1' } },
+      }) + '\n',
+    )
+  })
 }

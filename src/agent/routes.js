@@ -69,18 +69,23 @@ import { batchFixSettings, createBatchQueue } from './batch-fixes.js'
 import { FIX_PROMPT as BATCH_FIX_PROMPT } from './fix-prompt.js'
 import { cleanChoices } from './backends/acp.js'
 import { createOptionsCache, withChoices } from './options-cache.js'
-import { authFiles } from '../config.js'
+import { authFiles, storageStateFiles } from '../config.js'
 import { agentSettings, publicAgentInfo } from './config.js'
 import { AgentError } from './errors.js'
 import { createAgentHealth } from './agent-health.js'
 import { beginAgentOperation } from './control.js'
-import { validateFiles, validateMentions } from './composer.js'
+import { commentById, mentionComments, validateFiles, validateMentions } from './composer.js'
 import { profileForDefault, userAgentEntry, userSettingsFile } from './user-settings.js'
 import { uploadHashes } from './identity.js'
 import { readIcon } from './icon-store.js'
 import { finishFix, projectChanged, projectSnapshot, stopReason } from './feedback-loop.js'
 import { ownerMcpServers } from './owner-mcp.js'
-import { RUN_MS_MAX, commentIdOf, runTurn } from './run.js'
+import { localAgentOf, localOwnerOnly, startLocalTools } from './local-tools.js'
+import { createThreadRelay } from './exec-mcp.js'
+import { deprecated } from '../deprecation.js'
+import { agentHandles, respondLine, shouldRespond } from './triggers.js'
+import { RUN_MS_MAX, commentIdOf, quotesOutside, runTurn } from './run.js'
+import { readThreadTrust } from './thread-trust.js'
 import { beginTurnChanges, finishTurnChanges, ignoredPaths, starterSummary, undoFiles, undoStarterBranch } from './turn-changes.js'
 import { latestChange, withUndoAvailability } from './undo-state.js'
 import { exportRatings, findAnswer, myRatings, raterOf, removeRating, reviewRatings, setRating } from './ratings.js'
@@ -94,6 +99,8 @@ import {
   appendAssistantMessage,
   appendUserMessage,
   markThreadOwnerControls,
+  markThreadTainted,
+  localTextEvent,
   attachmentPath,
   changeMessage,
   changeThreadInfo,
@@ -104,6 +111,7 @@ import {
   replaceAnswer,
   restoreVersion,
   setThreadProfile,
+  setThreadRespond,
   threadKind,
   titleOf,
   validateUserMessage,
@@ -111,6 +119,7 @@ import {
   visibleTo,
 } from './threads.js'
 import { commentText } from '../comment-fields.js'
+import { ownersComment } from './watch-capabilities.js'
 
 // Four 5 MB images in base64, and the text. Only POST .../messages reads a
 // body this big, and only once the message is allowed to run.
@@ -303,6 +312,36 @@ export function agentRouter({
   const ownerGate = Boolean(settingsToken) && !shared
   const chatNeedsOwner = (req, current = settings()) => ownerGate && current.backend === 'acp' && current.configured && !agentOwner(req)
   router.chatNeedsOwner = chatNeedsOwner
+  // When a thread's agent answers (src/agent/triggers.js). A private chat:
+  // every message. A board only its owner chats on: its board chat and
+  // comment threads are the owner and the agent alone, so they answer every
+  // message too, unless the owner sets one to mentions only. A board shared
+  // with --chat: the board chat and comment threads are shared with
+  // everyone who reaches it, and answer an @mention or Send to agent only.
+  const respondOf = (thread) =>
+    threadKind(thread.id) === 'chat' ? 'always' : shared ? 'mention' : thread.respond === 'mention' ? 'mention' : 'always'
+  const respondView = (req, thread, current) => {
+    const isShared = threadKind(thread.id) !== 'chat'
+    const mode = respondOf(thread)
+    const owner = !shared && ownerWritesFor(req)
+    const name = current?.configured ? current.label : null
+    return {
+      mode,
+      shared: isShared,
+      stored: isShared ? mode : null,
+      machine: 'thread',
+      handles: agentHandles({ name }),
+      line: respondLine({ threadId: thread.id, respond: mode, name: name || 'The agent' }),
+      note: !isShared
+        ? null
+        : shared
+          ? 'This board is shared with --chat: its shared threads answer an @mention or Send to agent only.'
+          : owner
+            ? null
+            : 'Only the owner sets this (the private owner link, or a paired device).',
+      canSet: { always: isShared && owner, mention: isShared && owner },
+    }
+  }
   // The same state fields /status reports, for /api/info.
   router.agentStatus = () => agentStatus(settings())
   const ownerNeeded = (res) =>
@@ -316,6 +355,23 @@ export function agentRouter({
   // icon and tint (identity.js), which are display only. Renaming an agent
   // must not stop its processes.
   const fingerprintOf = (current) => JSON.stringify({ ...current, label: null, icon: null, tint: null })
+  // A local board's Claude Code session (1.4.0): restricted, with
+  // Shapewall's tool server for commands, the shell and the browser.
+  // `agent.localSession: "own"` keeps the 1.2.0 session for one minor.
+  const localSession = config.agent?.localSession === 'own' ? 'own' : 'restricted'
+  if (localSession === 'own')
+    deprecated(
+      'agent.localSession "own"',
+      'leave it out: a local board\u2019s agent gets read and edit tools and Shapewall\u2019s own tools for commands and the browser',
+    )
+  // One exec relay per chat thread (exec-mcp.js createThreadRelay): its ACP
+  // session keeps the relay, each turn puts its own tool host behind it.
+  const relays = new Map()
+  const closeRelay = (key) => {
+    const relay = relays.get(key)
+    relays.delete(key)
+    return relay?.close().catch(() => {})
+  }
   const backendFor = (current, ownerWrites = false) => {
     const key = JSON.stringify({ profileId: current.profileId || 'default', ownerWrites })
     const fingerprint = fingerprintOf(current)
@@ -326,7 +382,7 @@ export function agentRouter({
     if (!backends.has(key)) {
       // usage: an endpoint is asked for token counts (the composer's usage
       // ring); one that refuses stream_options is asked again without.
-      const live = { ...current, usage: current.usage ?? true }
+      const live = { ...current, usage: current.usage ?? true, localSession }
       const backend = createBackend(live, {
         env,
         fetchImpl,
@@ -335,11 +391,16 @@ export function agentRouter({
         protect: [config.outputDir],
         // Files capture runs or logs in with: a write needs an approval card.
         sensitivePaths: () => authFiles(config),
+        denyRead: storageStateFiles(config),
         mcpServersFor: ownerWrites
-          ? (thread) =>
+          ? (thread, { sessionKey = null } = {}) =>
               ownerMcpServers(config, thread.split('/')[0], {
                 allowCapture,
                 env,
+                // A session for turns above "open" (its key is the turn's
+                // tier, turnTools): the board reads give the owner's own
+                // comments only (Q7 N1).
+                ownersOnly: sessionKey !== 'open',
                 // Whose replies these are, so they are signed with its name.
                 agent: {
                   which: live.profileId || (['flag', 'env'].includes(live.sources?.acpCommand) ? 'fixed' : 'default'),
@@ -380,7 +441,8 @@ export function agentRouter({
     for (const entry of backends.values()) entry.backend?.close?.()
     backends.clear()
     cached = null
-    return Promise.all([settingsStopped, ...owned.map((agent) => agent.stoppingPromise)])
+    const relaysClosed = [...relays.keys()].map((key) => closeRelay(key))
+    return Promise.all([settingsStopped, ...relaysClosed, ...owned.map((agent) => agent.stoppingPromise)])
   }
   router.backend = () => cached?.backend || null
   router.processes = () =>
@@ -668,6 +730,114 @@ export function agentRouter({
   // edit, another version): the next turn sends the thread so far instead.
   const resetSessions = (key) => {
     for (const entry of backends.values()) entry.backend?.resetThread?.(key)
+    closeRelay(key)
+  }
+  // What a local turn may do (capabilities.js) and the tool host that holds
+  // it to that (local-tools.js), behind the thread's relay for an ACP agent.
+  // The composer's prepare starts the session the same way, so that the
+  // first turn finds it with the same tools and keeps it.
+  // -> { tools, relay, mcpServers } (tools null: none)
+  const turnTools = async ({ req, board, threadId, backend, current = null, ownerWrites, root, inPlace, ask }) => {
+    const key = [board.id, threadId].join('/')
+    const commentId = commentIdOf(threadId)
+    let tools = null
+    try {
+      const kind = threadKind(threadId)
+      let stored = readThread(config, board.id, threadId)
+      const comment = kind === 'comment' && commentId ? getComment(config, board.id, commentId) : null
+      // Extensions only while the thread holds nothing but the owner's text
+      // (thread-trust.js). What the prompt quotes is read again now (a
+      // comment's thread: the comment and its replies; a mention: the
+      // comments it quotes, with replies added since): someone else's text
+      // taints the thread for good, so taking that reply away again never
+      // makes it clean.
+      let trust = stored.trust
+      // The same answer decides the turn's tier (Q7 F1): a prompt that
+      // quotes someone else's comment is not the owner's alone, so the turn
+      // is "open" (an outside author), whatever kind of thread it is in.
+      const quoted = quotesOutside({ config, board, threadId, messages: stored.messages, reachable: shared || Boolean(accountUser) })
+      if (!readThreadTrust(trust).tainted && quoted) {
+        try {
+          await markThreadTainted(config, board.id, threadId, 'outside')
+          stored = readThread(config, board.id, threadId)
+          trust = stored.trust
+        } catch (error) {
+          log(`chat: taint not saved: ${error.message}`)
+        }
+        if (!readThreadTrust(trust).tainted) trust = { tainted: true, authors: [] }
+      }
+      tools = await startLocalTools({
+        config,
+        env,
+        acp: backend.id === 'acp',
+        thread: trust,
+        key,
+        agent: localAgentOf(config, current),
+        // A thread that ever carried someone else's text (a board read, a
+        // mention, a reply) stays open for good, as on a hosted board (Q7 N1).
+        owner:
+          !quoted &&
+          !readThreadTrust(trust).tainted &&
+          localOwnerOnly({
+            ownerWrites,
+            kind,
+            thread: stored,
+            comment,
+            ownerGate,
+            accounts: Boolean(accountUser),
+            acp: backend.id === 'acp',
+          }),
+        shared,
+        comment: kind !== 'chat',
+        root,
+        inPlace,
+        ask,
+        denyPorts: [ownPort(req)].filter(Boolean),
+        serve: false,
+        log,
+      })
+    } catch (error) {
+      log(`agent tools: ${error.message}`)
+      tools = null
+    }
+    let relay = null
+    let mcpServers = null
+    if (tools?.exec && backend.id === 'acp') {
+      relay = relays.get(key)
+      if (relay && !relay.matches(tools.exec.host)) {
+        await closeRelay(key)
+        relay = null
+      }
+      if (!relay) {
+        relay = await createThreadRelay({ env, log })
+        relays.set(key, relay)
+      }
+      try {
+        await relay.setHost(tools.exec.host)
+        mcpServers = relay.servers
+      } catch (error) {
+        log(`agent tools: ${error.message}`)
+        await closeRelay(key)
+        relay = null
+      }
+    }
+    // The session a turn may reuse is one of the same tier (acp.js sameSession, Q7 F2).
+    return { tools, relay, mcpServers, extensions: tools?.extensions || null, sessionKey: tools?.caps?.tier || null }
+  }
+  const endTurnTools = async (key, { tools, relay }) => {
+    if (relay && relays.get(key) === relay) await relay.setHost(null).catch(() => {})
+    await tools?.exec?.close().catch((error) => log(`agent tools: ${error.message}`))
+  }
+  // This server's own port: the agent browser never opens it.
+  const ownPort = (req) => {
+    const port =
+      req.socket?.localPort ||
+      Number(
+        String(req.headers?.host || '')
+          .split(':')
+          .pop(),
+      )
+    return Number.isInteger(port) && port > 0 && port < 65536 ? port : null
   }
   const handle = (handler) => async (req, res) => {
     try {
@@ -708,6 +878,102 @@ export function agentRouter({
         await release()
       }
     })
+
+  // ---- People talking: a message that does not ask the agent --------------
+
+  // What a local message brings into its thread (thread-trust.js): the
+  // viewer's own text, and the text of each comment it mentions (a comment
+  // that is not the owner's own, or has a reply by anyone but its agent, is
+  // someone else's and taints the thread).
+  const trustEventsOf = (board, input, viewer) => {
+    const events = [localTextEvent(viewer)]
+    const find = commentById(config, board)
+    for (const mention of Array.isArray(input?.mentions) ? input.mentions : []) {
+      // The comments the mention quotes (composer.js mentionComments, what
+      // mentionContext puts in the prompt): a comment, an element's comment,
+      // a person's open comments. One gone since: nobody can vouch for it.
+      let quoted = null
+      try {
+        quoted = mentionComments(config, board, mention, find)
+      } catch {
+        quoted = null
+      }
+      if (!quoted) events.push({ kind: 'outside' })
+      else for (const comment of quoted) if (!ownersComment(comment)) events.push({ kind: 'outside' })
+    }
+    return events
+  }
+
+  // Stores a message posted for the people in a shared thread and says so
+  // (`posted`): no turn, no run slot (src/agent/triggers.js).
+  const writePosted = async (req, res, { board, threadId, thread, current, input, editOf, decision, ownerWrites }) => {
+    const userMessage = await appendUserMessage(config, board.id, threadId, input, {
+      quotaBytes: limit.chatBytesMax,
+      viewer: res.locals.viewer,
+      editOf,
+      ownerControls: ownerWrites,
+      posted: true,
+      trustEvents: trustEventsOf(board, input, res.locals.viewer),
+    })
+    if (editOf !== null) resetSessions(`${board.id}/${threadId}`)
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' })
+    res.write(`event: user\ndata: ${JSON.stringify({ message: userMessage })}\n\n`)
+    res.write(
+      `event: posted\ndata: ${JSON.stringify({
+        reason: decision.reason,
+        line: respondLine({ threadId, respond: respondOf(thread), name: current.configured ? current.label : 'The agent' }),
+      })}\n\n`,
+    )
+    res.end()
+  }
+
+  // Before the turn admission below (run slot, rate bucket, "an answer is
+  // running"): in a thread that answers mentions only, a message that does
+  // not ask the agent is posted here, so people can talk while it answers.
+  const peekPost = (req, res, next) => {
+    const { board, threadId } = res.locals
+    if (threadKind(threadId) === 'chat' || req[batchOwner]) return next()
+    const thread = readThread(config, board.id, threadId)
+    if (respondOf(thread) !== 'mention') return next()
+    express.json({ limit: BODY_LIMIT })(req, res, async (error) => {
+      if (error) return next(error)
+      const body = req.body || {}
+      if (body.fix === true || body.regenerate !== undefined || body.ask === true) return next()
+      const current = settings(thread.profileId || 'default')
+      const decision = shouldRespond({
+        threadId,
+        message: { text: typeof body.text === 'string' ? body.text : '', mentions: body.mentions },
+        handles: agentHandles({ name: current.configured ? current.label : null }),
+        respond: 'mention',
+      })
+      if (decision.ok) return next()
+      try {
+        const ownerWrites = ownerWritesFor(req) && sameOriginWrite(req)
+        if ((thread.profileId || 'default') !== 'default' && !ownerWrites) return controlDenied(res)
+        if (chatNeedsOwner(req, current) || (ownerGate && current.backend === 'acp' && current.configured && !sameOriginWrite(req)))
+          return ownerNeeded(res)
+        const editOf = body.editOf ?? null
+        if (editOf !== null && (typeof editOf !== 'string' || editOf.length > 64))
+          return fail(res, 400, 'bad_edit', 'editOf is the id of one of your messages in this thread.')
+        // An edit rewrites the thread: not under a running answer.
+        if (editOf !== null && runs.has(`${board.id}/${threadId}`))
+          return fail(res, 409, 'agent_running', 'Wait for the answer in this thread before editing a message.')
+        if (editOf !== null && !controlsAllowed(req, board, threadId)) return controlDenied(res)
+        // People talking has its own allowance, apart from the agent's turns.
+        const bucket = bucketFor(`${board.id}#posts`)
+        if (!bucket.take()) {
+          res.setHeader('Retry-After', String(bucket.retryAfter()))
+          return fail(res, 429, 'rate_limited', 'Too many messages on this board. Wait a moment and send again.')
+        }
+        const mentions = validateMentions(config, board, body.mentions)
+        const files = validateFiles(body.files)
+        const input = { ...validateUserMessage(board, body, { extras: mentions.length + files.length }), mentions, files }
+        await writePosted(req, res, { board, threadId, thread, current, input, editOf, decision, ownerWrites })
+      } catch (failure) {
+        handleError(res, failure)
+      }
+    })
+  }
 
   // ---- Sending: checked and reserved before the big body is read ----------
 
@@ -840,6 +1106,23 @@ export function agentRouter({
       const editOf = req.body?.editOf ?? null
       if (editOf !== null && (typeof editOf !== 'string' || editOf.length > 64 || fix || previous))
         return fail(res, 400, 'bad_edit', 'editOf is the id of one of your messages in this thread.')
+      // People talking in a shared thread (src/agent/triggers.js): a message
+      // that does not @mention the agent and is not Send to agent is kept and
+      // shown, and no turn starts. Fix and Regenerate are explicit actions.
+      if (!fix && !previous) {
+        const thread = readThread(config, board.id, threadId)
+        const decision = shouldRespond({
+          threadId,
+          message: input,
+          handles: agentHandles({ name: current.configured ? current.label : null }),
+          respond: respondOf(thread),
+          explicit: req.body?.ask === true,
+        })
+        if (!decision.ok) {
+          if (editOf !== null && !controlsAllowed(req, board, threadId)) return controlDenied(res)
+          return writePosted(req, res, { board, threadId, thread, current, input, editOf, decision, ownerWrites })
+        }
+      }
       // An edit or a new answer rewrites the thread (and moves an owner
       // turn's answer, with its Undo, into an earlier version): like
       // bringing back a version, an owner session's thread needs the owner.
@@ -901,6 +1184,7 @@ export function agentRouter({
               viewer: res.locals.viewer,
               editOf,
               ownerControls: ownerWrites,
+              trustEvents: trustEventsOf(board, input, res.locals.viewer),
             })
       } catch (error) {
         if (fix)
@@ -977,30 +1261,70 @@ export function agentRouter({
           : null
         // The files the agent's own tools edited: the only ones its Undo may put back.
         const agentFiles = new Set()
-        const reply = await runTurn({
-          config,
+        // What this turn may do (capabilities.js) and the tool host that
+        // holds it to that (local-tools.js): named commands, the shell in the
+        // OS sandbox, dev servers, the browser. Its cards are answered on the
+        // board by the owner (the permission route below).
+        const key = [board.id, threadId].join('/')
+        const cards = {}
+        res.locals.run.cards = cards
+        const { tools, relay, mcpServers, extensions, sessionKey } = await turnTools({
+          req,
           board,
           threadId,
-          messages,
           backend,
-          editedFiles: agentFiles,
-          model: current.model,
-          // The composer's model picker (an endpoint's own list), owner turns only.
-          modelOverride: ownerWrites ? chosenModel(current, `${board.id}/${threadId}`) : null,
-          // The owner's own feedback notes go to the owner's turns only (ratings-core.js downNotes).
-          ownerTurn: res.locals.viewer === 'owner',
-          // The composer's options for this chat (an ACP session's own), owner turns only.
-          choices: ownerWrites && backend.id === 'acp' ? cleanChoices(req.body?.options) : null,
-          emit,
-          signal: controller.signal,
+          current,
           ownerWrites,
-          allowCapture,
-          capture,
-          requestedPages,
-          // Branch mode: the agent's cwd, file sandbox and commands are the worktree.
-          workdir: work ? worktreeWorkdir(work) : null,
-          agentName: current.label || null,
+          // Branch mode: the project in the worktree (the agent's own workdir), never the worktrees' folder.
+          root: work ? work.tree.projectDir : config.dir,
+          inPlace: !work,
+          ask: (card) => (cards.ask ? cards.ask(card) : Promise.resolve('cancelled')),
         })
+        let reply
+        try {
+          reply = await runTurn({
+            config,
+            board,
+            threadId,
+            messages,
+            backend,
+            editedFiles: agentFiles,
+            model: current.model,
+            // The composer's model picker (an endpoint's own list), owner turns only.
+            modelOverride: ownerWrites ? chosenModel(current, `${board.id}/${threadId}`) : null,
+            // The owner's own feedback notes go to the owner's turns only (ratings-core.js downNotes).
+            ownerTurn: res.locals.viewer === 'owner',
+            // The composer's options for this chat (an ACP session's own), owner turns only.
+            choices: ownerWrites && backend.id === 'acp' ? cleanChoices(req.body?.options) : null,
+            emit,
+            signal: controller.signal,
+            ownerWrites,
+            allowCapture,
+            capture,
+            requestedPages,
+            // Branch mode: the agent's cwd, file sandbox and commands are the worktree.
+            workdir: work ? worktreeWorkdir(work) : null,
+            agentName: current.label || null,
+            capabilities: tools?.prompt || '',
+            quoteOthers: !tools || tools.caps.tier === 'open',
+            reachable: shared || Boolean(accountUser),
+            sessionKey,
+            mcpServers,
+            execHost: backend.id === 'acp' ? null : tools?.exec?.host || null,
+            cards,
+            // Skills and MCP servers from the agent config folder, on a clean owner's turn only.
+            extensions: backend.id === 'acp' ? extensions : null,
+            // A board tool brought other people's text in: the thread is tainted for good,
+            // and on a turn above "open" an ACP agent's commands and browser (the
+            // thread's relay) are off for the rest of the turn (Q7 N1).
+            onTaint: (why) => {
+              if (tools && tools.caps.tier !== 'open') relay?.setHost(null).catch(() => {})
+              return markThreadTainted(config, board.id, threadId, why).catch((error) => log(`chat: taint not saved: ${error.message}`))
+            },
+          })
+        } finally {
+          await endTurnTools(key, { tools, relay })
+        }
         health.record(current, reply)
         // What the profile offers, as this turn's session saw it; a turn that
         // could not sign in drops what was known (the next look starts fresh).
@@ -1092,7 +1416,7 @@ export function agentRouter({
       }
     }
   })
-  router.post('/boards/:id/threads/:thread/messages', findThread, admitMessage, express.json({ limit: BODY_LIMIT }), sendMessage)
+  router.post('/boards/:id/threads/:thread/messages', findThread, peekPost, admitMessage, express.json({ limit: BODY_LIMIT }), sendMessage)
 
   // ---- Batch fixes (batch-fixes.js) -------------------------------------------
   //
@@ -1478,6 +1802,8 @@ export function agentRouter({
           ownerWrites: ownerWritesFor(req),
           fixWithAgent: allowCapture && ownerWritesFor(req) && current.backend === 'acp',
         },
+        // When its agent answers: every message, or an @mention or Send to agent.
+        respond: respondView(req, thread, current),
         running: runs.has(`${board.id}/${threadId}`),
         ratings: myRatings(config, board.id, threadId, raterOf(req.shapewallAccess, res.locals.viewer)),
       })
@@ -1639,7 +1965,23 @@ export function agentRouter({
       if (!release) return res.json({ options: null })
       try {
         if (runs.has(key) || selecting.has(key)) return res.json({ options: backend.sessionOptions(key) })
-        const options = await backend.prepare(key, { choices, signal: admission.signal })
+        // The session the first turn would start: with the tools it would have.
+        const branchOn = branchModeSettings(config, env).enabled
+        const prepared = branchOn
+          ? { tools: null, relay: null, mcpServers: null }
+          : await turnTools({ req, board, threadId, backend, current, ownerWrites: true, root: config.dir, inPlace: true, ask: null })
+        let options
+        try {
+          options = await backend.prepare(key, {
+            choices,
+            signal: admission.signal,
+            mcpServers: prepared.mcpServers,
+            extensions: prepared.extensions || null,
+            sessionKey: prepared.sessionKey || null,
+          })
+        } finally {
+          await endTurnTools(key, prepared)
+        }
         ownerThreads.add(key)
         if (readThread(config, board.id, threadId).messages.length) await markThreadOwnerControls(config, board.id, threadId)
         rememberSession(current, backend, key)
@@ -1813,7 +2155,27 @@ export function agentRouter({
     findThread,
     handle(async (req, res, board, threadId) => {
       if (!controlsAllowed(req, board, threadId)) return controlDenied(res)
-      const { title, archived } = req.body || {}
+      const { title, archived, respond } = req.body || {}
+      if (respond !== undefined) {
+        // The owner sets when a shared thread's agent answers; a board shared
+        // with --chat answers mentions only, and a private chat every message.
+        if (!['mention', 'always'].includes(respond) || title !== undefined || archived !== undefined)
+          return fail(res, 400, 'bad_thread_info', 'Send { respond: "mention" | "always" } on its own.')
+        if (threadKind(threadId) === 'chat')
+          return fail(res, 400, 'private_chat', 'A private chat answers every message already. This is for shared threads.')
+        if (shared || !ownerWritesFor(req) || !sameOriginWrite(req))
+          return fail(
+            res,
+            403,
+            'respond_owner',
+            shared
+              ? 'On a board shared with --chat, shared threads answer an @mention or Send to agent only.'
+              : 'Only the owner sets when the agent answers here (the private owner link, or a paired device).',
+          )
+        await setThreadRespond(config, board.id, threadId, respond)
+        const thread = readThread(config, board.id, threadId)
+        return res.json({ id: threadId, respond: respondView(req, thread, settings(thread.profileId)) })
+      }
       if ((title !== undefined && typeof title !== 'string') || (archived !== undefined && typeof archived !== 'boolean'))
         return fail(res, 400, 'bad_thread_info', 'Send { title: string } or { archived: true | false }.')
       res.json(await changeThreadInfo(config, board.id, threadId, { title, archived }))
@@ -1872,6 +2234,14 @@ export function agentRouter({
         // answer must come from this board's own page.
         if (!(controlsAllowed(req, board, threadId) && sameOriginWrite(req))) return controlDenied(res)
         const run = runs.get(`${board.id}/${threadId}`)
+        // A card of Shapewall's own (a command this turn's tool host asks
+        // about): the command runs as the person, so only the owner answers.
+        const own = run?.cards?.pending?.get(permission)
+        if (own) {
+          if (!ownerWritesFor(req)) return ownerNeeded(res)
+          own(optionId === 'allow' ? 'approved' : 'denied', req.shapewallAccess?.name || null)
+          return res.json({ state: optionId === 'allow' ? 'approved' : 'denied' })
+        }
         // An approval lets the agent run a command or write a file as the
         // person: with an owner capability on this server, only the owner answers.
         if (ownerGate && run?.backend.id === 'acp' && !agentOwner(req)) return ownerNeeded(res)

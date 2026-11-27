@@ -124,6 +124,8 @@ export function mountDeviceApprovals(consoleApi, deps) {
         // may use it. The scopes are fixed, whatever the request says: what
         // an agent works with, plus the link.
         const look = agentLogin ? agentLook(req.body?.agent, found.entry) : null
+        const clash = look ? agentsFor(req.t).nameProblem(look.name) : null
+        if (clash) throw new HttpError(400, 'agent_name_taken', `Agent ${clash}.`)
         if (!agentLogin && Array.isArray(req.body?.scopes) && req.body.scopes.includes('agent'))
           throw new HttpError(403, 'agent_login_required', 'The agent scope comes from "shapewall agent connect".')
         const token = createApiToken(
@@ -155,7 +157,9 @@ export function mountDeviceApprovals(consoleApi, deps) {
             audience: look.audience,
             ...(identityOnly ? { approvedBy: 'tailnet identity' } : {}),
           })
-          agent = { id: token.agentId, name: look.name, audience: look.audience }
+          // `owner`: who connected it, by handle. The machine saves it with the token and
+          // counts a turn's author as "the owner" only under this handle (remote/agent-link.js).
+          agent = { id: token.agentId, name: look.name, audience: look.audience, owner: { handle: req.user.handle || null } }
         }
         const approved = deviceLogins.approve(
           found.code,

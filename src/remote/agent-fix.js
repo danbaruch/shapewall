@@ -49,6 +49,7 @@ import {
   worktreeAgentEnv,
 } from '../agent/branch-mode.js'
 import { filesThatRun } from '../agent/exec-paths.js'
+import { instructionPaths, isInstructionPath } from '../agent/instructions.js'
 import { RUN_DIR_RE, git, processAlive, pushBranch, removeWorktree, sweepWorkRoot } from '../agent/starter/worktree.js'
 import { diffForCard, diffForFiles } from '../agent/text-diff.js'
 import { commentText } from '../comment-fields.js'
@@ -155,6 +156,14 @@ export function sweepFixes(projectDir, env = process.env, { isAlive = processAli
       }
     }
     if (/\.tmp$/.test(name)) fs.rmSync(path.join(root, name), { force: true })
+    // A command session's tmp folder (sandbox-exec.js) left by a process that died: a day old is long gone.
+    if (/^\.shapewall-cmd-[A-Za-z0-9]{6}$/.test(name))
+      try {
+        if (now - fs.lstatSync(path.join(root, name)).mtimeMs > 24 * 60 * 60 * 1000)
+          fs.rmSync(path.join(root, name), { recursive: true, force: true })
+      } catch {
+        /* gone */
+      }
   }
   const held = names
     .filter((name) => /^held-\d{14}-[a-f0-9]{6}\.json$/.test(name))
@@ -491,7 +500,14 @@ export async function pushFix({
   const hasRemote = remote ? (await git(['remote', 'get-url', remote], { cwd: config.dir }).catch(() => '')).trim() : ''
   if (!hasRemote || aborted(signal)) return out
   // A pushed branch runs CI, with the repository's secrets, before anyone reviews it.
-  const guarded = filesThatRun(record.files.map((item) => item.rel))
+  // And the project's rule files (CLAUDE.md, AGENTS.md and what they import): the next session's instructions.
+  const rules = instructionPaths(config.dir)
+  const guarded = [
+    ...new Set([
+      ...filesThatRun(record.files.map((item) => item.rel)),
+      ...record.files.filter((item) => isInstructionPath(rules, item.path)).map((item) => item.rel),
+    ]),
+  ]
   if (guarded.length) {
     notes.push(
       `Not pushed: the fix changes ${guarded.slice(0, 3).join(', ')}${guarded.length > 3 ? ', ...' : ''}, which runs on install, build, test or CI. Review the branch on the agent's machine.`,

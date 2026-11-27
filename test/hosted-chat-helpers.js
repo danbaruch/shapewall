@@ -122,6 +122,19 @@ export function startLink(
     edits = null,
     fixArgs = [],
     stateDir = tempDir('hosted-fix-state'),
+    // More of the fix's project config (`commands`, for the exec tools).
+    fixConfig = {},
+    // The platform the link resolves turns with (hostPlatform() when null).
+    platform = null,
+    // The approving account's handle, as `agent connect` saves it.
+    owner = null,
+    onOwner = () => {},
+    // The agent config folder's extensions (agent-config-folder.js policyExtensions), or null.
+    extensions = null,
+    // The chat agent's command in place of the stub's (a stub named as Claude Code, say).
+    acpArgv = null,
+    // The policy file read again before each turn (agent-connect.js passes readMachinePolicy).
+    reloadPolicy = null,
   } = {},
 ) {
   const logs = []
@@ -134,7 +147,7 @@ export function startLink(
         backend: 'acp',
         label: 'Stub agent',
         // The modes Claude Code's adapter lists: a read-only session needs a mode that asks.
-        acp: { argv: [process.execPath, ACP_STUB, '--ro-modes', ...args] },
+        acp: { argv: acpArgv || [process.execPath, ACP_STUB, '--ro-modes', ...args] },
         readOnly: true,
         preamble: REMOTE_PREAMBLE,
         vision: false,
@@ -171,10 +184,15 @@ export function startLink(
     backend,
     editBackend,
     fix: editBackend
-      ? { config: { dir: cwd, outputDir: path.join(cwd, '.shapewall'), agent: null, boards: [] }, env: fixEnv, fetchImpl }
+      ? { config: { dir: cwd, outputDir: path.join(cwd, '.shapewall'), agent: null, boards: [], ...fixConfig }, env: fixEnv, fetchImpl }
       : null,
     hello: { kind, machine: 'studio', version: '0.5.0', maxTurns },
+    ...(platform ? { capabilities: { config: null, platform } } : {}),
+    owner,
+    onOwner,
+    extensions,
     policy: edits ? machinePolicy : policy,
+    reloadPolicy,
     // `remote`: true for the real token API, or a client of the test's own.
     remote: remote === true ? createRemote({ origin: hosted.origin, token }) : remote || null,
     fetchImpl,
@@ -225,9 +243,11 @@ export function parseEvents(text) {
 }
 
 // Sends a chat message as `user` and reads the turn to its end:
-// { status, json, events, final } (`final`: the stored answer).
+// { status, json, events, final } (`final`: the stored answer). A string is
+// sent as Send to agent (`ask: true`), so it starts a turn in a shared thread
+// too; pass an object to send exactly that body.
 export async function chat(user, url, body) {
-  const response = await user.browser.post(url, typeof body === 'string' ? { text: body } : body)
+  const response = await user.browser.post(url, typeof body === 'string' ? { text: body, ask: true } : body)
   const events = response.status === 200 ? parseEvents(response.text) : []
   return {
     status: response.status,

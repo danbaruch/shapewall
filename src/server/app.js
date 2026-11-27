@@ -5,7 +5,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { SECRET_PREFIX } from '../tailnet-proof.js'
@@ -42,11 +41,15 @@ import { pageLinks } from '../links.js'
 import { MENTION_HANDLE_RE } from '../mentions.js'
 import { WEBHOOK_SECRET_VAR, createIssue, githubSettings, handleWebhook, linkPull, verifySignature } from '../github.js'
 import { publicAgentInfo } from '../agent/config.js'
+import { localCard } from '../agent/capability-views.js'
+import { localMachinePolicy, userAgentEntry } from '../agent/user-settings.js'
+import { localAgent, localCardConfig, localExtensions } from '../agent/local-tools.js'
 import { agentRouter } from '../agent/routes.js'
 import { checksRouter } from '../checks/routes.js'
 import { checksRunRouter, createChecksRuns } from '../checks/run-control.js'
 import { shareRouter } from './share-routes.js'
 import { localRequest, sameOriginWrite, settingsRefusal, settingsTokenOk } from '../agent/settings-routes.js'
+import { createOpenPages, localOpenRequest, sendTokenHandoff } from '../open-page.js'
 import { localUserName } from './local-user.js'
 import { boardEvents } from './board-events.js'
 import { listLocalProjects, projectId } from '../local-projects.js'
@@ -60,6 +63,7 @@ import { requireCleanBuzzEnvironment } from '../buzz/environment.js'
 import { cspWithErrors, errorMeta, errorSettingsFrom, reportServerError } from '../error-tracking.js'
 import { cliCommand } from '../invocation.js'
 import { formatCommand } from '../agent/acp/command.js'
+import { AGENT_HEADER } from '../agent/triggers.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 export const CLIENT_DIR = path.join(ROOT, 'dist', 'client')
@@ -418,44 +422,44 @@ export function createApp({
   // Looked up once, on the first request that may see it.
   let localName
 
-  // `serve --open`: a one-time link for the browser, so the settings token is
-  // never on a command line (other users of the machine can read those) and
-  // the browser loads a plain http URL (a file:// page fails in snap or
-  // flatpak browsers with a private /tmp, and may open in an editor).
-  // GET /open/<nonce> answers once, within OPEN_LINK_TTL_MS, to a local and
-  // direct request, with a redirect to the link with the token in its
-  // #fragment; then the nonce is gone. app.locals.openLink() makes one;
-  // app.locals.keepOpenLink(link) gives it OPEN_LINK_HEADLESS_TTL_MS from now
-  // when no browser could be opened for it.
-  const openLinks = new Map()
-  app.locals.openLink = settingsToken
-    ? () => {
-        const nonce = randomBytes(24).toString('base64url')
-        openLinks.set(nonce, Date.now() + OPEN_LINK_TTL_MS)
-        return `open/${nonce}`
-      }
+  // `serve --open`: a one-time way in for the browser, so the settings token
+  // is never on a command line (other users of the machine can read those).
+  // app.locals.openLink(boardUrl) writes a 0600 page in the project's
+  // .shapewall folder that posts a one-time nonce to POST /open, and returns
+  // that page's file:// URL (src/open-page.js): the nonce itself never goes
+  // in the opener's argv or any output either. POST /open answers once,
+  // within OPEN_LINK_TTL_MS, to a local and direct request, with a page that
+  // hands the token to the tab and opens the board (no URL ever holds it);
+  // then the nonce and its page are gone. app.locals.keepOpenLink(link) gives the page
+  // OPEN_LINK_HEADLESS_TTL_MS from now when no browser could be opened for it.
+  const openPages = settingsToken
+    ? createOpenPages({ dir: config.outputDir, ttlMs: OPEN_LINK_TTL_MS, keepMs: OPEN_LINK_HEADLESS_TTL_MS })
     : null
-  app.locals.keepOpenLink = (link) => {
-    const nonce = String(link || '').replace(/^\/?open\//, '')
-    if (openLinks.has(nonce)) openLinks.set(nonce, Date.now() + OPEN_LINK_HEADLESS_TTL_MS)
-  }
-  app.get('/open/:nonce', (req, res) => {
+  app.locals.openPages = openPages
+  app.locals.openLink = openPages ? (boardUrl) => openPages.mint(new URL('open', boardUrl).href) : null
+  app.locals.keepOpenLink = (link) => openPages?.keep(link)
+  const openGone = (res) =>
+    res
+      .status(410)
+      .type('html')
+      .send(
+        '<!doctype html><meta charset="utf-8"><title>Shapewall</title><p>This link works once, for a minute after <code>shapewall serve --open</code> starts (five minutes when no browser could be opened), and it has been used or has expired. Open the agent settings link that <code>shapewall serve</code> printed in your terminal instead. If you did not open this link yourself, restart <code>shapewall serve</code>: that makes a new settings key.</p>',
+      )
+  const openHeaders = (res) => {
     res.setHeader('Cache-Control', 'no-store')
     res.setHeader('Content-Security-Policy', "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
-    const expires = openLinks.get(req.params.nonce)
-    openLinks.delete(req.params.nonce)
-    for (const [nonce, at] of openLinks) if (at < Date.now()) openLinks.delete(nonce)
-    if (!settingsToken || shared || !localRequest(req) || !expires || expires < Date.now()) {
-      return res
-        .status(410)
-        .type('html')
-        .send(
-          '<!doctype html><meta charset="utf-8"><title>Shapewall</title><p>This link works once, for a minute after <code>shapewall serve --open</code> starts (five minutes when no browser could be opened), and it has been used or has expired. Open the agent settings link that <code>shapewall serve</code> printed in your terminal instead. If you did not open this link yourself, restart <code>shapewall serve</code>: that makes a new settings key.</p>',
-        )
-    }
-    // Relative, so it works under a sub-path too; the token only in the #fragment.
-    res.redirect(303, `../#settings-token=${settingsToken}`)
+    return res
+  }
+  app.post('/open', express.urlencoded({ extended: false, limit: '1kb', parameterLimit: 4 }), (req, res) => {
+    openHeaders(res)
+    // One try per nonce, whatever happens next.
+    const ok = Boolean(openPages?.redeem(req.body?.nonce))
+    if (!ok || shared || !localOpenRequest(req)) return openGone(res)
+    // The token in this answer only, never in a URL (browser history keeps those). Relative, for a sub-path too.
+    sendTokenHandoff(res, { token: settingsToken, target: './' })
   })
+  // POST only: a nonce in a URL would sit in history and on command lines.
+  app.get(['/open', '/open/:nonce'], (req, res) => openGone(openHeaders(res)))
   app.get('/api/health', (req, res) => res.json({ ok: true }))
   app.get('/api/local-project-id', (req, res) => {
     if (shared || !localRequest(req) || !config.file) return fail(res, 404, 'not_found', 'No such API route.')
@@ -474,6 +478,22 @@ export function createApp({
       )
     }
   })
+  // The local board's card (src/agent/capability-views.js): the same
+  // resolver and renderer as every turn and `shapewall agent status`.
+  const localCapabilities = () => {
+    try {
+      const { entry } = userAgentEntry(config.dir, env)
+      return localCard({
+        machine: localMachinePolicy(entry),
+        // In place unless Work on a branch is on: the config each turn resolves with.
+        config: localCardConfig(config, env, { acp: agentAcp }),
+        extensions: localExtensions(config, env).names,
+        agent: localAgent(config, env, { acp: agentAcp }),
+      })
+    } catch {
+      return null
+    }
+  }
   app.get('/api/info', (req, res) => {
     // Whether the board may offer "Create GitHub issue"; never the token.
     const github = githubSettings(config, env)
@@ -484,6 +504,8 @@ export function createApp({
           ...publicAgentInfo(app.locals.agentRouter.settings()),
           ...app.locals.agentRouter.agentStatus(),
           ownerWrites: app.locals.agentRouter.ownerWritesFor(req),
+          // What an agent can do on this board, per tier (the console's What it can do card), for its owner only.
+          ...(app.locals.agentRouter.ownerWritesFor(req) ? { capabilities: localCapabilities() } : {}),
           // An agent that runs commands answers only its owner (403 control_needs_owner otherwise).
           chatNeedsOwner: app.locals.agentRouter.chatNeedsOwner(req),
           fixWithAgent: allowCapture && app.locals.agentRouter.ownerWritesFor(req) && app.locals.agentRouter.settings().backend === 'acp',
@@ -659,9 +681,24 @@ export function createApp({
     }),
   )
 
+  // Whether the board's owner sends this request, as the server can tell
+  // (never from the body): the owner account signed in under `serve
+  // --accounts`, else this machine's own browser on a board not shared
+  // beyond it. A paired device, a LAN or tailnet visitor or a share link
+  // guest is not, whatever name it signs with.
+  const fromAgent = (req) => req.get(AGENT_HEADER) === '1'
+  const ownerRequest = (req) => {
+    if (account) return account.isOwner(req)
+    return !shared && localRequest(req)
+  }
+
   // Who changed a comment, for its events: the name the board sends (the
   // commenter's saved name), like the author of a reply. Display text only.
   const actorOf = (author) => (typeof author === 'string' ? author : null)
+  // Whose text a comment change is (store.js updateComment `by`): the owner's,
+  // the owner's agent's (the agent header from the owner's own machine), or
+  // nobody's the server can vouch for.
+  const textBy = (req) => (!ownerRequest(req) ? null : fromAgent(req) ? 'agent' : 'owner')
   app.get(
     '/api/boards/:id/comments',
     withBoard((req, res, board) => {
@@ -674,7 +711,10 @@ export function createApp({
   app.post(
     '/api/boards/:id/comments',
     withBoard(async (req, res, board) => {
-      const comment = await createComment(config, board, req.body)
+      // Sent by an agent's command (SHAPEWALL_AGENT_HEADER, watch --exec):
+      // marked as an agent's. It only ever narrows: agent text wakes no agent.
+      const agent = fromAgent(req)
+      const comment = await createComment(config, board, req.body, { owner: !agent && ownerRequest(req), agent })
       res.status(201).json({ comment })
     }),
   )
@@ -687,7 +727,7 @@ export function createApp({
         board.id,
         req.params.cid,
         { body, status, resolution, agentStatus, fixRef },
-        { actor: actorOf(author) },
+        { actor: actorOf(author), by: textBy(req) },
       )
       res.json({ comment })
     }),
@@ -696,7 +736,13 @@ export function createApp({
     '/api/boards/:id/comments/:cid/replies',
     withBoard(async (req, res, board) => {
       const { body, author, images, drawing } = req.body || {}
-      const { comment, reply } = await addReply(config, board.id, req.params.cid, { body, author, images, drawing })
+      const { comment, reply } = await addReply(config, board.id, req.params.cid, {
+        body,
+        author,
+        images,
+        drawing,
+        ...(fromAgent(req) ? { agent: true, ...(ownerRequest(req) ? {} : { unvouched: true }) } : {}),
+      })
       res.status(201).json({ comment, reply })
     }),
   )
@@ -719,7 +765,7 @@ export function createApp({
           board.id,
           req.params.cid,
           { status: 'resolved', resolution, fixRef },
-          { actor: actorOf(author) },
+          { actor: actorOf(author), by: textBy(req) },
         ),
       })
     }),
@@ -913,6 +959,7 @@ export function createApp({
 // on shutdown). Sends the signals only; shutdownApp waits for them.
 export function stopChildren(app) {
   const agents = app.locals.agentRouter?.close()
+  app.locals.openPages?.close()
   app.locals.boardEvents?.close()
   app.locals.appUpdate?.stop()
   for (const child of app.locals.children || []) {

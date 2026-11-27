@@ -1,9 +1,11 @@
 name: CI
 
-# The quick checks (lint, unit tests, build, package contents, website) run on
+# The quick checks (lint, the release text gate, unit tests, build, package contents, website) run on
 # every pull request and on every push to main. The full browser suite (e2e)
-# runs on pull requests into main, on pushes to main and from the Actions tab
-# (not on pull requests into other branches), split into four shards.
+# runs on pull requests into main or staging (staging is where work merges),
+# on pushes to main and from the Actions tab (not on pull requests into other
+# branches), split into four shards. A new push to a pull request cancels the
+# run still going for it (concurrency below).
 # No job uses a secret, so pull requests from forks run the same checks.
 on:
   pull_request:
@@ -38,6 +40,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      - name: Release text gate (lines added since main)
+        # No en or em dashes or banned phrases (scripts/release-text.config.json). Names are checked locally from a private list.
+        if: matrix.node == 22
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          node scripts/check-release-text.mjs --base FETCH_HEAD
       - name: Unit tests with a per-file deadline
         run: npm run pretest && node --test --test-concurrency=4 --test-timeout=120000 test/*.test.js
       - run: npm run build
@@ -64,6 +72,45 @@ jobs:
           node-version: 22
       - run: node --test test/tailnet-platform.test.js
 
+  sandbox:
+    # The OS sandbox agent commands run in (src/agent/sandbox-exec.js): bubblewrap on Linux, Seatbelt on
+    # macOS, through @anthropic-ai/sandbox-runtime. The escape tests, the exec tools and a hosted fix that
+    # runs npm test in it. SHAPEWALL_SANDBOX_TEST=1 makes a sandbox that does not start a failure.
+    name: Agent command sandbox (${{ matrix.os }})
+    timeout-minutes: 15
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install bubblewrap, socat and ripgrep, and check bubblewrap starts
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q bubblewrap socat ripgrep
+          bash scripts/ci-bwrap-sandbox.sh
+      - name: Seatbelt is the sandbox on macOS
+        if: runner.os == 'macOS'
+        run: echo 'SHAPEWALL_SANDBOX_TEST=1' >> "$GITHUB_ENV"
+      - name: Sandbox, exec tools and hosted fix commands
+        run: node --test --test-concurrency=1 --test-timeout=300000 test/sandbox-exec.test.js test/exec-mcp.test.js test/dev-server.test.js test/hosted-exec.test.js test/acp-fs-race.test.js test/q7-exec.test.js test/q7-rereview-exec.test.js
+      # The agent browser inside the OS sandbox (Linux): real Chromium under bubblewrap, its egress through srt's proxy.
+      - name: Playwright Chromium for the sandboxed agent browser
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+      - name: Agent browser inside the OS sandbox
+        if: runner.os == 'Linux'
+        run: node --test --test-concurrency=1 --test-timeout=300000 test/e2e/agent-browser-sandbox.e2e.test.js test/e2e/agent-browser.e2e.test.js
+
   website:
     name: Website (build and SEO checks)
     timeout-minutes: 10
@@ -89,7 +136,7 @@ jobs:
     # deterministically: the sorted file list, every fourth file to a shard.
     if: >-
       github.event_name == 'workflow_dispatch' || github.event_name == 'push' ||
-      (github.event_name == 'pull_request' && github.base_ref == 'main')
+      (github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'staging'))
     timeout-minutes: 40
     runs-on: ubuntu-latest
     needs: check

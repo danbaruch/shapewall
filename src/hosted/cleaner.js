@@ -88,5 +88,5 @@ export function createCleaner({ size = 2, maxQueue = 32, timeoutMs = 30_000, mem
     await Promise.all([...idle.splice(0), ...busy].map((worker) => worker.terminate()))
   }
 
-  return { clean, close, stats: () => ({ busy: busy.size, idle: idle.length, queued: queue.length }) }
+  return { clean, close, stats: () => ({ busy: busy.size, idle: idle.length, queued: queue.length, size, maxQueue }) }
 }

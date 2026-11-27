@@ -31,8 +31,10 @@ The core of Shapewall:
 
 - the commands `init`, `sitemap`, `capture`, `serve` (its base flags), `comments`, `watch`, `mcp`, `events`, `journeys`, `links`,
   `variant`, `export`, `notify`, `github`, `ci`, `doctor`, `auth record`, `push`, `share`, `login --remote`, `agent connect`
-  (except the link policy flags below), and `hosted` (its server flags, `backup` and `restore`);
-- the core config keys, the comment item JSON, the MCP tools, `/api/v1` (except `/api/v1/agent/*`), `/mcp`, the webhook payload and
+  (except the link policy flags below), `agent status` (its human-readable output is not covered, see Internal), and `hosted`
+  (its server flags, `backup` and `restore`);
+- the core config keys, including `commands`, `agent.browser.allow`, `agent.fixIn` and `agent.localSession` (1.4.0; its value
+  `"own"` is deprecated and goes in 2.0), the comment item JSON, the MCP tools, `/api/v1` (except `/api/v1/agent/*`), `/mcp`, the webhook payload and
   its signature, `events.jsonl`, the environment variables that are not listed as experimental below, the exit codes, and the
   `shapewall` bin name.
 
@@ -45,8 +47,11 @@ all`), an experimental command or option ends its first line with `(experimental
 - **The sandboxed starter agent:** `shapewall agent sandbox run|watch|doctor|build-image`, the `starterAgent` config key,
   `Dockerfile.agent`, `SHAPEWALL_AGENT_IMAGE`, `SHAPEWALL_AGENT_RUNTIME`, `SHAPEWALL_AGENT_REGISTRY`, `SHAPEWALL_AGENT_EGRESS`,
   `SHAPEWALL_AGENT_KEY_HOSTS`, `SHAPEWALL_SANDBOX` and `SHAPEWALL_EGRESS_*` ([the starter agent](starter-agent.md)).
-- **The hosted agent link policy:** `agent connect --approvals`, `--auto`, `--allow-command`, `--allow-path` and `--audience`,
-  `/api/v1/agent/*` and the machine's `agent-policy.json`.
+- **The hosted agent link policy:** `agent connect --approvals`, `--auto`, `--allow-command`, `--allow-path`, `--audience`,
+  `--browser-profile` and `--browser-no-sandbox`, `shapewall agent set` and its keys, the output of `agent status --json`,
+  `/api/v1/agent/*`, the machine's `agent-policy.json` (version 2 and its capability keys), the `capabilities` entry of a
+  project in `agents.json`, and the file `watch --exec` names in `SHAPEWALL_CAPABILITIES_FILE`
+  ([what an agent can do](agent-capabilities.md)).
 - **Chat internals:** `agent.branchMode`, `agent.branchPrefix`, `agent.batchFixes`, `SHAPEWALL_AGENT_BRANCH_*`,
   `SHAPEWALL_AGENT_ACP_ENV` and the chat's event stream.
 - **Tailnet sign-in:** `hosted --tailnet-sign-in`, `--tailnet-passkeys`, `--funnel` and `--funnel-port`, `hosted claim`,
@@ -58,6 +63,9 @@ all`), an experimental command or option ends its first line with `(experimental
   the report JSON ([page checks](page-checks.md), [Lighthouse audits](performance.md)).
 - **The Buzz bridge:** `shapewall buzz-bridge`, `serve --buzz-bridge`, the board's "Existing Buzz conversation" dialog,
   and `SHAPEWALL_BUZZ_SIGNER_CODEX`/`SHAPEWALL_BUZZ_SIGNER_CLAUDE` ([the Buzz bridge](buzz.md)).
+- **The Claude Code and Codex plugin:** everything in `plugins/shapewall/` (manifests, skills, the launcher) and the marketplace
+  files `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` ([plugins](plugins.md)). The `shapewall mcp`
+  server it starts is covered as usual.
 - **Self-update:** `SHAPEWALL_UPDATE_*` and the board's update routes ([updates](updates.md)).
 - **Smaller pieces:** the `settings` command (use `serve --open`), `export --browser-comments`, the hosted `quotas.json`, and the
   output of `hosted admin`.
@@ -73,7 +81,8 @@ Never promised, and free to change in any release:
   hosted console, board pages, `/auth` and presence connections. Agents and scripts use the CLI, the MCP server or `/api/v1`
   ([the agent workflow](agent-workflow.md#which-interface-to-build-on));
 - human-readable output: the wording of messages, tables and progress lines (use `--json` to read results);
-- the owner MCP tools of the board chat;
+- the owner MCP tools of the board chat, and the tools of Shapewall's command and browser tool server (`exec-mcp`) that an agent
+  session gets;
 - files on disk other than the stable ones below.
 
 ## Files on disk

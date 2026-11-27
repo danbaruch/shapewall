@@ -39,7 +39,7 @@ const cut = (value, max) => {
     .trim()
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
-const commentById = (config, board) => {
+export const commentById = (config, board) => {
   let cache = null
   return (id) => {
     cache ||= new Map(listComments(config, board.id).map((comment) => [comment.id, comment]))
@@ -116,8 +116,39 @@ export function validateFiles(raw) {
   })
 }
 
+// The board comments one mention quotes (mentionContext): a comment or
+// element mention its comment (null when it is gone), a person mention their
+// open comments. The thread trust checks read the same list
+// (routes.js trustEventsOf, run.js quotesOutside), so whatever is quoted is
+// what is judged.
+export function mentionComments(config, board, mention, find = commentById(config, board)) {
+  if (mention?.kind === 'comment' || mention?.kind === 'element') {
+    const id = Number(mention.id)
+    const comment = Number.isSafeInteger(id) && id > 0 ? find(id) : null
+    return comment ? [comment] : null
+  }
+  if (mention?.kind === 'person') {
+    const handle = String(mention.id || '').toLowerCase()
+    return listComments(config, board.id).filter(
+      (comment) =>
+        comment.status === 'open' &&
+        (handleFor(comment.author) === handle ||
+          String(comment.authorHandle || '').toLowerCase() === handle ||
+          commentMentions(comment).includes(handle)),
+    )
+  }
+  return []
+}
+
+// What a journey made on the board says of itself above the open tier: its
+// pages, never its name, description or fork labels (anyone who reaches the
+// board can make one; mcp.js list_journeys does the same, Q7 A1).
+export const BOARD_JOURNEY_WITHHELD = 'made on the board: its name, description and fork labels are not shown on this turn'
+
 // The quoted data for one mention: what the model needs to know about it.
-export function mentionContext(config, board, mention, find = commentById(config, board)) {
+// `quoteOthers`: false above the open tier (run.js modelMessages): a journey
+// made on the board is given by its pages only.
+export function mentionContext(config, board, mention, find = commentById(config, board), { quoteOthers = true } = {}) {
   const attrs = { board: board.id, kind: mention.kind }
   if (mention.kind === 'page') {
     const page = board.pages.find((value) => value.id === mention.id)
@@ -125,7 +156,7 @@ export function mentionContext(config, board, mention, find = commentById(config
     return quoteData('mention', { ...attrs, page: page.id }, { page: { id: page.id, title: page.title, path: page.path, note: page.note } })
   }
   if (mention.kind === 'comment' || mention.kind === 'element') {
-    const comment = find(mention.id)
+    const comment = mentionComments(config, board, mention, find)?.[0]
     if (!comment) return null
     if (mention.kind === 'comment') return quoteData('mention', { ...attrs, comment: comment.id }, commentForModel(config, board, comment))
     const page = board.pages.find((value) => value.id === comment.pageId)
@@ -144,6 +175,13 @@ export function mentionContext(config, board, mention, find = commentById(config
     const journey = listJourneys(config, board).find((value) => value.id === mention.id)
     if (!journey) return null
     const titles = new Map(board.pages.map((page) => [page.id, page.title]))
+    const pages = (journey.pages || []).map((id) => ({ id, title: titles.get(id) || id }))
+    if (!quoteOthers && journey.source === 'board')
+      return quoteData(
+        'mention',
+        { ...attrs, journey: journey.id },
+        { journey: { id: journey.id, source: 'board', pages, withheld: BOARD_JOURNEY_WITHHELD } },
+      )
     return quoteData(
       'mention',
       { ...attrs, journey: journey.id },
@@ -159,13 +197,7 @@ export function mentionContext(config, board, mention, find = commentById(config
   }
   if (mention.kind === 'person') {
     const handle = mention.id
-    const theirs = listComments(config, board.id).filter(
-      (comment) =>
-        comment.status === 'open' &&
-        (handleFor(comment.author) === handle ||
-          String(comment.authorHandle || '').toLowerCase() === handle ||
-          commentMentions(comment).includes(handle)),
-    )
+    const theirs = mentionComments(config, board, mention, find)
     return quoteData(
       'mention',
       { ...attrs, person: handle },
@@ -192,24 +224,20 @@ export function fileContext(board, file) {
 // The text parts for a stored message's mentions and files (run.js
 // modelMessages). `full`: the details (the last few person messages, like
 // images); older messages get one line each, so a long thread stays small.
-export function composerParts(config, board, message, { full = true } = {}) {
+export function composerParts(config, board, message, { full = true, quoteOthers = true } = {}) {
   const parts = []
   const mentions = Array.isArray(message.mentions) ? message.mentions : []
   const files = Array.isArray(message.files) ? message.files : []
   if (!mentions.length && !files.length) return parts
   const find = commentById(config, board)
   for (const mention of mentions) {
-    const text = full ? mentionContext(config, board, mention, find) : null
+    const text = full ? mentionContext(config, board, mention, find, { quoteOthers }) : null
+    // A journey's label is its name (the composer's chip): above open, its id.
+    const label = !quoteOthers && mention.kind === 'journey' ? mention.id : mention.label || mention.id
     // The label can be comment text: quoted like everything from the board.
     parts.push({
       type: 'text',
-      text:
-        text ||
-        quoteData(
-          'mention',
-          { board: board.id, kind: mention.kind },
-          { id: mention.id, label: cut(mention.label || mention.id, LABEL_MAX) },
-        ),
+      text: text || quoteData('mention', { board: board.id, kind: mention.kind }, { id: mention.id, label: cut(label, LABEL_MAX) }),
     })
   }
   for (const file of files) {

@@ -7,13 +7,14 @@
 // who may send it work. Below: what waits for a person. Only for people who
 // can send comments to an agent (never a share link guest or a public
 // viewer).
-import { Bot, Eye, GitBranch, MessageSquare, Settings2, ShieldCheck } from 'lucide-react'
+import { Bot, Eye, FileText, GitBranch, MessageSquare, Settings2, ShieldCheck } from 'lucide-react'
 import { Button } from '../components/ui'
 import { PanelHeader } from '../components/panel-header'
 import { AgentMark } from '../chat/AgentPicker'
 import { useState } from 'react'
 import { cn, formatRelative } from '../lib/utils'
-import { STATE_MARK, editsLine, stateWords } from './hostedAgents'
+import { STATE_MARK, editsLine, instructionsLine, stateWords } from './hostedAgents'
+import { StateChip } from '../console/components/CapabilityCard.jsx'
 
 const DOCS_URL = 'https://shapewall.com/docs/where-to-run#where-the-work-happens'
 const WHY = { approval: 'needs your OK', 'needs-human': 'needs a person', 'branch-ready': 'fix ready on a branch' }
@@ -70,6 +71,34 @@ function Chips({ label, ids, nameOf, onOpen, hook, tone }) {
   )
 }
 
+// What it can do on a fix this person asks for, as its machine said
+// (the server works it out: src/agent/capability-views.js compactCard).
+// The console's agent page has every line, per tier.
+const COMPACT_LINES = ['edits', 'commands', 'shell', 'browser', 'extensions', 'push']
+function CanDo({ can }) {
+  if (!can) return null
+  const lines = can.lines.filter((line) => COMPACT_LINES.includes(line.id))
+  return (
+    <div className="space-y-1" data-sw-hosted-agent-can={can.tier}>
+      <p className="text-[11px] text-muted">On a fix you ask for ({can.tierLabel.toLowerCase()} turn):</p>
+      <ul className="flex flex-wrap gap-1">
+        {lines.map((line) => (
+          <li
+            key={line.id}
+            className="flex items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-[11px] text-fg"
+            data-sw-hosted-agent-can-line={line.id}
+            data-state={line.state}
+            title={line.narrowed ? "Limited by this project's setting" : undefined}
+          >
+            {line.label}
+            <StateChip state={line.state} className="px-1.5 py-0 text-[10px]" />
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function AgentRow({ agent, nameOf, onOpen, onChat }) {
   const waiting = agent.state === 'offline' && agent.queued.length > 0
   // Connected with `shapewall agent connect`: it chats.
@@ -78,6 +107,8 @@ function AgentRow({ agent, nameOf, onOpen, onChat }) {
   // How its edits are allowed, as its own machine set it (hostedAgents.js).
   const mode = agent.edits?.mode || 'none'
   const modeLine = editsLine(agent)
+  // Its instruction files, as its machine said (names only here; hashes in the console).
+  const rules = instructionsLine(agent)
   const elsewhere = (agent.elsewhere?.working || 0) + (agent.elsewhere?.queued || 0)
   return (
     <li
@@ -117,6 +148,12 @@ function AgentRow({ agent, nameOf, onOpen, onChat }) {
               <span className="min-w-0">{mode === 'none' ? `${modeLine}. No edits, no commands.` : modeLine}</span>
             </p>
           ) : null}
+          {rules ? (
+            <p className="flex min-w-0 items-start gap-1 text-xs text-muted" data-sw-hosted-agent-instructions>
+              <FileText size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 break-words">Instructions: {rules}</span>
+            </p>
+          ) : null}
         </div>
         {chats ? (
           <Button
@@ -139,6 +176,7 @@ function AgentRow({ agent, nameOf, onOpen, onChat }) {
           </Button>
         ) : null}
       </div>
+      <CanDo can={agent.can} />
       {/* Not theirs to use: the line about who it takes work from says so, once. */}
       {chats && (agent.chat?.ok ? mode !== 'none' : agent.canSend) ? (
         <p className="text-[11px] text-muted" data-sw-hosted-agent-chat-note={agent.chat?.ok ? 'ok' : agent.chat?.code || 'no'}>
@@ -176,7 +214,6 @@ function AgentRow({ agent, nameOf, onOpen, onChat }) {
           : chats
             ? String(agent.reason || '').replace('can send work to', 'can use')
             : agent.reason}
-        {agent.canSend && agent.audience.inherited ? ' (As before 0.4.0.)' : ''}
       </p>
     </li>
   )

@@ -30,12 +30,42 @@
 //              changes.
 //   remote     the git remote a finished fix is pushed to ("origin"), or
 //              null: never pushed.
+//   instructions  which instruction files the agent's sessions get
+//              (src/agent/instructions.js): "all" (the default: the
+//              project's CLAUDE.md or AGENTS.md and the agent config
+//              folder's), "project", or "none".
+//   respond    when it answers in a shared thread (src/agent/triggers.js):
+//              "thread" (the default) honors a thread the person who
+//              connected it set to answer every message; "mention" answers
+//              only an @mention or Send to agent, whatever the thread says.
+//              A private chat answers every message either way, and a
+//              message an agent wrote never starts a turn.
+//   agentConfig  the agent config folder: null (the default:
+//              $XDG_CONFIG_HOME/shapewall/agent-config/<name>/, read only if
+//              it exists, never created), an absolute path, or "none".
+//
+// Version 2 (1.4.0) adds what each trust tier may do (src/agent/capabilities.js
+// cleanCapabilityKeys, docs/agent-hardening.md lists them): trustTeam,
+// trustTeamShell, shell, shellNetwork, shellUnsandboxed, commandApproval,
+// browser, browserAllow, browserAuth, browserProfile, browserProfileTeam,
+// browserNoSandbox, extensionsFor, allowTool, handoffHops. A version 1 file is read as exactly
+// what it allowed before (upgradeV1Capabilities: no shell, no browser, no
+// extensions, a card for every command), and the next save writes every
+// entry of it back as version 2 with those values spelled out, so no entry
+// gains anything by the upgrade. In version 2 too, a key an entry does not
+// name reads as that version 1 value, so a connection with nothing saved (or
+// saved by 1.3.0 without flags) still reads and answers only; each wider
+// capability is a key the owner sets. One exception, said in the changelog:
+// an entry with approvals and exact commands also gets the config's named
+// commands, each behind a card ("shell": "commands", "commandApproval":
+// "always").
 //
 // One entry per server and connection name.
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { credentialsFile, updatePrivateJson } from './credentials.js'
+import { CAPABILITY_KEYS, CAPABILITY_NARROWEST, cleanCapabilityKeys, machineView, upgradeV1Capabilities } from '../agent/capabilities.js'
 
 export const POLICY_AUDIENCES = ['server', 'owner']
 export const POLICY_APPROVALS = ['none', 'owner', 'admins']
@@ -51,7 +81,19 @@ export const DEFAULT_MACHINE_POLICY = {
   allowPaths: [],
   base: null,
   remote: 'origin',
+  instructions: 'all',
+  agentConfig: null,
+  respond: 'thread',
+  // Nothing saved: what version 1 allowed (reads and answers only). Every
+  // capability beyond that is the owner's opt-in, key by key.
+  ...upgradeV1Capabilities('none', []),
+  browserAllow: [],
+  extensionsFor: [],
+  allowTool: [],
 }
+export const POLICY_VERSION = 2
+export const POLICY_RESPOND = ['thread', 'mention']
+export const POLICY_INSTRUCTIONS = ['all', 'project', 'none']
 
 export const policyFile = (env = process.env) => path.join(path.dirname(credentialsFile(env)), 'agent-policy.json')
 
@@ -62,7 +104,7 @@ function readAll(file) {
   try {
     fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0))
   } catch (error) {
-    if (error.code === 'ENOENT') return { version: 1, connections: {} }
+    if (error.code === 'ENOENT') return { version: POLICY_VERSION, connections: {} }
     if (error.code === 'ELOOP') throw new Error(`${file} is a symbolic link. A policy file is a plain file of your own.`, { cause: error })
     throw error
   }
@@ -117,6 +159,13 @@ export const cleanBase = (value) =>
     ? value
     : null
 const REMOTE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/
+// The agent config folder: an absolute path on this machine, or "none".
+export function cleanAgentConfig(value) {
+  if (value === 'none') return 'none'
+  // eslint-disable-next-line no-control-regex
+  if (typeof value !== 'string' || !value || value.length > 1024 || /[\u0000-\u001f\u007f]/.test(value)) return null
+  return path.isAbsolute(value) ? path.normalize(value) : null
+}
 export const cleanRemote = (value) => (typeof value === 'string' && REMOTE_RE.test(value) ? value : null)
 
 // One entry of the file, as the policy in effect. A key that is missing
@@ -125,14 +174,38 @@ export const cleanRemote = (value) => (typeof value === 'string' && REMOTE_RE.te
 // for that key, never as the default: no approvals, only the person who
 // connected it, no commands, nothing automatic, no settings files, never
 // pushed. `warn(text)` hears about each such key by name.
-const KNOWN_KEYS = ['audience', 'approvals', 'commands', 'auto', 'allowPaths', 'base', 'remote']
+const KNOWN_KEYS = [
+  'audience',
+  'approvals',
+  'commands',
+  'auto',
+  'allowPaths',
+  'base',
+  'remote',
+  'instructions',
+  'agentConfig',
+  'respond',
+  ...CAPABILITY_KEYS,
+]
 const unique = (list) => [...new Set(list)]
-function clean(entry, warn = () => {}) {
+// `env`: where the agent browser profiles are (cleanBrowserProfile).
+function clean(entry, warn = () => {}, env = process.env) {
   const has = (key) =>
     entry !== null && typeof entry === 'object' && !Array.isArray(entry) && Object.hasOwn(entry, key) && entry[key] !== undefined
   if (entry !== undefined && entry !== null && (typeof entry !== 'object' || Array.isArray(entry))) {
     warn('this connection\'s entry is not an object: read as "read and answer only, for the person who connected it"')
-    return { ...DEFAULT_MACHINE_POLICY, audience: 'owner', remote: null }
+    return {
+      ...DEFAULT_MACHINE_POLICY,
+      audience: 'owner',
+      remote: null,
+      instructions: 'none',
+      agentConfig: 'none',
+      respond: 'mention',
+      ...CAPABILITY_NARROWEST,
+      browserAllow: [],
+      extensionsFor: [],
+      allowTool: [],
+    }
   }
   for (const key of Object.keys(entry || {})) if (!KNOWN_KEYS.includes(key)) warn(`"${key}" is not a setting this version knows: ignored`)
   const bad = (key, narrow) => {
@@ -175,6 +248,30 @@ function clean(entry, warn = () => {}) {
     remote = entry.remote === null ? null : cleanRemote(entry.remote)
     if (entry.remote !== null && !remote) bad('remote', 'none (a fix is never pushed)')
   }
+  let instructions = DEFAULT_MACHINE_POLICY.instructions
+  if (has('instructions')) {
+    if (POLICY_INSTRUCTIONS.includes(entry.instructions)) instructions = entry.instructions
+    else {
+      instructions = 'none'
+      bad('instructions', '"none" (no instruction files)')
+    }
+  }
+  let agentConfig = null
+  if (has('agentConfig') && entry.agentConfig !== null) {
+    agentConfig = cleanAgentConfig(entry.agentConfig)
+    if (!agentConfig) {
+      agentConfig = 'none'
+      bad('agentConfig', '"none" (no agent config folder)')
+    }
+  }
+  let respond = DEFAULT_MACHINE_POLICY.respond
+  if (has('respond')) {
+    if (POLICY_RESPOND.includes(entry.respond)) respond = entry.respond
+    else {
+      respond = 'mention'
+      bad('respond', '"mention" (answers an @mention or Send to agent only)')
+    }
+  }
   return {
     audience,
     approvals,
@@ -183,38 +280,125 @@ function clean(entry, warn = () => {}) {
     allowPaths: on ? allowPaths : [],
     base,
     remote,
+    instructions,
+    agentConfig,
+    respond,
+    // What each trust tier may do (capabilities.js), each key read the same
+    // way. A key the entry does not name reads as what version 1 allowed for
+    // this entry (upgradeV1Capabilities), never as a wider default: a
+    // connection nobody opted in stays at reads and answers (or, with
+    // approvals, its exact commands behind a card).
+    ...cleanCapabilityKeys(entry, {
+      defaults: upgradeV1Capabilities(approvals, on ? commands : []),
+      warn: (key, said) => bad(key, said),
+      env,
+    }),
   }
 }
 export { clean as cleanMachinePolicy }
+
+// The file's version as it reads it: 2, or 1 for a file from before 1.4.0
+// (no version, or any value that is not a whole number above 1). A newer
+// version is read as 2: keys it does not know are said and ignored.
+export const fileVersion = (data) => (Number.isInteger(data?.version) && data.version >= POLICY_VERSION ? POLICY_VERSION : 1)
+
+// One entry of a version 1 file, as version 2: the capability keys set to
+// what version 1 allowed (nothing new), unless the entry already names one.
+export function upgradeV1Entry(entry) {
+  if (entry === undefined || entry === null || typeof entry !== 'object' || Array.isArray(entry)) return entry
+  const before = clean(Object.fromEntries(Object.entries(entry).filter(([key]) => !CAPABILITY_KEYS.includes(key))))
+  return { ...upgradeV1Capabilities(before.approvals, before.commands), ...entry }
+}
 
 // The policy for one connection (defaults when nothing is saved).
 // `warn(text)`: told about every value in the file that was not understood.
 export function readMachinePolicy(origin, slug = 'default', env = process.env, { warn = () => {} } = {}) {
   const file = policyFile(env)
-  return clean(readAll(file).connections[`${origin}#${slug}`], (text) => warn(`${file}: ${text}`))
+  const data = readAll(file)
+  const entry = data.connections[`${origin}#${slug}`]
+  return clean(fileVersion(data) === 1 ? upgradeV1Entry(entry) : entry, (text) => warn(`${file}: ${text}`), env)
 }
 
 // Saves what was chosen for one connection; returns the policy in effect.
 export function saveMachinePolicy(origin, slug, changes, env = process.env) {
   const file = policyFile(env)
-  return updatePrivateJson(file, readAll, (data) => {
+  // The version as read (updatePrivateJson stamps its own before `change` runs).
+  let version = POLICY_VERSION
+  const read = (target) => {
+    const data = readAll(target)
+    version = fileVersion(data)
+    return data
+  }
+  return updatePrivateJson(file, read, (data) => {
+    // A version 1 file is written back as version 2, every entry reading
+    // exactly as it did: an entry nobody touched gains nothing.
+    if (version === 1) {
+      for (const [name, entry] of Object.entries(data.connections))
+        data.connections[name] = stored(clean(upgradeV1Entry(entry), undefined, env))
+    }
+    data.version = POLICY_VERSION
     const key = `${origin}#${slug}`
-    const next = clean({ ...clean(data.connections[key]), ...changes })
-    data.connections[key] = next
+    const next = clean({ ...stored(clean(data.connections[key], undefined, env)), ...changes }, undefined, env)
+    data.connections[key] = stored(next)
     return next
   })
 }
 
+// An entry as it is written: the capability keys the owner chose, without
+// the ones that only say what version 1 allowed for its approvals and
+// commands. Those are left out so they keep following them (a connection
+// given approvals and an exact command later gets that command, behind a
+// card), and reading the entry back gives the same policy.
+function stored(policy) {
+  const derived = upgradeV1Capabilities(policy.approvals, policy.commands)
+  return Object.fromEntries(
+    Object.entries(policy).filter(
+      ([key, value]) => !CAPABILITY_KEYS.includes(key) || JSON.stringify(value) !== JSON.stringify(derived[key]),
+    ),
+  )
+}
+
 // The policy in one line each, for the terminal when the agent connects.
+const MENTION_ONLY_LINE =
+  'In shared threads: answers an @mention or Send to agent only, also where a thread is set to answer every message.'
+// It says what the resolver does (src/agent/capabilities.js); a test holds
+// it to `agent status` (toCli) for every policy shape.
 export function describeMachinePolicy(policy) {
-  if (policy.approvals === 'none') return ['Reads and answers. No edits, no commands (this machine refuses both).']
+  const respond = policy.respond === 'mention' ? [MENTION_ONLY_LINE] : []
+  // The capability keys as the resolver reads them (missing: the narrowest).
+  const caps = machineView(policy)
+  const browser =
+    caps.browser === 'on'
+      ? [
+          `Browser: a throwaway headless one, limited to the app's own addresses${caps.browserAllow.length ? ` and ${caps.browserAllow.join(', ')}` : ''}. Never your own Chrome.` +
+            (caps.browserNoSandbox
+              ? " Where Chromium's own sandbox cannot start, it starts without it on solo and team turns (you chose --browser-no-sandbox)."
+              : ''),
+        ]
+      : ['Browser: none.']
+  if (policy.approvals === 'none')
+    return ['Reads and answers. No edits, no commands, no shell (this machine refuses all three).', ...browser, ...respond]
   const who = policy.approvals === 'owner' ? 'the person who connected it' : 'the people the server lets answer (admins by default)'
   const lines = [
     `Edits: asked on the board, allowed by ${who}. Each fix is made on a new branch in a folder of its own, never in this checkout.`,
-    policy.commands.length
-      ? `Commands: only ${policy.commands.map((command) => `"${command}"`).join(', ')}, each asked on the board.`
-      : 'Commands: never.',
   ]
+  if (caps.shell === 'off') lines.push('Commands: never (this machine allows no commands and no shell).')
+  else {
+    lines.push(
+      `Named commands from shapewall.config.json: ${caps.commandApproval === 'always' ? 'each asked on the board' : 'each asked on the board on open turns and where there is no OS sandbox'}.`,
+    )
+    lines.push(
+      policy.commands.length
+        ? `Exact commands: only ${policy.commands.map((command) => `"${command}"`).join(', ')}, each asked on the board.`
+        : 'Exact commands: none.',
+    )
+    lines.push(
+      caps.shell === 'sandboxed'
+        ? `Shell: a full shell in the fix copy on solo turns${caps.trustTeamShell ? ' and team turns' : ''}, only inside an OS sandbox${caps.shellUnsandboxed ? ' (or without one on solo turns: you chose that)' : ''}.`
+        : 'Shell: no full shell.',
+    )
+  }
+  lines.push(...browser)
   if (policy.auto.length)
     lines.push(
       `May be allowed without asking: ${policy.auto.join(' and ')}, once ${policy.approvals === 'owner' ? 'the person who connected it (nobody else)' : "someone with the agent's rule-changing role (an admin by default)"} switches that on in the console. Still only inside the project, never a file that runs something, and such a fix is not pushed until a person has looked at its whole diff on the board.`,
@@ -228,5 +412,83 @@ export function describeMachinePolicy(policy) {
   lines.push(
     policy.remote ? `A finished fix is pushed to the remote "${policy.remote}" when this machine may push there.` : 'Fixes are not pushed.',
   )
-  return lines
+  return [...lines, ...respond]
+}
+
+// ---- Live narrowing (Q7 F7) ----
+
+// A running `shapewall agent connect` reads the file again before each
+// turn: what `agent set` (or a hand edit) made narrower applies at once,
+// what it made wider waits for the next connect, so a change to the file
+// alone never widens a link that is already running. For each key, the
+// narrower of the two, by these orders (narrowest first):
+const ORDERS = {
+  audience: ['owner', 'server'],
+  approvals: ['none', 'owner', 'admins'],
+  instructions: ['none', 'project', 'all'],
+  respond: ['mention', 'thread'],
+  shell: ['off', 'commands', 'sandboxed'],
+  shellNetwork: ['none', 'registries', 'open'],
+  commandApproval: ['always', 'tier'],
+  browser: ['off', 'on'],
+}
+// true is the wider value of these.
+const FLAGS = ['trustTeamShell', 'shellUnsandboxed', 'browserProfileTeam', 'browserNoSandbox']
+// Lists: only what both allow.
+const LISTS = ['commands', 'auto', 'allowPaths', 'browserAllow', 'extensionsFor', 'allowTool']
+// A value or nothing (null): nothing is the narrower; another value waits.
+const NULLABLE = ['remote', 'browserAuth', 'browserProfile']
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+
+// -> { policy, narrowed: [keys], wider: [keys] }. `current` is the policy
+// the link runs with, `fresh` the file as read now (cleanMachinePolicy).
+export function narrowPolicy(current, fresh) {
+  const policy = { ...current }
+  const narrowed = []
+  const wider = []
+  const take = (key, value) => {
+    if (same(value, current[key])) return
+    policy[key] = value
+    narrowed.push(key)
+  }
+  for (const key of Object.keys(fresh || {})) {
+    const now = current[key]
+    const next = fresh[key]
+    if (same(now, next)) continue
+    if (ORDERS[key]) {
+      const order = ORDERS[key]
+      const a = order.indexOf(now)
+      const b = order.indexOf(next)
+      if (b < 0) continue
+      if (a < 0 || b < a) take(key, next)
+      else wider.push(key)
+    } else if (FLAGS.includes(key)) {
+      if (next === false) take(key, false)
+      else wider.push(key)
+    } else if (LISTS.includes(key)) {
+      const both = (Array.isArray(now) ? now : []).filter((item) => Array.isArray(next) && next.includes(item))
+      if (Array.isArray(next) && next.some((item) => !both.includes(item))) wider.push(key)
+      take(key, both)
+    } else if (NULLABLE.includes(key)) {
+      if (next === null) take(key, null)
+      else wider.push(key)
+    } else if (key === 'handoffHops') {
+      if (Number.isInteger(next) && next < now) take(key, next)
+      else wider.push(key)
+    } else if (key === 'trustTeam') {
+      // "none" < a list < "members".
+      if (next === 'none') take(key, 'none')
+      else if (Array.isArray(next) && now === 'members') take(key, next)
+      else if (Array.isArray(next) && Array.isArray(now)) {
+        const both = now.filter((handle) => next.includes(handle))
+        if (next.some((handle) => !both.includes(handle))) wider.push(key)
+        take(key, both.length ? both : 'none')
+      } else wider.push(key)
+    } else if (key === 'agentConfig') {
+      // No folder at all is the narrower; another folder waits.
+      if (next === 'none') take(key, 'none')
+      else wider.push(key)
+    } else wider.push(key)
+  }
+  return { policy, narrowed, wider }
 }

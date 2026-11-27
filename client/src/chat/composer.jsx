@@ -4,7 +4,7 @@
 // agent's option menus and usage ring, the mic and send / queue / stop.
 
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, Crosshair, FileImage, FileText, ListPlus, Mic, MonitorSmartphone, Paperclip, Square, Upload, X } from 'lucide-react'
+import { ArrowUp, Bot, Crosshair, FileImage, FileText, ListPlus, Mic, MonitorSmartphone, Paperclip, Square, Upload, X } from 'lucide-react'
 import {
   Button,
   DropdownMenu,
@@ -60,6 +60,10 @@ export function Composer({
   optionsLoading = false,
   onChooseOption,
   onSubmit,
+  // A shared thread whose agent answers an @mention or Send to agent only
+  // ({ shared, mode, line }, src/agent/triggers.js), and its Send to agent.
+  respond = null,
+  onAsk = null,
   onStop,
   onMic,
   addFiles,
@@ -98,10 +102,14 @@ export function Composer({
     // React's key event has no isComposing: an IME's Enter (it picks a word) is on the native event.
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !touch) {
       event.preventDefault()
-      onSubmit()
+      // Ctrl or Cmd + Enter: Send to agent, in a thread that needs it.
+      if (askable && (event.ctrlKey || event.metaKey)) onAsk()
+      else onSubmit()
     }
   }
   const attachFull = attachments.length >= ATTACH_MAX && files.length >= TEXT_FILES_MAX
+  // Send posts to the people here; Send to agent (or an @mention) wakes the agent.
+  const askable = Boolean(onAsk && respond?.shared && respond.mode === 'mention')
   const chips = showStarters ? SUGGESTIONS[comment ? 'comment' : 'board'] : followUps
   return (
     <form
@@ -358,20 +366,42 @@ export function Composer({
               <Square size={15} aria-hidden="true" />
             </IconButton>
           ) : (
-            <Button
-              type="submit"
-              size="icon"
-              variant="default"
-              className={cn(iconSize, 'rounded-full')}
-              aria-label="Send message"
-              disabled={selectingProfile || dictation.listening || !hasContent}
-              data-sw-chat-send="true"
-            >
-              <ArrowUp size={18} aria-hidden="true" />
-            </Button>
+            <>
+              {askable ? (
+                <IconButton
+                  type="button"
+                  size="icon"
+                  variant="secondary"
+                  className={cn(iconSize, 'rounded-full')}
+                  label="Send to agent"
+                  tooltip={touch ? 'Send to agent' : 'Send to agent (Ctrl+Enter)'}
+                  disabled={selectingProfile || dictation.listening || !hasContent}
+                  onClick={onAsk}
+                  data-sw-chat-ask="true"
+                >
+                  <Bot size={16} aria-hidden="true" />
+                </IconButton>
+              ) : null}
+              <Button
+                type="submit"
+                size="icon"
+                variant="default"
+                className={cn(iconSize, 'rounded-full')}
+                aria-label={askable ? 'Send to the thread' : 'Send message'}
+                disabled={selectingProfile || dictation.listening || !hasContent}
+                data-sw-chat-send="true"
+              >
+                <ArrowUp size={18} aria-hidden="true" />
+              </Button>
+            </>
           )}
         </div>
       </div>
+      {askable ? (
+        <p className="px-1 pt-1 text-xs text-muted" data-sw-chat-respond-line="true">
+          {respond.line}
+        </p>
+      ) : null}
       <span className="sr-only">Stop dictation to check or edit your message, then press Send.</span>
     </form>
   )

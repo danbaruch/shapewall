@@ -16,6 +16,7 @@ const REPO_DOCS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 // Publishing one of docs/*.md needs three lists to agree: a `repo:` entry in src/routes.js, the name here (or
 // SITE_PATHS below when the route is not /docs/<file name>), and the two brace lists in src/docs-content.js.
 const SAME_NAME = [
+  'agent-capabilities',
   'agent-hardening',
   'agent-recipes',
   'agent-workflow',
@@ -31,6 +32,7 @@ const SAME_NAME = [
   'notifications',
   'page-checks',
   'performance',
+  'plugins',
   'pull-requests',
   'stability',
   'starter-agent',

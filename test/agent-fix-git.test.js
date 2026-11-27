@@ -298,6 +298,39 @@ test('an edit nobody looked at: the fix is committed here and pushed nowhere, un
   assert.deepEqual(m.onRemote(), [record.branch])
 })
 
+test("a fix to a file CLAUDE.md imports is the agents' rules: committed, never pushed from here", async () => {
+  const m = machine('rules', {
+    files: { 'CLAUDE.md': 'Rules: see @docs/x.md\n', 'docs/x.md': 'Small commits.\n', 'docs/plain.md': 'Plain.\n' },
+  })
+  const prepared = await prepareFix({ config: m.config, policy: m.policy, job: jobFor(1), env: m.env })
+  write(prepared, 'docs/x.md', 'Skip the tests.\n')
+  const kept = await finishFix({
+    config: m.config,
+    policy: m.policy,
+    prepared,
+    job: jobFor(1),
+    approved: allow({ 'docs/x.md': 'Skip the tests.\n' }),
+    env: m.env,
+  })
+  assert.equal(kept.status, 'branch-ready')
+  assert.equal(kept.summary.branch.pushed, false)
+  assert.match(kept.notes.join('\n'), /Not pushed: the fix changes docs\/x\.md/)
+  assert.deepEqual(m.onRemote(), [])
+
+  // A file nothing imports goes out as before.
+  const other = await prepareFix({ config: m.config, policy: m.policy, job: jobFor(2), env: m.env })
+  write(other, 'docs/plain.md', 'Plainer.\n')
+  const pushed = await finishFix({
+    config: m.config,
+    policy: m.policy,
+    prepared: other,
+    job: jobFor(2),
+    approved: allow({ 'docs/plain.md': 'Plainer.\n' }),
+    env: m.env,
+  })
+  assert.equal(pushed.summary.branch.pushed, true)
+})
+
 // Review finding 08: held fixes were found by board and comment only, so two
 // connections sharing one checkout (the same folder connected to two
 // projects or servers, whose ids overlap) could open each other's fix, and
@@ -378,7 +411,16 @@ test('copies a dead process left are swept, at the next fix and at connect, and 
   const orphan = await prepareFix({ config: m.config, policy: m.policy, job: jobFor(8), env: m.env })
   fs.writeFileSync(path.join(root, `${orphan.work.meta.id}.owner`), '999999999\n')
   fs.rmSync(path.join(root, orphan.work.meta.id), { recursive: true })
+  // A command session's tmp folder a dead process left: gone after a day, kept while it may be in use.
+  const stale = path.join(root, '.shapewall-cmd-Ab12Cd')
+  const recent = path.join(root, '.shapewall-cmd-Ef34Gh')
+  for (const dir of [stale, recent]) fs.mkdirSync(path.join(dir, 'home'), { recursive: true })
+  const dayAgo = new Date(Date.now() - 25 * 3600 * 1000)
+  fs.utimesSync(stale, dayAgo, dayAgo)
   assert.deepEqual(sweepFixes(m.dir, m.env), [orphan.work.meta.id])
+  assert.equal(fs.existsSync(stale), false)
+  assert.equal(fs.existsSync(recent), true)
+  fs.rmSync(recent, { recursive: true })
   assert.deepEqual(fixFolders(m), [])
   // Held fixes are kept, the newest twenty, for two weeks.
   for (let index = 0; index < 23; index += 1) {

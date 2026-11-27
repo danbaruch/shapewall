@@ -82,11 +82,18 @@ export function useChatTurn({
   // new one takes its place, the old one stays as an earlier version. All of
   // them stream like any turn (frame-batched below).
   // `push`: a hosted board's "Push this fix", asked again (no text of its own).
-  const submit = async (textValue = draft, fix = false, { queued = null, editOf = null, regenerate = null, push = false } = {}) => {
+  // `ask`: Send to agent, the explicit action that wakes a shared thread's
+  // agent without an @mention (src/agent/triggers.js).
+  const submit = async (
+    textValue = draft,
+    fix = false,
+    { queued = null, editOf = null, regenerate = null, push = false, ask = false } = {},
+  ) => {
     const fromComposer = !editOf && !regenerate && !push
     const item = queued || {
       text: regenerate ? regenerate.request.text || '' : String(textValue ?? '').trim(),
       fix: fromComposer && fix,
+      ask: fromComposer && ask === true,
       attachments: fromComposer ? attachments : [],
       mentions: fromComposer ? mentions : [],
       files: fromComposer ? files : [],
@@ -132,6 +139,7 @@ export function useChatTurn({
           : withOptions({
               text,
               ...(fix ? { fix: true } : {}),
+              ...(item.ask ? { ask: true } : {}),
               ...(editOf ? { editOf } : {}),
               attachments: sent.map(({ name, mediaType, data, source }) => ({ name, mediaType, data, ...(source ? { source } : {}) })),
               // Composer extras (src/agent/composer.js): mention ids and text files.
@@ -211,7 +219,8 @@ export function useChatTurn({
           else frame.now()
         },
       })
-      if (!pending.final) throw new Error('The response was interrupted. Try again.')
+      // A message for the people in a shared thread: kept, no answer comes (`posted`).
+      if (!pending.final && !pending.posted) throw new Error('The response was interrupted. Try again.')
     } catch (error) {
       interrupted = error
       // A notice and a restored draft belong to the thread that sent it: they
@@ -268,6 +277,11 @@ export function useChatTurn({
       if (here()) {
         live().thread.setData((current) => {
           if (!current) return current
+          if (pending.posted && !pending.final) {
+            const stored = current.messages || []
+            const kept = stored.some((message) => message.id === pending.user.id) ? stored : [...stored, pending.user]
+            return { ...current, running: false, messages: kept }
+          }
           if (!pending.final) return current.running ? { ...current, running: false } : current
           let stored = current.messages || []
           // An edit replaced the edited message and everything after it;
@@ -286,7 +300,7 @@ export function useChatTurn({
       // Queued messages go out only after a complete answer. After Stop, an
       // error or a lost connection they come back into the box instead (like
       // Codex): nothing is sent that the person did not see the outcome of.
-      const completed = Boolean(pending.final && pending.final.status === 'done' && !pending.final.error)
+      const completed = Boolean(pending.posted || (pending.final && pending.final.status === 'done' && !pending.final.error))
       const waiting = queueOf(boardId).filter((entry) => entry.threadId === startedThread)
       if (!completed && waiting.length) {
         updateQueue(boardId, (current) => current.filter((entry) => entry.threadId !== startedThread))
@@ -313,7 +327,12 @@ export function useChatTurn({
       setSending(boardId, false)
       live()?.threads.refetch()
       storeRun(boardId, null)
-      publishFocus(pending.final && !['stopped', 'error'].includes(pending.final.status) && !pending.final.error ? 'done' : 'stopped')
+      // Kept but not answered for a reason the person should know (the agent
+      // is offline, or busy here): say so in the composer.
+      if (pending.posted && !pending.final && pending.posted.reason && pending.posted.reason !== 'not_addressed' && pending.posted.line)
+        stash(boardId, startedThread, (composer) => composer.setNotice({ tone: 'info', text: pending.posted.line }))
+      if (pending.posted && !pending.final) publishFocus('stopped')
+      else publishFocus(pending.final && !['stopped', 'error'].includes(pending.final.status) && !pending.final.error ? 'done' : 'stopped')
       if (fix) (live()?.onFixDone || onFixDone)?.()
     }
     // An edit that the server refused stays open in its editor.

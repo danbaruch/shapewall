@@ -83,13 +83,19 @@ test('ACP: no injected MCP tools on shared boards; tokenless and proxied request
       }
       const result = await request(port, 'POST', '/api/agent/boards/sample/threads/board/messages', {
         headers,
-        body: { text: 'Inspect tools' },
+        body: { text: 'Inspect tools', ask: true },
       })
       assert.doesNotMatch(result.text, /owner-mcp/)
       if (options.shared) {
         // Shared with --allow-remote-agent: whoever reaches it may chat, with no owner tools.
+        // Shapewall's own tool server may be there (1.4.0): an open turn, held to what that tier may do.
         assert.equal(result.status, 200)
-        assert.match(result.text, /"text":"\[\]"/)
+        const done = JSON.parse(/^event: done\ndata: (.*)$/m.exec(result.text)[1]).message
+        const servers = JSON.parse(done.text).map((server) => server.name)
+        assert.ok(
+          servers.every((name) => name === 'shapewall_exec'),
+          servers.join(', '),
+        )
       } else {
         // A direct local board has an owner capability: without it (no token,
         // or the token through a proxy) the agent does not run at all.

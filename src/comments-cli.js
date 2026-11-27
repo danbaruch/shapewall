@@ -304,8 +304,34 @@ export function unmatchedNote({ selector, viewport, pageId, none, mapFile = null
   return `note: "${selector}" ${what}. ${where}${look}`
 }
 
+// Where a comment pinned by `selector` goes on a page's capture: { anchor,
+// pin }. In the middle of the element when the element map (`map`, or null)
+// has exactly one; otherwise the selector is kept and the pin stays near the
+// corner until the board finds the element (a note goes to `err`). `html` is
+// a function giving the capture's live HTML (or null), read only then. Used by
+// `comments add` and the add_comment MCP tools (local and --remote).
+export function selectorPin({ selector: raw, map, mapFile = null, html, pageId, viewport, err = () => {} }) {
+  const selector = String(raw).trim()
+  if (!ANCHOR_SELECTOR_RE.test(selector))
+    throw new Error(`--selector "${selector.slice(0, 80)}" is not one Shapewall can use. ${selectorHelp(pageId)}`)
+  const hits = map ? matchSelectorAll(map, selector, 2) : []
+  const middle = hits.length === 1 ? middleOf(map, hits[0], selector) : null
+  // The pin sits in the middle of the element, where the map has it.
+  if (middle) return middle
+  // No map, or the map does not have exactly one such element: the selector
+  // is kept, and the pin stays near the corner until the board finds it.
+  const source = html()
+  const found = source ? anchorText(source, selector) : ''
+  // None at all (the map says so): the anchor says it, so the board does not
+  // name an element from the selector's words.
+  const none = Boolean(map && hits.length === 0)
+  if (found === null || (map && hits.length !== 1)) err(unmatchedNote({ selector, viewport, pageId, none, mapFile }))
+  return { anchor: { selector, text: found || '', dx: 0.5, dy: 0.5, ...(none ? { unmatched: true } : {}) }, pin: DEFAULT_PIN }
+}
+
 // `comments add --page ID --body TEXT [--viewport NAME] [--selector CSS] [--author NAME]`
-export async function addComment(config, board, flags, out, err = () => {}) {
+// `agent`: the MCP add_comment tool is calling (the comment is an agent's).
+export async function addComment(config, board, flags, out, err = () => {}, { agent = false } = {}) {
   const pageId = typeof flags.page === 'string' ? flags.page.trim() : ''
   const body = typeof flags.body === 'string' ? flags.body : ''
   if (!pageId || !body.trim())
@@ -319,44 +345,27 @@ export async function addComment(config, board, flags, out, err = () => {}) {
   let anchor
   let pin = DEFAULT_PIN
   if (flags.selector !== undefined) {
-    const selector = String(flags.selector).trim()
-    if (!ANCHOR_SELECTOR_RE.test(selector))
-      throw new Error(`--selector "${selector.slice(0, 80)}" is not one Shapewall can use. ${selectorHelp(pageId)}`)
     const mapped = page ? latestElementMap(config, board, page.id, viewport) : null
-    const hits = mapped ? matchSelectorAll(mapped.map, selector, 2) : []
-    const middle = hits.length === 1 ? middleOf(mapped.map, hits[0], selector) : null
-    if (middle) {
-      // The pin sits in the middle of the element, where the map has it.
-      anchor = middle.anchor
-      pin = middle.pin
-    } else {
-      // No map, or the map does not have exactly one such element: the
-      // selector is kept, and the pin stays near the corner until the
-      // board finds the element.
-      let text = ''
-      const live = page ? resolveFile(config, board.id, 'captures', `${page.id}.${viewport}.html`) : null
-      const found = live ? anchorText(fs.readFileSync(live, 'utf8'), selector) : ''
-      // None at all (the map says so): the anchor says it, so the board
-      // does not name an element from the selector's words.
-      const none = Boolean(mapped && hits.length === 0)
-      if (found === null || (mapped && hits.length !== 1)) {
-        err(
-          unmatchedNote({
-            selector,
-            viewport,
-            pageId,
-            none,
-            mapFile: mapped ? path.relative(process.cwd(), mapped.file) || mapped.file : null,
-          }),
-        )
-      }
-      if (found) text = found
-      anchor = { selector, text, dx: 0.5, dy: 0.5, ...(none ? { unmatched: true } : {}) }
-    }
+    const live = page ? resolveFile(config, board.id, 'captures', `${page.id}.${viewport}.html`) : null
+    ;({ anchor, pin } = selectorPin({
+      selector: flags.selector,
+      map: mapped?.map || null,
+      mapFile: mapped ? path.relative(process.cwd(), mapped.file) || mapped.file : null,
+      html: () => (live ? fs.readFileSync(live, 'utf8') : null),
+      pageId,
+      viewport,
+      err,
+    }))
   }
   let comment
   try {
-    comment = await createComment(config, board, { pageId, viewport, ...pin, body, author: authorFlag(flags, { dir: config.dir }), anchor })
+    comment = await createComment(
+      config,
+      board,
+      { pageId, viewport, ...pin, body, author: authorFlag(flags, { dir: config.dir }), anchor },
+      // The person at this machine, unless an agent's run is calling.
+      { owner: !agent && !runByAgent(process.env), agent: agent === true || runByAgent(process.env) },
+    )
   } catch (error) {
     if (error instanceof CommentError && error.code === 'invalid_anchor') {
       throw new Error(`${error.message} ${selectorHelp(pageId)}`, { cause: error })

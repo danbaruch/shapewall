@@ -184,6 +184,16 @@ export const DOC_GROUPS = [
           'Exact commands to connect Claude Code, Codex, goose, Ollama and chat bots to a Shapewall board: MCP, watch, the board chat and the event stream.',
       },
       {
+        path: '/docs/plugins',
+        file: 'plugins',
+        repo: 'plugins',
+        nav: 'Claude Code and Codex plugin',
+        title: 'Claude Code and Codex plugin for Shapewall | Shapewall',
+        description:
+          'Experimental: the plugin for Claude Code and Codex adds the Shapewall MCP server and skills that take the next comment, open the board and show status.',
+        og: 'docs-agent-recipes',
+      },
+      {
         path: '/docs/chat',
         file: 'chat',
         repo: 'agents',
@@ -348,6 +358,16 @@ export const DOC_GROUPS = [
         title: 'Security model: how captured pages stay inert | Shapewall',
         description:
           'Why captured HTML can never run code: an allowlist sanitizer, a strict content security policy and a sandboxed frame. Plus the local server rules.',
+      },
+      {
+        path: '/docs/agent-capabilities',
+        file: 'agent-capabilities',
+        repo: 'agent-capabilities',
+        nav: 'What an agent can do',
+        title: 'What an agent can do: tiers, commands, browser | Shapewall',
+        description:
+          'One set of rules decides what a coding agent may do on each turn: solo, team and open tiers, named commands, the sandboxed shell, the throwaway browser.',
+        og: 'docs-agent-hardening',
       },
       {
         path: '/docs/agent-hardening',

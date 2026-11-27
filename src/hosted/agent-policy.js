@@ -4,6 +4,7 @@ import { extractMentions } from '../mentions.js'
 import { randomBytes } from 'node:crypto'
 import { sha256 } from './crypto.js'
 import { roleAtLeast } from './permissions.js'
+import { TIERS, combineNarrowing } from '../agent/capabilities.js'
 
 export class AgentPolicyError extends Error {
   constructor(statusCode, code, message) {
@@ -21,6 +22,14 @@ export const DEFAULT_POLICY = {
   // Chat turns with connected agents, per project and day.
   dailyTurns: 200,
   approveNonAdmin: true,
+  // What a connected agent's machine allows, narrowed for this project (or
+  // board): the highest trust tier a turn may reach ("solo", "team",
+  // "open"), and whether commands and the shell, and the browser, may be
+  // used at all. The machine applies the narrower of its own policy and
+  // these (src/agent/capabilities.js); nothing here can widen it.
+  maxTier: 'solo',
+  shell: true,
+  browser: true,
 }
 export const dispatchHash = (row) => sha256(JSON.stringify([row.body, row.anchor || null, row.page_id, row.viewport, row.x, row.y]))
 export function cleanPolicy(input) {
@@ -41,7 +50,11 @@ export function cleanPolicy(input) {
       throw new AgentPolicyError(400, 'invalid_policy', `Invalid ${key}.`)
     out[key] = [...new Set(input[key])]
   }
-  for (const key of ['onlyMentions', 'approveNonAdmin']) {
+  if (input.maxTier !== undefined) {
+    if (!TIERS.includes(input.maxTier)) throw new AgentPolicyError(400, 'invalid_policy', 'maxTier: solo, team or open.')
+    out.maxTier = input.maxTier
+  }
+  for (const key of ['onlyMentions', 'approveNonAdmin', 'shell', 'browser']) {
     if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new AgentPolicyError(400, 'invalid_policy', `Invalid ${key}.`)
     if (input[key] !== undefined) out[key] = input[key]
   }
@@ -75,6 +88,16 @@ export function agentPolicy(t, project, board = null) {
   const row = t.get('SELECT agent_policy FROM projects WHERE workspace_id = :ws AND id = :project', { project })
   const policy = cleanPolicy(JSON.parse(row?.agent_policy || '{}'))
   return board && policy.boards[board] ? { ...policy, ...policy.boards[board] } : policy
+}
+// What the server tells a connected agent's machine about this project (and
+// board): the narrower of the project's setting and the board's own, never
+// the board's alone (a board override cannot lift the project's ceiling).
+export const NARROWING_KEYS = ['maxTier', 'shell', 'browser']
+export function narrowingOf(t, project, board = null) {
+  const row = t.get('SELECT agent_policy FROM projects WHERE workspace_id = :ws AND id = :project', { project })
+  const policy = cleanPolicy(JSON.parse(row?.agent_policy || '{}'))
+  const pick = (value) => Object.fromEntries(NARROWING_KEYS.map((key) => [key, value[key] ?? DEFAULT_POLICY[key]]))
+  return combineNarrowing(pick(policy), ...(board && policy.boards[board] ? [pick({ ...policy, ...policy.boards[board] })] : []))
 }
 export function trustedMember(t, policy, user) {
   if (!user) return false

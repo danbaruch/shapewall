@@ -78,17 +78,16 @@ const TABS = [
     label: 'MCP',
     body: (
       <>
-        <Dim># Claude Code</Dim>
+        <Dim># Claude Code and Codex, in one step</Dim>
         {'\n'}
-        <Prompt /> claude mcp add shapewall -- shapewall mcp{'\n\n'}
-        <Dim># Codex</Dim>
-        {'\n'}
-        <Prompt /> codex mcp add shapewall -- shapewall mcp{'\n\n'}
+        <Prompt /> shapewall agent setup{'\n\n'}
         <Dim># tools the agent gets</Dim>
         {'\n'}
         <Key>list_comments</Key> <Key>get_comment</Key> <Key>reply_to_comment</Key>
         {'\n'}
         <Key>set_comment_status</Key> <Key>resolve_comment</Key> <Key>recapture_pages</Key>
+        {'\n'}
+        <Key>compare_captures</Key> <Key>board_link</Key>
       </>
     ),
   },

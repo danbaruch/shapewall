@@ -175,7 +175,7 @@ test('issue text: quoted comment, page, element, pin, screenshot link and crop, 
   assert.match(body, /\*\*Pin:\*\* 720, 595 px \(50% \/ 27\.05%\)/)
   assert.match(body, /x 270-1170, y 245-945/)
   assert.match(body, /not captured/)
-  assert.match(body, /\[comment #1\]\(http:\/\/board\.test\/review\/\?board=sample&filter=all&c=1\)/)
+  assert.match(body, /\[comment #1\]\(http:\/\/board\.test\/review\/\?board=sample&c=1&filter=all\)/)
   assert.match(body, /<!-- shapewall:sample\/1 -->/)
   assert.ok(!body.includes('\u2014'))
 })

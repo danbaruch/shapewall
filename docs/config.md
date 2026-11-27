@@ -8,50 +8,52 @@ A running `shapewall serve` watches the file and applies edits to `title`, the p
 each board (including a board's own `viewports`, `block`, `setup` and `auth`), `viewports`, `concurrency`, `capturePacing`, `timeouts`,
 `block`, `reducedMotion`, `keepVersions` and `checks` on the next refresh of the board (a `checks` edit applies to the next **Run checks**). An edit with a problem is reported
 in the serve log and the board keeps the last good config. `outputDir`, `boardUrl`, `auth`, `browser`, `liveHtml`, `agent`,
-`starterAgent`, `notifications` and `github` still need a restart (the log says so).
+`starterAgent`, `commands`, `notifications` and `github` still need a restart (the log says so).
 
 `ci` is in neither list, so an edit to it is not picked up and the log says nothing about it; `ci` is read by `shapewall ci` in its
 own run, so a running board never uses it anyway.
 
 A key Shapewall does not use (a typo like `"viewport"` for `"viewports"`, or a page key such as `waitFor` set at the top level) is
 ignored, and `shapewall doctor`, `capture` and `serve` warn about it with the key it most likely meant; the config still loads.
-Unknown keys are refused outright only inside `capturePacing`, `checks`, `setup`, `ci`, an action's options and a page's `seo`,
+Unknown keys are refused outright only inside `capturePacing`, `checks`, `setup`, `ci`, a named command, `agent.browser`, an action's options and a page's `seo`,
 plus the secret, command and sandbox keys that `agent`, `github`, notification channels and `starterAgent` refuse. A required key under the wrong case (`"baseURL"`) is an error that
 says to rename it. `$schema` is allowed anywhere.
 
 ## Top level
 
-| Key             | Type                  | Default                             | Notes                                                                                                                                                         |
-| --------------- | --------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `title`         | string                | `"Shapewall"`                       | The config's title, on the board and in exports and hosted pushes. In a single-board config the board takes it too; a board with none is titled by its id.    |
-| `id`            | string                | `"site"`                            | Board id for single-board configs. Lowercase letters, digits, dashes.                                                                                         |
-| `baseUrl`       | http(s) URL           | required                            | Where pages are loaded from. May include a base path: `http://localhost:3000/app`.                                                                            |
-| `publicUrl`     | http(s) URL           | none                                | Used for "Open page" links and to rewrite links in live HTML.                                                                                                 |
-| `outputDir`     | path                  | `.shapewall`                        | Captures, comments, variants and run state.                                                                                                                   |
-| `concurrency`   | 1-8                   | `2`                                 | Pages captured in parallel. Each one is a browser context.                                                                                                    |
-| `viewports`     | object                | desktop 1440x2200, phone 390x1800   | Keyed by name: `desktop`, `tablet`, `phone` or your own (`phone-landscape`). Width 240-3840, height 240-8000. See [Viewports](#viewports).                    |
-| `timeouts`      | `{ page, settle }` ms | `{ "page": 45000, "settle": 8000 }` | `page` bounds navigation, `waitFor` and actions (a page's own `timeout` replaces it); `settle` bounds the network-idle wait.                                  |
-| `block`         | string[]              | none                                | Requests to abort during capture: URL patterns, or `"analytics"`. Boards add their own. See [Blocking requests](#blocking-requests).                          |
-| `reducedMotion` | string or boolean     | `"reduce"`                          | `prefers-reduced-motion` in the capture browser. `"no-preference"` (or `false`) captures motion as players see it. A board may set its own.                   |
-| `localStorage`  | object                | none                                | Keys and values set before every page's own scripts run, on its origin. Boards and pages add their own. See [localStorage seeds](#localstorage-seeds).        |
-| `setup`         | Action[] or object    | none                                | Single-board configs: actions run once per viewport, whose state the pages reuse. See [Setup](#setup-shared-state).                                           |
-| `liveHtml`      | boolean               | `true`                              | `false` captures screenshots only.                                                                                                                            |
-| `keepVersions`  | 0-50                  | `5`                                 | Previous captures kept per page and viewport, for before/after. `0` keeps none. (Before 1.0: `versions`, still read, with a warning.)                         |
-| `boardUrl`      | http(s) URL           | the running `serve` address         | Where people open the board, for links in notifications and GitHub issues. Without it, links use a running `shapewall serve` for this config, else port 4600. |
-| `environments`  | Environment[]         | none                                | The same pages at other base URLs, for compare mode. 1 to 8 of them. See below.                                                                               |
-| `journeys`      | Journey[]             | none                                | Named page sequences, which may fork. See [Journeys and links](journeys.md).                                                                                  |
-| `auth`          | object                | none                                | See below.                                                                                                                                                    |
-| `browser`       | object                | Playwright's Chromium               | `{ "channel": "chrome" }` or `{ "executablePath": "/path/to/chrome" }` (absolute, outside the project).                                                       |
-| `groups`        | string[]              | order of first use                  | Group order on the board.                                                                                                                                     |
-| `pages`         | Page[]                | required (or `boards`)              | See below.                                                                                                                                                    |
-| `boards`        | Board[]               | none                                | Several boards in one file, instead of top-level `pages`.                                                                                                     |
-| `notifications` | object                | off                                 | Webhook, Slack, Discord, Telegram and email for comment events. See [Notifications](notifications.md).                                                        |
-| `github`        | object                | none                                | GitHub connect: `repo`, `boardUrl`, `labels`. See [GitHub](#github) below.                                                                                    |
-| `agent`         | object                | none                                | The board chat's model endpoint. See [Agent](#agent) below.                                                                                                   |
-| `starterAgent`  | object                | none                                | The sandboxed starter agent: who may dispatch work, tests, budgets. See [Sandboxed starter agent](starter-agent.md).                                          |
-| `sitemap`       | URL, file or object   | none                                | Default source for `shapewall sitemap`. See [Sitemap import](#sitemap-import).                                                                                |
-| `checks`        | object                | none                                | Defaults for page checks. Only `seo` and `budgets` are accepted. See [Checks SEO](#checks-seo) and [Checks budgets](#checks-budgets) below.                   |
-| `ci`            | object                | none                                | Capture on pull requests: threshold, pages, ignore selectors, build and serve commands. See [CI](#ci) below.                                                  |
+| Key             | Type                  | Default                             | Notes                                                                                                                                                                                                                                                                                                                                                       |
+| --------------- | --------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `title`         | string                | `"Shapewall"`                       | The config's title, on the board and in exports and hosted pushes. In a single-board config the board takes it too; a board with none is titled by its id.                                                                                                                                                                                                  |
+| `id`            | string                | `"site"`                            | Board id for single-board configs. Lowercase letters, digits, dashes.                                                                                                                                                                                                                                                                                       |
+| `baseUrl`       | http(s) URL           | required                            | Where pages are loaded from. May include a base path: `http://localhost:3000/app`.                                                                                                                                                                                                                                                                          |
+| `publicUrl`     | http(s) URL           | none                                | Used for "Open page" links and to rewrite links in live HTML.                                                                                                                                                                                                                                                                                               |
+| `outputDir`     | path                  | `.shapewall`                        | Captures, comments, variants and run state.                                                                                                                                                                                                                                                                                                                 |
+| `concurrency`   | 1-8                   | `2`                                 | Pages captured in parallel. Each one is a browser context.                                                                                                                                                                                                                                                                                                  |
+| `viewports`     | object                | desktop 1440x2200, phone 390x1800   | Keyed by name: `desktop`, `tablet`, `phone` or your own (`phone-landscape`). Width 240-3840, height 240-8000. See [Viewports](#viewports).                                                                                                                                                                                                                  |
+| `timeouts`      | `{ page, settle }` ms | `{ "page": 45000, "settle": 8000 }` | `page` bounds navigation, `waitFor` and actions (a page's own `timeout` replaces it); `settle` bounds the network-idle wait.                                                                                                                                                                                                                                |
+| `block`         | string[]              | none                                | Requests to abort during capture: URL patterns, or `"analytics"`. Boards add their own. See [Blocking requests](#blocking-requests).                                                                                                                                                                                                                        |
+| `reducedMotion` | string or boolean     | `"reduce"`                          | `prefers-reduced-motion` in the capture browser. `"no-preference"` (or `false`) captures motion as players see it. A board may set its own.                                                                                                                                                                                                                 |
+| `localStorage`  | object                | none                                | Keys and values set before every page's own scripts run, on its origin. Boards and pages add their own. See [localStorage seeds](#localstorage-seeds).                                                                                                                                                                                                      |
+| `setup`         | Action[] or object    | none                                | Single-board configs: actions run once per viewport, whose state the pages reuse. See [Setup](#setup-shared-state).                                                                                                                                                                                                                                         |
+| `liveHtml`      | boolean               | `true`                              | `false` captures screenshots only.                                                                                                                                                                                                                                                                                                                          |
+| `agentDocs`     | boolean               | not set                             | Not set: the first `serve` or `capture` creates `AGENTS.md` with the Shapewall section in a project that has neither `AGENTS.md` nor `CLAUDE.md`. `false` (written by `init --no-agent-docs` and `agent docs --remove`) or `true`: serve and capture leave the files alone. See [Your agent finds the board](agent-workflow.md#your-agent-finds-the-board). |
+| `keepVersions`  | 0-50                  | `5`                                 | Previous captures kept per page and viewport, for before/after. `0` keeps none. (Before 1.0: `versions`, still read, with a warning.)                                                                                                                                                                                                                       |
+| `boardUrl`      | http(s) URL           | the running `serve` address         | Where people open the board, for links in notifications and GitHub issues. Without it, links use a running `shapewall serve` for this config, else port 4600.                                                                                                                                                                                               |
+| `environments`  | Environment[]         | none                                | The same pages at other base URLs, for compare mode. 1 to 8 of them. See below.                                                                                                                                                                                                                                                                             |
+| `journeys`      | Journey[]             | none                                | Named page sequences, which may fork. See [Journeys and links](journeys.md).                                                                                                                                                                                                                                                                                |
+| `auth`          | object                | none                                | See below.                                                                                                                                                                                                                                                                                                                                                  |
+| `browser`       | object                | Playwright's Chromium               | `{ "channel": "chrome" }` or `{ "executablePath": "/path/to/chrome" }` (absolute, outside the project).                                                                                                                                                                                                                                                     |
+| `groups`        | string[]              | order of first use                  | Group order on the board.                                                                                                                                                                                                                                                                                                                                   |
+| `pages`         | Page[]                | required (or `boards`)              | See below.                                                                                                                                                                                                                                                                                                                                                  |
+| `boards`        | Board[]               | none                                | Several boards in one file, instead of top-level `pages`.                                                                                                                                                                                                                                                                                                   |
+| `notifications` | object                | off                                 | Webhook, Slack, Discord, Telegram and email for comment events. See [Notifications](notifications.md).                                                                                                                                                                                                                                                      |
+| `github`        | object                | none                                | GitHub connect: `repo`, `boardUrl`, `labels`. See [GitHub](#github) below.                                                                                                                                                                                                                                                                                  |
+| `agent`         | object                | none                                | The board chat's model endpoint. See [Agent](#agent) below.                                                                                                                                                                                                                                                                                                 |
+| `starterAgent`  | object                | none                                | The sandboxed starter agent: who may dispatch work, tests, budgets. See [Sandboxed starter agent](starter-agent.md).                                                                                                                                                                                                                                        |
+| `commands`      | object                | none                                | Named commands (`test`, `build`, `dev`, `lint`, ...) an agent may run through Shapewall. See [Commands](#commands) below.                                                                                                                                                                                                                                   |
+| `sitemap`       | URL, file or object   | none                                | Default source for `shapewall sitemap`. See [Sitemap import](#sitemap-import).                                                                                                                                                                                                                                                                              |
+| `checks`        | object                | none                                | Defaults for page checks. Only `seo` and `budgets` are accepted. See [Checks SEO](#checks-seo) and [Checks budgets](#checks-budgets) below.                                                                                                                                                                                                                 |
+| `ci`            | object                | none                                | Capture on pull requests: threshold, pages, ignore selectors, build and serve commands. See [CI](#ci) below.                                                                                                                                                                                                                                                |
 
 Environment overrides: `SHAPEWALL_BROWSER_CHANNEL`, `SHAPEWALL_BROWSER_PATH`.
 
@@ -469,6 +471,61 @@ How fixes run, both off by default and also on the Agents page of the Workspace 
 `branchMode` (`true` runs an agent CLI's fixes on a branch of their own) with `branchPrefix` (default `"shapewall/"`), see
 [Work on a branch](agents.md#work-on-a-branch); and `batchFixes` (`{ "enabled": true, "max": 5 }`, `max` from 1 to 20), see
 [Fix several comments at once](agents.md#fix-several-comments-at-once).
+
+What an agent's tools may reach (1.4.0, see [what an agent can do](agent-capabilities.md)):
+
+- `browser.allow`: origins the agent's throwaway browser may load besides the app's own addresses (every `baseUrl` and `publicUrl`
+  of the config, its boards and environments). Up to 40 exact http(s) origins, such as `"https://staging.example.com"`: no path, no
+  user or password. The machine has the last word: its own `browser` setting switches the browser off whatever the config says, and
+  these extra origins count only on solo turns of a machine without a login for the browser (`browserAuth` or `browserProfile`).
+  On every other turn an origin here counts only if the machine's own `browserAllow` names it too, and so does an address on
+  your machine (loopback, `localhost`, a local name such as `app.test`) that a `baseUrl` or `publicUrl` names. The config is read
+  from your
+  checkout, never from the fix copy an agent writes in.
+- `fixIn`: `"copy"` (the default, every fix in a fix copy of its own) or `"checkout"`, which lets a local board's owner keep solo
+  fixes in this checkout. Every other tier and every hosted path still uses a fix copy.
+- `localSession`: `"restricted"` (the default since 1.4.0: a local board's Claude Code session gets read and edit tools plus
+  Shapewall's own tools for commands, the sandboxed shell and the browser, and never its own shell or your `~/.claude` settings)
+  or `"own"`, the 1.2.0 session with the agent's own full tool set. `"own"` is deprecated and goes in 2.0.
+
+```json
+{ "agent": { "browser": { "allow": ["https://staging.example.com"] }, "fixIn": "copy" } }
+```
+
+## Commands
+
+```json
+{
+  "commands": {
+    "test": { "run": "npm test", "inputs": ["package.json", "package-lock.json", "test/**"] },
+    "build": "npm run build",
+    "dev": { "run": "npm run dev -- --port $PORT", "ready": "http://127.0.0.1:$PORT" },
+    "lint": { "run": "npm run lint", "mutating": false }
+  }
+}
+```
+
+The commands an agent may run by name, through Shapewall (never through its own shell). Up to 20, each named with lowercase letters,
+digits and dashes. A string is short for `{ "run": "..." }`. Each takes:
+
+| Key        | Type     | Default                                    | Notes                                                                                                                               |
+| ---------- | -------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `run`      | string   | required                                   | One command line, run without a shell: no pipes, `;`, `&`, redirects or backticks, and no `$` except `$PORT`. Up to 500 characters. |
+| `inputs`   | string[] | manifests, lockfiles, configs, named files | More project-relative paths or globs an approval covers, on top of the manifests, lockfiles and `.npmrc` (always). Up to 50.        |
+| `mutating` | boolean  | `true`                                     | `false`: the command only reads (a linter, a type check). Hosted chat runs only these, and only on its owner's turns.               |
+| `args`     | boolean  | `false`                                    | `true`: the agent may add arguments to it.                                                                                          |
+| `ready`    | URL      | none                                       | For a dev server: the loopback URL that answers once it is up. `$PORT` is the free port Shapewall picks. Bind `127.0.0.1`.          |
+
+`$PORT` goes bare, as its own word or part of one (`--port $PORT`, `--port=$PORT`): quoted or escaped it is refused, as it would
+read as text to a person and as the port to Shapewall, and it is never the program itself. `"args": true` lets the agent add any
+arguments: for `npx`, `jest` and similar runners that is any script or package, and the card for it says so. On Windows a line
+runs without a shell too: `node`, `npm` and `npx` run as Node plus their own script, and a `.cmd` or `.bat` program is refused.
+
+Whether a command runs at once or waits for a card on the board depends on who wrote the turn and what the machine running the agent
+allows, not on this file: see [what each turn may do](agent-hardening.md#what-each-turn-may-do) and
+[commands through Shapewall](agent-hardening.md#commands-through-shapewall). The lines are always read from your checkout, never
+from the copy an agent edits. `starterAgent.testCommand` still
+works; `commands.test` wins when both are set. A change needs a restart of `serve`.
 
 ## Auth
 

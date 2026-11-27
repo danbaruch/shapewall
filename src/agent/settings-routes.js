@@ -671,6 +671,9 @@ export function settingsRoutes({
         vision: current.vision !== false,
         keyHosts: current.keyHosts,
         acpCommand: current.acp?.argv ? formatCommand(current.acp.argv) : null,
+        // Which session Claude Code gets on this board (agent.localSession in
+        // shapewall.config.json): "restricted" (the default) or "own".
+        localSession: repo().localSession === 'own' ? 'own' : 'restricted',
         refusedEnv: current.acp?.refusedEnv || [],
         sources: current.sources || {},
       },
@@ -764,7 +767,13 @@ export function settingsRoutes({
         .filter((key) => !Object.hasOwn(input, key) && savedEntry[key] !== undefined)
         .map((key) => [key, savedEntry[key]]),
     )
-    const { entry, problems } = validateUserEntry({ ...input, ...(preserved ? { profiles: preserved } : {}), ...branch })
+    // The agent config folder is the machine's to name, on its command line
+    // (`shapewall agent set agent-config DIR`): a save on the board keeps
+    // what is saved and never sets it.
+    const { agentConfig: ignored, ...given } = input
+    void ignored
+    const kept = savedEntry.agentConfig !== undefined ? { agentConfig: savedEntry.agentConfig } : {}
+    const { entry, problems } = validateUserEntry({ ...given, ...(preserved ? { profiles: preserved } : {}), ...branch, ...kept })
     if (!entry) return fail(res, 400, 'invalid_settings', problems.join('; '))
     // The form's name field names the agent it saves. When that is a
     // connected agent (the default command is one of the profiles), the name

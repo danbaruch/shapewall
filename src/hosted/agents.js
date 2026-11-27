@@ -37,11 +37,31 @@
 
 import { logoForAgent } from '../agent/agent-logos.js'
 import { cleanAgentName, isAgentTint, isBuiltInIcon } from '../agent/identity.js'
-import { agentPolicy, trustedMember } from './agent-policy.js'
+import { handleFor as mentionHandle } from '../mentions.js'
+import { agentHandles } from '../agent/triggers.js'
+import { cleanCapabilitySummary, LINE_IDS, SUMMARY_PATHS } from '../agent/capability-render.js'
+import { compactCard, summaryCard, viewerTier } from '../agent/capability-views.js'
+import { agentPolicy, narrowingOf, trustedMember } from './agent-policy.js'
 import { newId } from './crypto.js'
 import { RUN_DURATION } from './usage-shape.js'
 import { CLAIM_HEARTBEAT } from './claim-sweep.js'
 import { HttpError } from './http.js'
+
+// What differs between two capability summaries: "team", or "chat.solo.shell"
+// for each line state that changed (every line of a side that is missing).
+export function summaryChanges(before, after) {
+  const out = []
+  if ((before?.team ?? null) !== (after?.team ?? null)) out.push('team')
+  if ((before?.browserNoSandbox === true) !== (after?.browserNoSandbox === true)) out.push('browserNoSandbox')
+  for (const key of Object.keys(SUMMARY_PATHS))
+    for (const tier of ['solo', 'team', 'open'])
+      for (const id of LINE_IDS) {
+        const was = before?.[key]?.[tier]?.[id] ?? null
+        const now = after?.[key]?.[tier]?.[id] ?? null
+        if (was !== now) out.push([key, tier, id].join('.'))
+      }
+  return out
+}
 import {
   AGENT_AUDIENCES,
   APPROVAL_ROLES,
@@ -104,7 +124,14 @@ const parseCaps = (text) => {
 // `links`: the open links of connected agents (src/hosted/agent-link.js):
 // { of(workspaceId, agentId) -> { connectedAt, streams } | null,
 //   turns(workspaceId, agentId) -> how many chat turns it is answering }.
-export function createAgentStore(t, { now = () => new Date(), presence = null, handleFor = () => null, links = null } = {}) {
+// An agent nobody has heard from in this long, made from a claim token
+// before agents had rows (an "inherited" watcher), is not listed as an
+// agent any more: it is hidden, never deleted (see dormant below).
+export const DORMANT_DAYS = 90
+const DORMANT_MS = DORMANT_DAYS * 24 * 60 * 60 * 1000
+
+// `origin`: this server's address, for the commands the console shows.
+export function createAgentStore(t, { now = () => new Date(), presence = null, handleFor = () => null, links = null, origin = null } = {}) {
   const iso = () => now().toISOString()
   // Reads repeat within one request (a list of comments asks per comment);
   // every write starts over.
@@ -120,17 +147,19 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
   // ---- Rows ----
 
   // A token with the claim scope that has no agent row yet was made while an
-  // older build ran on this database: it becomes an agent the first time it
-  // is looked for, with the audience such tokens had (the agent policy's).
-  // `audit(action, target, detail)`: hears `agent_first_seen` for each one,
-  // whoever's request found it (a token's call, the board, the console).
+  // older build ran on this database: it becomes an agent when it is used
+  // (its own call to the token API, `tokenId`), with the audience such
+  // tokens had (the agent policy's). Lists (the board, the console) no
+  // longer make agents of tokens nobody uses: those show on the Tokens page
+  // as having agent access, with "Make this an agent" (makeAgent).
+  // `audit(action, target, detail)`: hears `agent_first_seen` for each one.
   // Two requests may find the same token at once: the insert gives way to
   // the row that is already there.
-  function ensure(projectId, audit = null) {
+  function ensure(projectId, audit = null, { tokenId = null } = {}) {
     const missing = t.all(
       `SELECT k.id, k.name, k.created_by, k.created_at, k.last_used_at FROM api_tokens k WHERE k.workspace_id = :ws AND k.project_id = :project
-       AND k.scopes LIKE '%"claim"%' AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.token_id = k.id)`,
-      { project: projectId },
+       AND k.scopes LIKE '%"claim"%' AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.token_id = k.id)${tokenId ? ' AND k.id = :token' : ''}`,
+      { project: projectId, ...(tokenId ? { token: tokenId } : {}) },
     )
     let made = 0
     for (const token of missing) {
@@ -224,12 +253,13 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     return row
   }
   // The agent of a token, or null. A claim-scoped token from an older build
-  // becomes an agent here, on first sight (`audit` hears of it, see ensure).
-  function forToken(projectId, tokenId, { audit = null } = {}) {
+  // becomes an agent here, on first sight (`audit` hears of it, see ensure),
+  // unless `create: false` (looking it up only, as revoking a token does).
+  function forToken(projectId, tokenId, { audit = null, create = true } = {}) {
     const find = () => rows(projectId).find((row) => row.token_id === tokenId) || null
     const found = find()
-    if (found) return found
-    ensure(projectId, audit)
+    if (found || !create) return found
+    ensure(projectId, audit, { tokenId })
     return find()
   }
   // Which agent a token is, for the face on a reply it wrote (revoked or not).
@@ -303,10 +333,161 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     const busy = held(row.project_id).get(row.token_id)?.length || (links?.turns(t.workspaceId, row.id) || 0) > 0
     return { state: busy ? 'busy' : 'online', lastSeenAt }
   }
+  // ---- Hidden agents (inherited watchers nobody uses) ----
+
+  // When each token of the project last took a comment: token id -> ISO time.
+  const lastClaims = (projectId) =>
+    once(`claims:${projectId}`, () => {
+      const out = new Map()
+      for (const row of t.all(
+        'SELECT token_id, MAX(created_at) AS at FROM agent_claims WHERE workspace_id = :ws AND project_id = :project GROUP BY token_id',
+        { project: projectId },
+      ))
+        out.set(row.token_id, row.at)
+      return out
+    })
+  // An agent row that is not listed as an agent: a watcher made from a
+  // claim token of an older build (ensure; never one a login or the Tokens
+  // page made, never a connected agent) that nothing was heard from, and
+  // that took nothing, in DORMANT_DAYS; or one whose token no longer has
+  // the claim scope (removeClaim). It is hidden, not deleted: its row,
+  // its token and its replies stay, a call from its token lists it again
+  // (that is activity), and makeAgent lists it for good. Never the
+  // project's default agent, nor one that holds or is sent a comment.
+  function dormant(row) {
+    if (linked(row)) return false
+    if (!parseList(row.token_scopes).includes('claim')) return true
+    if (row.kind !== 'watcher' || !row.audience_inherited) return false
+    if (defaultId(row.project_id) === row.id) return false
+    if (held(row.project_id).get(row.token_id)?.length || waiting(row.project_id).get(row.id)?.length) return false
+    const last = latestOf(row.last_seen_at, row.token_last_used_at, lastClaims(row.project_id).get(row.token_id))
+    return !last || now().getTime() - Date.parse(last) > DORMANT_MS
+  }
+  // Writes `agent_hidden` once each time an agent stops being listed: the
+  // audit log says when, and why. An agent that was hidden, was used again
+  // (listed) and then went quiet once more is said again: the last
+  // `agent_hidden` counts only while it is newer than the agent's last
+  // activity (Q7 F8).
+  function noteHidden(projectId, audit) {
+    if (!audit) return
+    for (const row of rows(projectId).filter(dormant)) {
+      const said = t.get("SELECT MAX(at) AS at FROM audit_log WHERE workspace_id = :ws AND action = 'agent_hidden' AND target = :id", {
+        id: row.id,
+      })?.at
+      // A token without the claim scope stays hidden whatever it does: said once.
+      const canClaim = parseList(row.token_scopes).includes('claim')
+      const last = latestOf(row.last_seen_at, row.token_last_used_at, lastClaims(row.project_id).get(row.token_id))
+      if (said && (!canClaim || !last || Date.parse(said) >= Date.parse(last))) continue
+      audit('agent_hidden', row.id, {
+        project: row.project_id,
+        token: row.token_id,
+        name: row.name,
+        reason: canClaim ? 'inactive' : 'no_claim',
+        days: DORMANT_DAYS,
+        by: 'server',
+      })
+    }
+  }
+  const listed = (projectId) => rows(projectId).filter((row) => !dormant(row))
+
+  // The project's tokens that may take work (the claim scope) but are not
+  // listed as agents: never made one (from an older build, not used since),
+  // or hidden. The Tokens page lists them as "Has agent access (claim)".
+  function claimTokens(projectId) {
+    const hidden = new Map(
+      rows(projectId)
+        .filter(dormant)
+        .map((row) => [row.token_id, row]),
+    )
+    return t
+      .all(
+        `SELECT k.id, k.name, k.prefix, k.scopes, k.created_at, k.last_used_at FROM api_tokens k WHERE k.workspace_id = :ws
+         AND k.project_id = :project AND k.revoked_at IS NULL AND k.scopes LIKE '%"claim"%' ORDER BY k.created_at DESC`,
+        { project: projectId },
+      )
+      .filter((token) => parseList(token.scopes).includes('claim'))
+      .filter((token) => hidden.has(token.id) || !rows(projectId).some((row) => row.token_id === token.id))
+      .map((token) => ({
+        id: token.id,
+        name: token.name,
+        prefix: token.prefix,
+        createdAt: token.created_at,
+        lastUsedAt: latestOf(token.last_used_at, hidden.get(token.id)?.last_seen_at, lastClaims(projectId).get(token.id)),
+        agentId: hidden.get(token.id)?.id || null,
+        hidden: hidden.has(token.id),
+      }))
+  }
+  const claimTokenOf = (projectId, tokenId) => {
+    const token = claimTokens(projectId).find((item) => item.id === tokenId)
+    if (!token) throw new HttpError(404, 'unknown_token', 'No such token with agent access that is not an agent already.')
+    return token
+  }
+  // "Make this an agent": a hidden one is listed again for good; a token
+  // without a row gets one, for the person who made the token only (as a
+  // new agent starts). Nothing it may do changes: the token could already
+  // take work.
+  function makeAgent(actor, projectId, tokenId) {
+    mayManage(actor)
+    const token = claimTokenOf(projectId, String(tokenId || ''))
+    let id = token.agentId
+    if (id) t.run('UPDATE agents SET audience_inherited = 0 WHERE workspace_id = :ws AND id = :id', { id })
+    else {
+      const owner = t.get('SELECT created_by FROM api_tokens WHERE workspace_id = :ws AND id = :id', { id: token.id })?.created_by
+      id = insert({ projectId, tokenId: token.id, userId: owner || null })
+    }
+    forget()
+    const row = get(projectId, id)
+    actor.audit('agent_made', id, {
+      project: projectId,
+      token: token.id,
+      name: token.name,
+      audience: row?.audience || 'owner',
+      was: token.hidden ? 'hidden' : 'token',
+    })
+    return consoleView(row)
+  }
+  // "Remove claim access": the token keeps its other scopes and stops
+  // taking work. Not for a connected agent's token (its "agent" scope needs
+  // claim); revoke that one instead.
+  function removeClaim(actor, projectId, tokenId) {
+    mayManage(actor)
+    const token = claimTokenOf(projectId, String(tokenId || ''))
+    const row = t.get('SELECT scopes FROM api_tokens WHERE workspace_id = :ws AND project_id = :project AND id = :id', {
+      project: projectId,
+      id: token.id,
+    })
+    const scopes = parseList(row?.scopes)
+    if (scopes.includes('agent'))
+      throw new HttpError(409, 'agent_token', "A connected agent's token needs the claim scope. Revoke the agent instead.")
+    const next = scopes.filter((scope) => scope !== 'claim')
+    t.run('UPDATE api_tokens SET scopes = :scopes WHERE workspace_id = :ws AND project_id = :project AND id = :id', {
+      scopes: JSON.stringify(next),
+      project: projectId,
+      id: token.id,
+    })
+    forget()
+    actor.audit('token_claim_removed', token.id, { project: projectId, name: token.name, before: scopes, after: next })
+    return { ok: true, scopes: next }
+  }
+
   // The link opened and the agent said what it is (POST /api/v1/agent/hello):
   // kind, machine and capabilities, validated by the caller. Display, and
   // what the machine's own policy narrows; never a widening.
   function hello(row, { kind, machine, capabilities }) {
+    // An older hello of the same process (`link`, counted by `seq`) that
+    // arrives after a newer one: it is heard, and changes nothing it said.
+    const was = capsOf(row)
+    if (
+      typeof capabilities?.link === 'string' &&
+      was.link === capabilities.link &&
+      Number.isSafeInteger(was.seq) &&
+      Number.isSafeInteger(capabilities.seq) &&
+      capabilities.seq < was.seq
+    ) {
+      t.run('UPDATE agents SET last_seen_at = :at WHERE workspace_id = :ws AND id = :id', { at: iso(), id: row.id })
+      forget()
+      return get(row.project_id, row.id)
+    }
     const label = cleanMachine(machine)
     t.run(
       'UPDATE agents SET kind = :kind, machine = :machine, capabilities = :caps, last_seen_at = :at WHERE workspace_id = :ws AND id = :id',
@@ -332,7 +513,16 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
       approvals !== 'none' && Array.isArray(policy.auto)
         ? policy.auto.filter((kind) => kind === 'edits' || (kind === 'commands' && commands.length > 0))
         : []
-    return { audience: policy.audience === 'owner' ? 'owner' : 'server', approvals, commands, auto }
+    // When it answers in a shared thread: "thread" honors a thread set to
+    // answer every message; "mention" (also an older machine that did not
+    // say) answers an @mention or Send to agent only (src/agent/triggers.js).
+    return {
+      audience: policy.audience === 'owner' ? 'owner' : 'server',
+      approvals,
+      commands,
+      auto,
+      respond: policy.respond === 'thread' ? 'thread' : 'mention',
+    }
   }
   // On a machine that takes approvals from the person who connected it
   // alone, "allow without asking" counts only when that same person set it:
@@ -402,6 +592,20 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         after: shape(now),
         by: 'machine',
       })
+    // What each tier may do, as the machine said it (line states per path
+    // and tier, and its team setting): a change is written down, line by line.
+    const summaryOf = (row) => (linked(row) ? cleanCapabilitySummary(capsOf(row).summary) : null)
+    const wasSummary = summaryOf(before)
+    const nowSummary = summaryOf(after)
+    if (JSON.stringify(wasSummary) !== JSON.stringify(nowSummary))
+      audit?.('agent_capabilities_changed', after.id, {
+        project: after.project_id,
+        name: after.name,
+        changed: summaryChanges(wasSummary, nowSummary),
+        before: wasSummary,
+        after: nowSummary,
+        by: 'machine',
+      })
     if (after.approval_rule === 'auto' && (!ruleStands(after) || !approvalAutoAvailable(approvalOf(after)))) {
       t.run("UPDATE agents SET approval_rule = 'ask' WHERE workspace_id = :ws AND id = :id", { id: after.id })
       audit?.('agent_approval_rule_changed', after.id, {
@@ -440,6 +644,29 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         before: new Date(at.getTime() - CLAIM_HEARTBEAT.touchEveryMs).toISOString(),
       },
     )
+  }
+
+  // An agent's name makes the handle people @mention it by
+  // (src/agent/triggers.js agentHandles): never "agent", which every agent
+  // answers to, nor a member's handle, which would wake it when they meant
+  // the person. A problem to show, or null.
+  function nameProblem(name) {
+    const handle = mentionHandle(name)
+    if (!handle) return null
+    if (handle === 'agent') return 'name: every agent answers to @agent already. Give it a name of its own'
+    for (const person of people().values())
+      if (String(person.handle || '').toLowerCase() === handle)
+        return `name: @${handle} is a member of this workspace, so a mention of them would wake the agent. Pick another name`
+    return null
+  }
+
+  // The handles that wake this agent in a message: agentHandles, less any
+  // that is a member's handle. A mention resolves to a person first, so a
+  // member who joined later with an agent's handle (or took it as theirs)
+  // is mentioned, and the agent is not woken by it.
+  function triggerHandles(agent) {
+    const members = new Set([...people().values()].map((person) => String(person.handle || '').toLowerCase()).filter(Boolean))
+    return agentHandles(agent).filter((handle) => !members.has(handle))
   }
 
   // ---- Audience ----
@@ -552,7 +779,15 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         images: caps.images === true,
       },
       policy: machinePolicy(row),
+      // What each trust tier may do there, as its machine last said (line
+      // states, src/agent/capability-render.js). null: an older machine.
+      summary: cleanCapabilitySummary(caps.summary),
+      // The "What it can do" card (src/agent/capability-views.js): those
+      // states, with the project's own narrowing over them.
+      card: summaryCard(cleanCapabilitySummary(caps.summary), { narrowing: narrowingOf(t, row.project_id), remote: origin }),
       maxTurns: Number.isInteger(caps.maxTurns) ? caps.maxTurns : null,
+      // The instruction files its sessions read, as its last hello said (names and hashes, no content).
+      instructions: presence?.instructionsOf(t.workspaceId, row.id) || [],
     }
   }
   // Edits from the board, as the board says it about this agent: whether
@@ -887,8 +1122,31 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
       reason: check.reason,
       // A connected agent: whether it chats, and whether this person may
       // chat with it right now (with the reason when not).
-      link: linkView(row),
+      link: (() => {
+        // Its instruction files only for someone who may use it, and then
+        // names only: sizes and hashes stay in the console.
+        const link = linkView(row)
+        if (!link.connected) return link
+        if (check.ok || chatCheck(row, { ...viewer, boardId }).ok)
+          return { ...link, instructions: (link.instructions || []).map((file) => ({ scope: file.scope, path: file.path })) }
+        const rest = { ...link }
+        delete rest.instructions
+        return rest
+      })(),
       edits: editsView(row, viewer, { boardId }),
+      // What it can do on a fix this person alone asks for, compact (the board's agent panel).
+      can: (() => {
+        const summary = linked(row) ? cleanCapabilitySummary(capsOf(row).summary) : null
+        if (!summary) return null
+        const narrowing = narrowingOf(t, row.project_id, boardId)
+        const tier = viewerTier(summary, {
+          audience: row.audience,
+          machineAudience: machinePolicy(row).audience,
+          owner: Boolean(viewer.userId) && viewer.userId === row.created_by,
+          narrowing,
+        })
+        return compactCard(summaryCard(summary, { narrowing }), { path: 'fix', tier })
+      })(),
       chat: (() => {
         const chat = chatCheck(row, { ...viewer, boardId })
         return { ok: chat.ok, code: chat.code, reason: chat.reason }
@@ -901,9 +1159,9 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
   }
   // The agents of a project for its board: the ones that can take work.
   function boardList(projectId, viewer, { boardId = null, audit = null } = {}) {
-    ensure(projectId, audit)
     releaseGone(projectId, audit)
-    const agents = rows(projectId)
+    noteHidden(projectId, audit)
+    const agents = listed(projectId)
       .filter((row) => live(row))
       .map((row) => boardView(row, viewer, { boardId }))
     return {
@@ -970,10 +1228,12 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
   function consoleList(projectId = null, { audit = null } = {}) {
     const projects = projectId ? [projectId] : t.all('SELECT id FROM projects WHERE workspace_id = :ws').map((project) => project.id)
     for (const id of projects) {
-      ensure(id, audit)
       releaseGone(id, audit)
+      noteHidden(id, audit)
     }
-    const all = rows(projectId).map(consoleView)
+    const all = rows(projectId)
+      .filter((row) => !dormant(row))
+      .map(consoleView)
     return [...all.filter((agent) => agent.state !== 'revoked'), ...all.filter((agent) => agent.state === 'revoked')]
   }
 
@@ -999,6 +1259,8 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     if (changes.name !== undefined) {
       const { name, problem } = cleanAgentName(changes.name)
       if (problem || !name) throw new HttpError(400, 'invalid_name', problem ? `Agent ${problem}.` : 'Agent name: 1 to 40 characters.')
+      const clash = nameProblem(name)
+      if (clash) throw new HttpError(400, 'agent_name_taken', `Agent ${clash}.`)
       next.name = name
     }
     if (changes.icon !== undefined) {
@@ -1209,7 +1471,13 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     boardList,
     consoleView,
     consoleList,
+    dormant,
+    claimTokens,
+    makeAgent,
+    removeClaim,
     setIdentity,
+    nameProblem,
+    triggerHandles,
     setDefault,
     setAudience,
     setApprovalRule,

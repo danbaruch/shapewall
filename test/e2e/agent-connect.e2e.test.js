@@ -129,7 +129,10 @@ test('desktop 1440: Claude Code found, Connect, chatting; no file edit, no resta
     await card.waitFor()
     assert.match(await card.textContent(), /Claude Code found on this machine/)
     assert.match(await card.textContent(), /claude-agent-acp/)
-    assert.match(await page.locator('[data-sw-chat-connect-note]').textContent(), /does not sandbox/)
+    // Claude Code's local session is the restricted one: the note says so, not that it brings its own shell.
+    const connectNote = await page.locator('[data-sw-chat-connect-note]').textContent()
+    assert.match(connectNote, /On this board Claude Code gets a restricted session/)
+    assert.doesNotMatch(connectNote, /Claude Code brings/)
     // The endpoint and the docs are folded away.
     assert.equal(await page.locator('[data-sw-chat-other-options]').getAttribute('open'), null)
     assert.equal(await page.locator('[data-sw-chat-acp-example]').count(), 0, 'no JSON or terminal commands up front')

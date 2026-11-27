@@ -132,7 +132,8 @@ program on the server. The chat panel described here is also on hosted boards, f
 connect`: the same panel, with an agent that reads the project and answers. On a hosted comment, **Fix with** an agent is offered
 only when that agent's own machine switched edits on (`--approvals`): the fix is made on a new branch on that machine, never in
 its checkout, and each edit is a card with the full diff that someone allows or denies on the board. Only Claude Code can be
-connected that way in this release, and it runs no commands from a hosted board ([Connected agents](hosted.md#connected-agents)).
+connected that way in this release. Its commands, shell and browser come from Shapewall's own tools, as far as that machine allows
+([Connected agents](hosted.md#connected-agents), [what an agent can do](agent-capabilities.md)).
 The public demo shows this card read-only on its console's Agents page.
 
 ## Usage
@@ -267,6 +268,10 @@ is checked again on each turn, and trusted and untrusted ACP sessions are separa
 
 For an external coding session, open **Chat settings** in the chat panel: **Use with Claude Code / Codex** shows copyable MCP setup
 commands (before an agent is connected, the same commands are folded under the connect options). See [The agent workflow](agent-workflow.md#mcp-server-shapewall-mcp).
+
+To watch an agent work from the board, press **Follow agent** on the canvas while it works, or open `shapewall open --follow`: the
+board flies to each comment it takes and shows the before and after of that screen when it recaptures. See
+[Follow an agent](agent-workflow.md#follow-an-agent).
 
 ## Undo an agent's change
 
@@ -415,8 +420,10 @@ settings token, see [Who may change them](#who-may-change-them)), the toolbar ha
   key, checked with the same rule as `agent.apiKeyEnv` (below). The screen says whether that variable is set and **which host the key
   goes to**.
 - For an ACP agent: the **agent command** (one program and its arguments, no shell), with buttons for Claude Code, Codex, goose and
-  Gemini CLI in their restricted forms. The screen warns, every time an ACP agent is picked, that the agent brings its own tools and
-  extensions, which Shapewall does not sandbox (see [Restrict the agent's own tools](#restrict-the-agents-own-tools)). When
+  Gemini CLI in their restricted forms. Every time an ACP agent is picked, the screen says what each one brings: Claude Code gets
+  the restricted session (read and edit tools plus Shapewall's own tools, never a shell of its own or your Claude settings files),
+  while Codex, goose and Gemini CLI bring their own tools and extensions, which Shapewall does not sandbox (see
+  [Restrict the agent's own tools](#restrict-the-agents-own-tools)). The chat's Connect note says the same for the agents it found. When
   `--agent-acp` or `SHAPEWALL_AGENT_ACP` wins over the saved command, the screen shows the command in use, read-only, and says where it
   comes from.
 - **This model takes images**: turn it off for a text-only model. Images are then left out of the request, and the chat says so, instead
@@ -469,9 +476,13 @@ machine that rewrites `Host` (a default nginx `proxy_pass`, Caddy with `header_u
   Run as a service (journald, a log file) it says how to open it instead (`shapewall serve --open`, `shapewall settings --open`).
   `shapewall serve --print-owner-link` (or `SHAPEWALL_PRINT_OWNER_LINK=1`) prints it in full, for scripts:
   `Private owner link (settings, sharing; keep it to yourself): http://127.0.0.1:4600/#settings-token=...`.
-- Open that direct local link (`shapewall serve --open` opens it for you in this mode: the browser gets a one-time `http://127.0.0.1:4600/open/<nonce>` link that
-  the server answers once, within a minute, with a redirect to the settings link, so the token itself is never on a command line,
-  where other users of the machine could read it; a used or expired one says so): the board keeps the token for that tab (`sessionStorage`), removes it from the address bar, and sends it in an
+- Open that direct local link (`shapewall serve --open` opens it for you in this mode: the browser is opened on a page in the
+  project's `.shapewall/` folder, readable only by you, that posts a one-time nonce to `POST /open`; the server answers it once,
+  within a minute (five when no browser could be opened and the page's path is printed instead), with a page that hands the
+  token to the tab and opens the board, so no URL holds it and browser history never records it. Neither the token nor the
+  nonce is ever on a command line, where other users of the machine could read it, or in the output. The page is removed once
+  used, when it expires and when serve stops; one a stopped server left behind is dead, and the next start removes it. A used
+  or expired one says so): the board keeps the token for that tab (`sessionStorage`), removes it from the address bar, and sends it in an
   `X-Shapewall-Settings-Token` header, to `/api/info`, `/api/agent/settings`, chat message writes and approval answers. This authorizes owner-only comment tools on direct local chat turns; it never goes to an agent or model endpoint. The server compares it in constant time.
 - Without it (another tab, a bookmark, after a restart) the Settings button is hidden (the profile menu shows it greyed out), the
   panel says to open the link from your terminal or run `shapewall serve --open` for a direct local board, and `/api/agent/settings` answers `404`. For a fixed-origin account board, use the host-only settings command above. Other routes cannot add or edit an executable command or key destination.
@@ -600,9 +611,12 @@ Subscription agents (Claude Code, Codex, goose, Gemini CLI) talk to editors over
 panel can drive the agent on your machine with **its own login**. The subscription and its credentials never leave your machine, and
 Shapewall never sees them.
 
-> **An ACP agent brings its own tools, and Shapewall does not sandbox them.** Claude Code, Codex and goose run with their own built-in
-> tools and whatever extensions and MCP servers their own config loads (a shell, file edits, browser control, ...). Shapewall's
-> approval cards cover only what the agent asks Shapewall to do. Run the agent in a restricted profile:
+> **Claude Code gets a restricted session; other ACP agents bring their own tools.** From 1.4.0 a local board starts Claude Code
+> with its read and edit tools plus Shapewall's own tools for commands, the sandboxed shell and the browser: no shell of its own,
+> none of your `~/.claude` settings, hooks, plugins or `.mcp.json`, no auto memory
+> ([the restricted session](#claude-codes-restricted-session)). Codex, goose and Gemini CLI still run with their own built-in tools
+> and whatever extensions and MCP servers their own config loads (a shell, file edits, browser control, ...), which Shapewall does
+> not sandbox, and Shapewall's approval cards cover only what the agent asks Shapewall to do. Run them in a restricted profile:
 > [Restrict the agent's own tools](#restrict-the-agents-own-tools).
 
 Give the command to `shapewall serve`, or put it in `SHAPEWALL_AGENT_ACP`:
@@ -665,6 +679,24 @@ SHAPEWALL_AGENT_ACP_ENV=CLAUDE_CODE_OAUTH_TOKEN shapewall serve --agent-acp "cla
 The token must already be present in the server's environment; this command names it without printing its value. The default
 allowlist does not forward it automatically. If other agent variables are already allowed, append this name to the comma-separated
 list. Restart only your own board process after changing its environment, then send the message again.
+
+### Claude Code's restricted session
+
+On a local board, Claude Code (`claude-agent-acp`) runs in the same restricted session a connected agent gets:
+
+- **Its tools:** Read, Grep and Glob, and Edit, Write and MultiEdit for the project's files. Bash, WebFetch, WebSearch, Task, Agent and Skill are removed from the session, so no allow rule and no mode can run them.
+- **Shapewall's tools instead:** the board's own tools, and a second tool server for the project's named commands, the sandboxed
+  shell, dev servers and the throwaway browser, each checked by Shapewall before it runs. Which ones a turn gets follows who wrote
+  it: on the owner's own turns named commands run, and the shell is a full one inside the OS sandbox; on any other turn each
+  command waits for a card. See [what an agent can do](agent-capabilities.md).
+- **No settings files** (`settingSources: []`): your `~/.claude` and the project's `.claude` allow rules, hooks, default mode and
+  plugins do not apply, and no MCP server from `.mcp.json` or settings is loaded. The project's `CLAUDE.md` (or `AGENTS.md`)
+  comes from Shapewall instead, followed by the block that says what this turn may do.
+- **No auto memory:** `autoMemoryEnabled: false` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
+
+`"agent": { "localSession": "own" }` in the config keeps the 1.2.0 session, with Claude Code's own full tool set and settings,
+until 2.0; Shapewall prints a deprecation warning when it is used. Other ACP adapters take no such options and keep their own
+session.
 
 ### Codex
 
@@ -749,11 +781,16 @@ ACP lets the editor (here, Shapewall) offer the agent file and terminal access. 
   limited: a request that sets one that changes what a program loads or runs (`LD_*`, `DYLD_*`, `NODE_OPTIONS`, `PATH`,
   `BASH_ENV`, `ENV`, `GIT_*`, `PAGER`, `EDITOR`, `npm_config_*`, ...) is refused outright; a few harmless ones (`TERM`, `NO_COLOR`,
   `FORCE_COLOR`, `CI`, `TZ`, `LANG`, ...) pass and are shown on the card; anything else is ignored and listed as ignored.
-- **Nothing else:** on a trusted owner turn Shapewall adds only its own board-scoped `shapewall` MCP server (board reads, replies,
-  agent status, resolve and recapture; no GitHub tools); other turns get no MCP server.
+- **Board tools:** on a trusted owner turn Shapewall adds its own board-scoped `shapewall` MCP server (board reads, replies,
+  agent status, resolve and recapture; no GitHub tools).
+- **Commands, the shell and the browser:** for Claude Code's restricted session, a second Shapewall tool server
+  (`run_named_command`, `run_command`, `start_dev_server`, `stop_dev_server`, the `browser_*` tools and
+  `shapewall_capabilities`), with no terminal of its own. Commands run in the OS sandbox where the machine has one
+  ([commands through Shapewall](agent-hardening.md#commands-through-shapewall)).
 
-The agent is still a program running as you: its own built-in tools (Claude Code's Bash and Edit, Codex's sandbox) work as they do in
-your terminal, under the agent's own permission settings. Shapewall cannot sandbox those; see the threat model below.
+Outside Claude Code's restricted session the agent is still a program running as you: its own built-in tools (Codex's sandbox,
+goose's extensions, Claude Code's Bash with `localSession: "own"`) work as they do in your terminal, under the agent's own
+permission settings. Shapewall cannot sandbox those; see the threat model below.
 
 ### What the agent is told
 
@@ -767,10 +804,11 @@ quote each comment in the same `<shapewall-data trust="untrusted">` element.
 
 ### Restrict the agent's own tools
 
-The agent works with its own tools under its own settings, and Shapewall cannot sandbox them. Run it the way you would run it on a repo
+Outside Claude Code's restricted session, the agent works with its own tools under its own settings, and Shapewall cannot sandbox
+them. Run it the way you would run it on a repo
 full of other people's text:
 
-- **Claude Code** (`claude-agent-acp`) follows your Claude Code settings. Set `permissions.defaultMode` to `default` (asks before
+- **Claude Code** (`claude-agent-acp`) with `agent.localSession: "own"` follows your Claude Code settings. Set `permissions.defaultMode` to `default` (asks before
   edits and commands your allow rules do not cover) or `plan` (read-only), never `auto`, `acceptEdits` or `bypassPermissions`. Set
   it explicitly: with none set, `claude-agent-acp` 0.106.0 starts in `auto`, which acts without asking. A separate config folder for Shapewall works too:
   `CLAUDE_CONFIG_DIR` is passed to the agent.
@@ -819,10 +857,30 @@ What the bridge protects against, and what it does not:
   board with `--chat` unless you also pass `--allow-remote-agent`: that combination is remote command execution as you, for anyone
   who reaches the board. For shared boards, use the [sandboxed starter agent](starter-agent.md), and see
   [Agent hardening](agent-hardening.md).
-- **Not covered:** the agent's own tools and its own sandbox (or lack of one), what its model provider sees, and anything you allow.
+- **Not covered:** the own tools of an agent outside Claude Code's restricted session, and its own sandbox (or lack of one), what its model provider sees, and anything you allow.
   A command you approve runs as you in the project, so the project's own config still applies to it (a repo's `.git/config` can make
   `git status` run a program): approve commands only in repos you trust.
   Shapewall does not inspect the agent's network traffic.
+
+## When an agent answers
+
+The same rules hold on a local board, a hosted board, in chat and for `watch` (`src/agent/triggers.js`):
+
+- **A private chat** (New chat) answers every message.
+- **A shared thread** (the board chat, a comment's chat on a hosted board or a board shared with `--chat`) answers only a message
+  that @mentions the agent (`@agent`, or its own handle such as `@builder`), **Send to agent** (the button beside Send, or
+  Ctrl/Cmd+Enter) or **Fix with**. Other messages stay in the thread for the people there; the agent reads them, as quoted data,
+  with the next message that is for it. On a hosted board the person who connected the thread's agent can turn on **Answer every
+  message** in Chat settings, and the agent's own machine can refuse that (`agent connect --respond mention`).
+- **A local board only you chat on** treats the board chat and comment threads like a private chat: every message gets an answer.
+  Chat settings > **Answer every message** turns that off for one thread, so it answers mentions and Send to agent only.
+- **Text an agent wrote never starts a turn**: not its replies, not a comment it made with `add_comment` or `comments add`, not an
+  @mention inside them. This is always on and has no setting, so agents cannot set each other off in a loop.
+- **What counts as a mention**: `@agent`, or the handle the agent's name makes (lowercase, accents dropped, other characters as
+  `-`, at most 40 characters: "Builder Bot" is `@builder-bot`). A name with no letters to make one from (only emoji, say) answers
+  `@agent` only. A mention inside a code span or block, or on a quoted line (`> ...`), does not count.
+- **People can talk while it answers**: a message that does not ask the agent is posted at once, even while an answer is being
+  written; the agent gets it with the next message that is for it.
 
 ## What the panel does
 
@@ -1045,7 +1103,7 @@ every comment event from every process that never claims anything (`shapewall wa
 it sends the notifications for all of those changes ([The agent workflow](agent-workflow.md#a-chat-bot-telegram-slack-discord),
 [Notifications](notifications.md#events)).
 
-An ACP agent reads the project with its own tools; board data comes with each message. On trusted owner turns, its ACP session also receives a Shapewall stdio MCP server scoped to this board. It provides board reads plus replies, agent status, resolution and optional recapture, with no GitHub actions. Ask it to call `recapture_pages` with any other configured pages it changed; Shapewall automatically recaptures the comment page after the turn.
+An ACP agent reads the project with its own tools; board data comes with each message. On trusted owner turns, its ACP session also receives a Shapewall stdio MCP server scoped to this board (Claude Code's restricted session gets a second one for commands and the browser: [what an agent can do](agent-capabilities.md)). It provides board reads plus replies, agent status, resolution and optional recapture, with no GitHub actions. Ask it to call `recapture_pages` with any other configured pages it changed; Shapewall automatically recaptures the comment page after the turn.
 
 ## Prompt injection: board text is data
 

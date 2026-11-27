@@ -134,15 +134,26 @@ export function useFlyToPending({
 }
 
 // The first view on a phone: two cards of the first group across, not the
-// whole board drawn tiny.
-export function usePhoneStartView({ wide, nodesReady, initialCamera, selectedCommentId, canvasRef, nodes, flow, setSettledZoom }) {
+// whole board drawn tiny. `linkedTarget`: a link names a page the board has
+// (`p`), and the board's start flies there instead.
+export function usePhoneStartView({
+  wide,
+  nodesReady,
+  initialCamera,
+  selectedCommentId,
+  linkedTarget = false,
+  canvasRef,
+  nodes,
+  flow,
+  setSettledZoom,
+}) {
   const phoneStart = useRef(false)
   useEffect(() => {
     if (wide || phoneStart.current || !nodesReady) return
     // Only the first view: not after a link to a thread or a camera, and
     // never again later in the visit.
     phoneStart.current = true
-    if (initialCamera.current || selectedCommentId) return
+    if (initialCamera.current || selectedCommentId || linkedTarget) return
     const box = canvasRef.current?.getBoundingClientRect()
     const group = nodes.find((node) => node.type === 'groupFrame')
     const first = group && nodes.find((node) => node.type === 'page' && node.data?.page?.group === group.data.group)
@@ -156,7 +167,7 @@ export function usePhoneStartView({ wide, nodesReady, initialCamera, selectedCom
     const label = 12 + 44 * Math.max(zoom, 0.45)
     setSettledZoom(null)
     flow.setViewport({ x: 8 - group.position.x * zoom, y: label - group.position.y * zoom, zoom })
-  }, [canvasRef, flow, initialCamera, nodes, nodesReady, selectedCommentId, setSettledZoom, wide])
+  }, [canvasRef, flow, initialCamera, linkedTarget, nodes, nodesReady, selectedCommentId, setSettledZoom, wide])
 }
 
 // Refit the board when its shape changes: switching viewport mode changes

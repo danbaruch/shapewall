@@ -22,10 +22,13 @@ import { cleanCardDiff } from './text-diff.js'
 
 export const CARD_ID_RE = /^perm_[a-f0-9]{12,32}$/
 export const CARD_HASH_RE = /^[a-f0-9]{64}$/
-// What a card of a hosted board may ask: a file edit, a command, or to push
-// a finished fix whose edits nobody looked at ("Push this fix", with its
-// whole diff).
-export const CARD_KINDS = ['edit', 'execute', 'push']
+// What a card of a hosted board may ask: a file edit, a command the agent's
+// own tools ask to run ("execute", an exact listed command), a command
+// Shapewall runs for it ("command": a named command or the shell, through
+// exec-mcp.js), or to push a finished fix whose edits nobody looked at
+// ("Push this fix", with its whole diff).
+export const CARD_KINDS = ['edit', 'execute', 'command', 'push']
+const NO_DIFF = ['execute', 'command']
 export const CARD_LIMITS = { label: 400, detail: 4096, bytes: 96 * 1024, ttlMs: 2 * 60 * 1000, pushTtlMs: 10 * 60 * 1000 }
 export const cardTtlMax = (name) => (name === 'push' ? CARD_LIMITS.pushTtlMs : CARD_LIMITS.ttlMs)
 
@@ -39,11 +42,11 @@ export function cardContent(card) {
   if (!label || label.length > CARD_LIMITS.label || !detail || detail.length > CARD_LIMITS.detail) return null
   const ttlMs = Number.isSafeInteger(card.ttlMs) && card.ttlMs >= 1000 && card.ttlMs <= cardTtlMax(card.name) ? card.ttlMs : null
   if (!ttlMs) return null
-  const diff = card.name === 'execute' ? null : cleanCardDiff(card.diff)
+  const diff = NO_DIFF.includes(card.name) ? null : cleanCardDiff(card.diff)
   // An edit, or a push, is approved with its whole diff in view, or not at all.
-  if (card.name !== 'execute' && (!diff || diff.truncated || diff.outside)) return null
+  if (!NO_DIFF.includes(card.name) && (!diff || diff.truncated || diff.outside)) return null
   if (card.name === 'edit' && diff.path !== detail) return null
-  if (card.name === 'execute' && card.diff) return null
+  if (NO_DIFF.includes(card.name) && card.diff) return null
   const content = { id: card.id, name: card.name, label, detail, diff, ttlMs }
   return Buffer.byteLength(JSON.stringify(content)) <= CARD_LIMITS.bytes ? content : null
 }

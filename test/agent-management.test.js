@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import http from 'node:http'
@@ -40,6 +41,25 @@ async function setup(t) {
   t.after(close)
   return { config, env, app, server, origin, port, call }
 }
+// What a redeemed POST /open answers (src/open-page.js sendTokenHandoff): a
+// no-store page that puts the token in the tab's sessionStorage and replaces
+// itself with the board. No URL holds the token: no Location, nothing to keep in history.
+function handoffOf(answer) {
+  assert.equal(answer.status, 200)
+  assert.equal(answer.headers.location, undefined)
+  assert.equal(answer.headers['cache-control'], 'no-store')
+  const csp = answer.headers['content-security-policy']
+  const nonce = /script-src 'nonce-([^']+)'/.exec(csp)?.[1]
+  assert.ok(nonce, csp)
+  assert.match(csp, /default-src 'none'/)
+  assert.match(csp, /frame-ancestors 'none'/)
+  const script = new RegExp(`<script nonce="${nonce.replace(/[+/=]/g, (c) => `\\${c}`)}">const d = (\\{[^<]*?\\});`).exec(answer.text)
+  assert.ok(script, answer.text)
+  const data = JSON.parse(script[1])
+  assert.equal(data.key, 'shapewall-settings-token')
+  return data
+}
+
 const settings = '/api/agent/settings'
 test('management exposes only host-authorized settings and preserves server state and project index', async (t) => {
   const b = await setup(t)
@@ -64,12 +84,33 @@ test('management exposes only host-authorized settings and preserves server stat
   ])
     assert.equal((await b.call('GET', route)).status, 404, route)
   assert.equal((await b.call('POST', '/api/agent/boards/sample/threads/board/messages', { text: 'never dispatch' })).status, 404)
-  const nonce = b.app.locals.openLink()
-  const opened = await b.call('GET', nonce)
-  assert.equal(opened.status, 303)
-  assert.equal(opened.headers.location, `/#settings-token=${token}`)
-  assert.equal((await b.call('GET', nonce)).status, 404)
+  // --open: the browser is opened on a 0600 page that posts the nonce; the nonce is never in a URL.
+  const link = b.app.locals.openLink(b.origin)
+  assert.equal(new URL(link).protocol, 'file:')
+  const file = fileURLToPath(link)
+  assert.equal(path.dirname(file), b.config.outputDir)
+  if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600)
+  const html = fs.readFileSync(file, 'utf8')
+  const nonce = /name="nonce" value="([^"]+)"/.exec(html)[1]
+  assert.equal(/action="([^"]+)"/.exec(html)[1], `${b.origin}/open`)
+  assert.ok(!link.includes(nonce))
+  assert.equal((await b.call('GET', `/open/${nonce}`)).status, 404)
+  const post = () =>
+    request(b.port, 'POST', '/open', {
+      body: `nonce=${nonce}`,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'null' },
+    })
+  const opened = await post()
+  assert.deepEqual(handoffOf(opened), { key: 'shapewall-settings-token', token, target: '/' })
+  assert.equal(fs.existsSync(file), false, 'the page is removed once used')
+  assert.equal((await post()).status, 404)
+  // Only the newest page works, and stop removes it.
+  const older = fileURLToPath(b.app.locals.openLink(b.origin))
+  const newer = fileURLToPath(b.app.locals.openLink(b.origin))
+  assert.equal(fs.existsSync(older), false)
+  assert.equal(fs.existsSync(newer), true)
   b.app.locals.close()
+  assert.equal(fs.existsSync(newer), false, 'the page is removed at stop')
   assert.equal(fs.readFileSync(serveFile, 'utf8'), before)
   assert.equal(fs.readFileSync(projectsFile(b.env), 'utf8'), index)
 })
@@ -377,8 +418,14 @@ test(
     })
     const first = await b.call('POST', settings + '/profiles/connect', { agentId: 'codex' })
     const pending = b.call('POST', settings + '/profiles/connect', { agentId: 'codex', confirm: first.json.confirmHash })
-    await until(() => fs.existsSync(marker))
-    const pid = Number(fs.readFileSync(marker, 'utf8'))
+    // The shell's redirection creates the marker before printf writes the
+    // pid: an empty read is Number('') === 0, and process.kill(0, 0) signals
+    // our own process group, so it never throws. Wait for the pid itself.
+    let pid = 0
+    await until(() => {
+      pid = Number(fs.existsSync(marker) && fs.readFileSync(marker, 'utf8'))
+      return Number.isInteger(pid) && pid > 1
+    })
     b.app.locals.close()
     const ended = await pending
     assert.equal(ended.json.connected, false)
@@ -716,11 +763,14 @@ test(
     await until(() => output.includes('This temporary server'))
     cli.kill('SIGINT')
     cli.kill('SIGTERM')
-    const [code, signal] = await ended
+    // And more, every millisecond, until it is gone: one that lands after
+    // cleanup, while the process is on its way out, must not kill it either.
+    const more = setInterval(() => cli.kill('SIGTERM'), 1)
+    const [code, signal] = await ended.finally(() => clearInterval(more))
     assert.equal(code, 0)
     assert.equal(signal, null)
     assert.equal(fs.existsSync(agentControlFile(b.config, b.env)), false)
-    assert.equal(b.app.locals.openLink().startsWith('/open/'), true)
+    assert.equal(b.app.locals.openLink(b.origin).startsWith('file:'), true)
   },
 )
 
@@ -747,4 +797,18 @@ test('the settings page gets its theme script and icon from an install inside a 
   assert.match(script.headers['content-type'], /javascript/)
   assert.equal((await request(port, 'GET', '/favicon.svg')).status, 200)
   assert.equal((await request(port, 'GET', '/')).status, 200)
+})
+
+test('a save from the board never sets the agent config folder, and keeps the one the machine named', async (t) => {
+  const b = await setup(t)
+  saveUserAgentEntry(b.config.dir, { backend: 'acp', acpCommand: 'claude-agent-acp', agentConfig: '/home/me/agent-config/site' }, b.env)
+  const saved = await b.call('POST', settings, {
+    settings: { backend: 'acp', acpCommand: 'claude-agent-acp', vision: false, agentConfig: '/home/me/planted' },
+  })
+  assert.equal(saved.status, 200, saved.text)
+  assert.equal(userAgentEntry(b.config.dir, b.env).entry.agentConfig, '/home/me/agent-config/site')
+  // None saved: a save from the board does not make one either.
+  saveUserAgentEntry(b.config.dir, { backend: 'acp', acpCommand: 'claude-agent-acp' }, b.env)
+  await b.call('POST', settings, { settings: { backend: 'acp', acpCommand: 'claude-agent-acp', agentConfig: '/home/me/planted' } })
+  assert.equal(userAgentEntry(b.config.dir, b.env).entry.agentConfig, undefined)
 })

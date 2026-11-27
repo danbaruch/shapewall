@@ -11,9 +11,18 @@ import path from 'node:path'
 import express from 'express'
 import { boardRef, feedbackContext, feedbackItem, fileKind, replyOf } from '../feedback.js'
 import { listJourneys } from '../journeys.js'
-import { joinUrl } from '../config.js'
+import { boardViewports, joinUrl } from '../config.js'
 import { MENTION_HANDLE_RE } from '../mentions.js'
-import { captureFiles, listVersions, readManifest, resolveFile, variantsWithFiles } from '../store.js'
+import {
+  captureFiles,
+  entryVersion,
+  listVersions,
+  readManifest,
+  resolveFile,
+  VERSION_FILE_RE,
+  variantsWithFiles,
+  versionTime,
+} from '../store.js'
 import { agentPolicy, trustedMember } from './agent-policy.js'
 import { COMMENT_ROUTING } from './agents.js'
 import { mountHostedApprovals } from './agent-approvals.js'
@@ -31,6 +40,7 @@ import { createPushStore } from './push.js'
 import { LIMITS } from './ratelimit.js'
 import { findApiToken, tenant } from './tenancy.js'
 import { mountTokenEvents } from './token-events.js'
+import { boardLink, hostedBoardBase } from '../board-links.js'
 
 export function mountTokenApi({
   agentsFor,
@@ -101,7 +111,7 @@ export function mountTokenApi({
       res.setHeader('Retry-After', String(hits.retryAfter))
       return fail(res, 429, 'rate_limited', 'Too many requests for this token.')
     }
-    req.token = { id: row.id, name: row.name, scopes }
+    req.token = { id: row.id, name: row.name, scopes, createdBy: row.created_by }
     req.tokenHash = sha256(token)
     req.authTokenHash = row.token_hash
     req.t = tenant(db, row.workspace_id)
@@ -317,7 +327,7 @@ export function mountTokenApi({
         title: ctx.board.title,
         baseUrl: ctx.board.baseUrl,
         project: req.project.id,
-        url: `${publicOrigin}/w/${req.t.workspaceId}/p/${req.project.id}/`,
+        url: hostedBoardBase(publicOrigin, req.t.workspaceId, req.project.id),
       },
       status,
       guestsHidden,
@@ -366,13 +376,28 @@ export function mountTokenApi({
           id: req.project.id,
           name: req.project.name,
           slug: req.project.slug,
-          url: `${publicOrigin}/w/${req.t.workspaceId}/p/${req.project.id}/`,
+          url: hostedBoardBase(publicOrigin, req.t.workspaceId, req.project.id),
         },
-        token: { name: req.token.name, scopes: req.token.scopes },
+        // The account that made the token: the person its agent works for
+        // ("me" in the MCP list_comments filter). Handle and name only, and
+        // only to a token that may read the board (where comments show them).
+        token: {
+          name: req.token.name,
+          scopes: req.token.scopes,
+          ...(req.token.scopes.includes('read') ? { createdBy: tokenMaker(req) } : {}),
+        },
         boards: boards.map((row) => ({ id: row.board_id, pushedAt: row.pushed_at })),
+        // The agent this token is, if it is one: its name and state (online
+        // while its link is open), for `shapewall agent status`.
+        ...(req.agent ? { agent: { id: req.agent.id, name: req.agent.name, state: agentsFor(req.t).stateOf(req.agent).state } } : {}),
       })
     }),
   )
+
+  const tokenMaker = (req) => {
+    const user = req.token.createdBy ? q.get('SELECT handle, display_name FROM users WHERE id = :id', { id: req.token.createdBy }) : null
+    return user ? { handle: user.handle, name: user.display_name } : null
+  }
 
   const pushJson = express.json({ limit: '4mb' })
   // Files a token is uploading right now: the CLI sends one at a time, so a
@@ -441,8 +466,16 @@ export function mountTokenApi({
         now: now(),
         credential: { id: req.token.id, hash: req.authTokenHash, now },
       })
-      auditOf(req, 'push_committed', `${req.project.id}/${result.board}`, { files: result.files })
-      res.json({ ...result, url: `${publicOrigin}/w/${req.t.workspaceId}/p/${req.project.id}/?board=${result.board}` })
+      // A page push says so, with how many pages and viewports it replaced.
+      const detail =
+        result.mode === 'pages'
+          ? { files: result.files, mode: 'pages', pages: result.pages, viewports: result.viewports }
+          : { files: result.files }
+      auditOf(req, 'push_committed', `${req.project.id}/${result.board}`, detail)
+      res.json({
+        ...result,
+        url: boardLink({ base: hostedBoardBase(publicOrigin, req.t.workspaceId, req.project.id), board: result.board }),
+      })
     }),
   )
 
@@ -465,10 +498,101 @@ export function mountTokenApi({
           url: joinUrl(ctx.board.publicUrl || ctx.board.baseUrl, page.path),
           viewports: page.viewports,
           captured: Object.keys(files[page.id] || {}),
+          // When each viewport's current capture was taken (page pushes
+          // update pages one by one, so the board's capturedAt is only the newest).
+          capturedAt: Object.fromEntries(
+            Object.keys(files[page.id] || {}).map((viewport) => [
+              viewport,
+              versionTime(entryVersion(manifest?.pages?.[page.id]?.[viewport], manifest)),
+            ]),
+          ),
         })),
         journeys: listJourneys(ctx.config, ctx.board),
         variants: variantsWithFiles(ctx.config, ctx.board).map(({ files: _files, ...variant }) => variant),
         versions: Object.keys(listVersions(ctx.config, ctx.board.id)).length,
+      })
+    }),
+  )
+  // The earlier capture versions of a page a claim token may read: the ones
+  // the comments dispatched to it were made (or drawn) on. Its agent has no
+  // business in the rest of the history. null: any other token, no limit.
+  const claimVersions = (req, ctx, pageId) => {
+    if (!req.token.scopes.includes('claim')) return null
+    const out = new Set()
+    for (const row of ctx.comments.list({ status: null })) {
+      if (row.pageId !== pageId) continue
+      const comment = dispatchView(req.t, req.project.id, ctx.board.id, row)
+      if (!comment.dispatchable || !mine(req, comment[COMMENT_ROUTING])) continue
+      if (comment.captureVersion) out.add(comment.captureVersion)
+      if (comment.drawing?.captureVersion) out.add(comment.drawing.captureVersion)
+    }
+    return out
+  }
+  // The page and viewport of a current capture's file name, if it is one.
+  const captureOf = (board, name) => {
+    for (const page of board.pages)
+      for (const viewport of page.viewports)
+        if (name === `${page.id}.${viewport}.png` || name === `${page.id}.${viewport}.html`) return { page: page.id, viewport }
+    return null
+  }
+
+  // A page's capture history, newest first: the current capture of each
+  // viewport and the earlier versions the board keeps, with token API URLs
+  // of their files (GET /files/captures|versions/<name>, same guards). The
+  // current capture's URLs carry ?version=<its version>: fetched after a
+  // push replaced it, they answer 409 instead of another capture. At most
+  // VERSIONS_MAX; ?viewport= narrows it to one viewport. Any read token sees
+  // the whole history, except a claim token (one agent's dispatched work):
+  // it sees the current captures and the versions its comments were made on.
+  const VERSIONS_MAX = 50
+  v1.get(
+    '/boards/:bid/pages/:pid/versions',
+    scope('read'),
+    v1Board((req, res, ctx) => {
+      const page = ctx.board.pages.find((item) => item.id === req.params.pid)
+      if (!page) return fail(res, 404, 'unknown_page', 'That page is not on this board.')
+      const asked = typeof req.query.viewport === 'string' ? req.query.viewport : null
+      if (asked && !page.viewports.includes(asked)) return fail(res, 404, 'unknown_viewport', 'That page has no such viewport.')
+      const files = captureFiles(ctx.config, ctx.board)[page.id] || {}
+      const manifest = readManifest(ctx.config, ctx.board.id)
+      const kept = listVersions(ctx.config, ctx.board.id)[page.id] || {}
+      const fileUrl = (kind, name, version = null) =>
+        `${publicOrigin}/api/v1/boards/${encodeURIComponent(ctx.board.id)}/files/${kind}/${encodeURIComponent(name)}${version ? `?version=${encodeURIComponent(version)}` : ''}`
+      const allowed = claimVersions(req, ctx, page.id)
+      const rows = []
+      for (const viewport of asked ? [asked] : page.viewports) {
+        const current = files[viewport] ? entryVersion(manifest?.pages?.[page.id]?.[viewport], manifest) : null
+        if (current) {
+          const html = resolveFile(ctx.config, ctx.board.id, 'captures', `${page.id}.${viewport}.html`)
+          rows.push({
+            version: current,
+            viewport,
+            current: true,
+            capturedAt: versionTime(current),
+            files: {
+              png: fileUrl('captures', `${page.id}.${viewport}.png`, current),
+              html: html ? fileUrl('captures', `${page.id}.${viewport}.html`, current) : null,
+            },
+          })
+        }
+        for (const item of kept[viewport] || []) {
+          if (item.version === current || (allowed && !allowed.has(item.version))) continue
+          rows.push({
+            version: item.version,
+            viewport,
+            current: false,
+            capturedAt: versionTime(item.version),
+            files: { png: fileUrl('versions', item.file), html: item.live ? fileUrl('versions', item.live) : null },
+          })
+        }
+      }
+      rows.sort((a, b) => (a.version < b.version ? 1 : a.version > b.version ? -1 : a.current === b.current ? 0 : a.current ? -1 : 1))
+      res.json({
+        board: boardRef(ctx.board),
+        page: page.id,
+        viewports: asked ? [asked] : page.viewports,
+        versions: rows.slice(0, VERSIONS_MAX),
+        more: Math.max(0, rows.length - VERSIONS_MAX),
       })
     }),
   )
@@ -504,6 +628,19 @@ export function mountTokenApi({
     v1Board((req, res, ctx) => {
       const { kind, file: name } = req.params
       if (!['captures', 'variants', 'versions'].includes(kind)) return fail(res, 404, 'not_found', 'No such file.')
+      // A claim token reads only the earlier versions its comments were made on.
+      if (kind === 'versions' && req.token.scopes.includes('claim')) {
+        const match = VERSION_FILE_RE.exec(name)
+        if (!match || !claimVersions(req, ctx, match[1]).has(match[3])) return fail(res, 404, 'not_found', 'No such file.')
+      }
+      // ?version=: the current capture only while it is still that version
+      // (the history route's URLs), so a push in between is never mislabeled.
+      if (typeof req.query.version === 'string') {
+        const at = kind === 'captures' ? captureOf(ctx.board, name) : null
+        const manifest = at ? readManifest(ctx.config, ctx.board.id) : null
+        if (!at || entryVersion(manifest?.pages?.[at.page]?.[at.viewport], manifest) !== req.query.version)
+          return fail(res, 409, 'capture_moved', 'That capture is no longer the current one. List the versions again.')
+      }
       const file = resolveFile(ctx.config, ctx.board.id, kind, name)
       if (!file) return fail(res, 404, 'not_found', 'No such file.')
       if (name.endsWith('.png')) return sendPng(res, file, false)
@@ -575,6 +712,53 @@ export function mountTokenApi({
       // The reply in the item shape (authorAgent, files), as the comment lists it.
       const item = v1Item(req, ctx, comment)
       res.status(201).json({ board: boardRef(ctx.board), comment: item, reply: replyOf(item, reply.id) })
+    }),
+  )
+  // A new comment from a token (the add_comment MCP tool): the same scope as
+  // a reply, since both put the token's text on the board, signed with the
+  // token's name and marked as an agent. Only text and a pin: no images, no
+  // drawing, no author name. It is never vouched for or sent to an agent
+  // (agent-policy.js refuses any comment a token wrote), so an agent cannot
+  // hand work to another agent this way; only a trusted person can.
+  v1.post(
+    '/boards/:bid/comments',
+    scope('reply'),
+    (req, res, next) => {
+      const result = rateLimiter.hit('tokenComment', req.token.id, LIMITS.tokenComment)
+      if (result.ok) return next()
+      res.setHeader('Retry-After', String(result.retryAfter))
+      fail(res, 429, 'rate_limited', 'That is a lot of new comments from this token. Wait a while and try again.')
+    },
+    v1Json,
+    v1Board((req, res, ctx) => {
+      const input = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}
+      const pageId = typeof input.page === 'string' ? input.page.trim() : ''
+      const page = ctx.board.pages.find((item) => item.id === pageId)
+      const comment = transaction(db, () =>
+        ctx.comments.create(
+          ctx.config,
+          ctx.board,
+          {
+            pageId,
+            // Default: the page's first viewport, and the pin near the
+            // top-left corner (where `comments add` puts it).
+            viewport:
+              input.viewport !== undefined
+                ? input.viewport
+                : page
+                  ? page.viewports[0]
+                  : Object.keys(boardViewports(ctx.config, ctx.board))[0],
+            x: input.x === undefined ? 2 : input.x,
+            y: input.y === undefined ? 2 : input.y,
+            body: input.body,
+            anchor: input.anchor ?? null,
+          },
+          { ...tokenAuthor(req), tokenId: req.token.id },
+          now(),
+        ),
+      )
+      auditOf(req, 'token_commented', `${ctx.board.id}#${comment.id}`, { project: req.project.id })
+      res.status(201).json({ board: boardRef(ctx.board), comment: v1Item(req, ctx, comment) })
     }),
   )
   function requireClaimOwner(req, boardId, number) {

@@ -7,14 +7,14 @@ import { DOCS } from './routes.js'
 
 const FILES = import.meta.glob('./docs/*.md', { import: 'default' })
 const REPO_FILES = import.meta.glob(
-  '../../docs/{agent-hardening,agent-recipes,agent-workflow,agents,buzz,capture-warnings,config,deployment,github,hosted,interaction-audits,journeys,local-accounts,monitoring,notifications,page-checks,performance,pull-requests,stability,starter-agent,updates,where-to-run}.md',
+  '../../docs/{agent-capabilities,agent-hardening,agent-recipes,agent-workflow,agents,buzz,capture-warnings,config,deployment,github,hosted,interaction-audits,journeys,local-accounts,monitoring,notifications,page-checks,performance,plugins,pull-requests,stability,starter-agent,updates,where-to-run}.md',
   { import: 'default' },
 )
 // The search index: the same files with `?search`, which the markdown plugin turns into { headings, text } only. Loaded
 // the first time someone uses the docs search.
 const SEARCH_FILES = import.meta.glob('./docs/*.md', { import: 'default', query: '?search' })
 const REPO_SEARCH_FILES = import.meta.glob(
-  '../../docs/{agent-hardening,agent-recipes,agent-workflow,agents,buzz,capture-warnings,config,deployment,github,hosted,interaction-audits,journeys,local-accounts,monitoring,notifications,page-checks,performance,pull-requests,stability,starter-agent,updates,where-to-run}.md',
+  '../../docs/{agent-capabilities,agent-hardening,agent-recipes,agent-workflow,agents,buzz,capture-warnings,config,deployment,github,hosted,interaction-audits,journeys,local-accounts,monitoring,notifications,page-checks,performance,plugins,pull-requests,stability,starter-agent,updates,where-to-run}.md',
   { import: 'default', query: '?search' },
 )
 

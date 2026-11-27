@@ -180,6 +180,9 @@ export function feedbackItem(context, comment) {
     // (an agent); the starter agent's trigger gate goes by these.
     ...(comment.authorHandle ? { authorHandle: comment.authorHandle } : {}),
     ...(comment.authorAgent ? { authorAgent: true } : {}),
+    // Local: whether the server saw the board's owner make it (store.js
+    // createComment). Absent on comments from before 1.3.0 and on hosted ones.
+    ...(typeof comment.byOwner === 'boolean' ? { byOwner: comment.byOwner } : {}),
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt || comment.createdAt,
     resolvedAt: comment.resolvedAt || null,
@@ -213,6 +216,8 @@ export function feedbackItem(context, comment) {
         ...(reply.guest ? { authorGuest: true } : {}),
         ...(reply.handle ? { authorHandle: reply.handle } : {}),
         ...(reply.agent ? { authorAgent: true } : {}),
+        // An agent header the server did not see the owner's machine send.
+        ...(reply.unvouched ? { authorUnvouched: true } : {}),
         body: reply.body,
         createdAt: reply.createdAt,
         drawing: drawn.drawing,

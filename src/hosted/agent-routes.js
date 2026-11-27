@@ -61,6 +61,8 @@ export function mountAgentRoutes(consoleApi, { db, publicOrigin, handle, inWorks
         defaultAgentId: agents.defaultAgent(req.project.id)?.id || null,
         members,
         policy: { trustedRoles: policy.trustedRoles, trustedHandles: policy.trustedHandles },
+        // Tokens that may take work but are not listed as agents (the Tokens page lists them).
+        claimTokens: agents.claimTokens(req.project.id).length,
         connect: { origin: publicOrigin },
         options,
       })
@@ -120,6 +122,50 @@ export function mountAgentRoutes(consoleApi, { db, publicOrigin, handle, inWorks
         throw new HttpError(400, 'invalid_agent', 'agentId: an agent id, or null for any agent.')
       const defaultAgentId = transaction(db, () => agentsFor(req.t).setDefault(actorOf(req), req.project.id, agentId))
       res.json({ defaultAgentId })
+    }),
+  )
+
+  // The same for every project of the workspace (the Tokens page).
+  consoleApi.get(
+    '/workspaces/:ws/claim-tokens',
+    inWorkspace(NEEDS.tokens),
+    handle((req, res) => {
+      const agents = agentsFor(req.t)
+      const projects = req.t.all('SELECT id, name FROM projects WHERE workspace_id = :ws ORDER BY name')
+      res.json({
+        tokens: projects.flatMap((project) =>
+          agents.claimTokens(project.id).map((token) => ({ ...token, projectId: project.id, projectName: project.name })),
+        ),
+      })
+    }),
+  )
+  // Tokens with the claim scope that are not listed as agents: ones from an
+  // older build nobody used, and hidden ones (src/hosted/agents.js dormant).
+  consoleApi.get(
+    '/workspaces/:ws/projects/:pid/claim-tokens',
+    inWorkspace(NEEDS.tokens),
+    inProject,
+    handle((req, res) => {
+      res.json({ tokens: agentsFor(req.t).claimTokens(req.project.id) })
+    }),
+  )
+  // "Make this an agent".
+  consoleApi.post(
+    '/workspaces/:ws/projects/:pid/claim-tokens/:tid/agent',
+    inWorkspace(NEEDS.tokens),
+    inProject,
+    handle((req, res) => {
+      const agent = transaction(db, () => agentsFor(req.t).makeAgent(actorOf(req), req.project.id, req.params.tid))
+      res.json({ agent })
+    }),
+  )
+  // "Remove claim access": the token keeps its other scopes.
+  consoleApi.delete(
+    '/workspaces/:ws/projects/:pid/claim-tokens/:tid/claim',
+    inWorkspace(NEEDS.tokens),
+    inProject,
+    handle((req, res) => {
+      res.json(transaction(db, () => agentsFor(req.t).removeClaim(actorOf(req), req.project.id, req.params.tid)))
     }),
   )
 

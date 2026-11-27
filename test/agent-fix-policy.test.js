@@ -6,6 +6,7 @@
 // hello may claim (src/hosted/agent-link.js cleanHello), the summary of a
 // fix as the server keeps it (src/hosted/chat-frames.js cleanSummary), and
 // what a session that takes edits is started with (src/agent/backends/acp.js).
+import { upgradeV1Capabilities, CAPABILITY_NARROWEST } from '../src/agent/capabilities.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -179,7 +180,21 @@ test('which files run something: one list for the card and for the push', () => 
 })
 
 test('the policy file: a value it does not know reads as the narrowest setting, by name; never as the default', () => {
-  const NONE = { audience: 'server', approvals: 'none', commands: [], auto: [], allowPaths: [], base: null, remote: 'origin' }
+  const NONE = {
+    audience: 'server',
+    approvals: 'none',
+    commands: [],
+    auto: [],
+    allowPaths: [],
+    base: null,
+    remote: 'origin',
+    instructions: 'all',
+    agentConfig: null,
+    respond: 'thread',
+    // Version 2: what each trust tier may do (src/agent/capabilities.js); nothing
+    // saved reads as what version 1 allowed.
+    ...upgradeV1Capabilities('none', []),
+  }
   const read = (entry) => {
     const warnings = []
     return [cleanMachinePolicy(entry, (text) => warnings.push(text)), warnings]
@@ -225,7 +240,21 @@ test('the policy file: a value it does not know reads as the narrowest setting, 
     /"pushWithoutAsking" is not a setting this version knows/,
   )
   // An entry that is not an object at all: the narrowest of everything.
-  assert.deepEqual(read('admins')[0], { ...NONE, audience: 'owner', remote: null })
+  assert.deepEqual(read('admins')[0], {
+    ...NONE,
+    audience: 'owner',
+    remote: null,
+    instructions: 'none',
+    agentConfig: 'none',
+    respond: 'mention',
+    ...CAPABILITY_NARROWEST,
+  })
+  // A respond value it does not know: mentions only.
+  for (const respond of ['always', 'Thread', '', 1]) {
+    const [policy, warnings] = read({ respond })
+    assert.equal(policy.respond, 'mention', JSON.stringify(respond))
+    assert.match(warnings.join('\n'), /"respond"/)
+  }
 
   // The file itself: yours, and only yours to write, checked before a byte of it is read.
   const env = { XDG_CONFIG_HOME: tempDir('fix-policy-file') }
@@ -286,11 +315,17 @@ test('agent connect: the flags that change this machine’s policy, and what the
   assert.throws(() => policyChanges({ base: '--upload-pack=x' }, on), /--base/)
   assert.throws(() => policyChanges({ 'git-remote': '-x' }, on), /--git-remote/)
   // What the terminal says of each, and exactly who can switch "without asking" on.
-  assert.deepEqual(describeMachinePolicy(none), ['Reads and answers. No edits, no commands (this machine refuses both).'])
-  const said = describeMachinePolicy({ ...on, auto: ['edits'], allowPaths: ['package.json'], base: 'main' }).join('\n')
+  assert.deepEqual(describeMachinePolicy(none), [
+    'Reads and answers. No edits, no commands, no shell (this machine refuses all three).',
+    'Browser: none.',
+  ])
+  // As connect hands it over: the saved entry, cleaned (the capability keys follow approvals and commands).
+  const said = describeMachinePolicy(
+    cleanMachinePolicy({ approvals: 'owner', commands: ['npm test'], auto: ['edits'], allowPaths: ['package.json'], base: 'main' }),
+  ).join('\n')
   assert.match(said, /allowed by the person who connected it/)
   assert.match(said, /never in this checkout/)
-  assert.match(said, /Commands: only "npm test"/)
+  assert.match(said, /Exact commands: only "npm test"/)
   assert.match(said, /May be allowed without asking: edits, once the person who connected it \(nobody else\) switches that on/)
   assert.match(said, /never a file that runs something/)
   assert.match(said, /not pushed until a person has looked at its whole diff/)
@@ -303,7 +338,7 @@ test('agent connect: the flags that change this machine’s policy, and what the
 
 test('hello: what a machine says it allows is recorded as said, and anything unclear as nothing', () => {
   const hello = (policy, extra = {}) => cleanHello({ kind: 'claude', policy, ...extra }).capabilities
-  assert.deepEqual(hello(undefined).policy, { audience: 'server', approvals: 'none', commands: [], auto: [] })
+  assert.deepEqual(hello(undefined).policy, { audience: 'server', approvals: 'none', commands: [], auto: [], respond: 'mention' })
   assert.deepEqual([hello(undefined).edits, hello(undefined).commands], [false, false])
   // A 0.5.0 machine, a made-up level, and claims without approvals.
   for (const policy of [
@@ -311,7 +346,7 @@ test('hello: what a machine says it allows is recorded as said, and anything unc
     { approvals: 'remote', commands: ['npm test'], auto: ['edits'] },
     { commands: ['npm test'], auto: ['edits', 'commands'] },
   ])
-    assert.deepEqual(hello(policy).policy, { audience: 'server', approvals: 'none', commands: [], auto: [] })
+    assert.deepEqual(hello(policy).policy, { audience: 'server', approvals: 'none', commands: [], auto: [], respond: 'mention' })
   // The machine cannot claim capabilities apart from its policy.
   assert.equal(cleanHello({ kind: 'claude', capabilities: { chat: true, edits: true, commands: true } }).capabilities.edits, false)
   const on = hello({
@@ -319,7 +354,13 @@ test('hello: what a machine says it allows is recorded as said, and anything unc
     commands: ['npm test', 'npm test', 'a\nb', 7, 'x'.repeat(201)],
     auto: ['commands', 'edits', 'all'],
   })
-  assert.deepEqual(on.policy, { audience: 'server', approvals: 'owner', commands: ['npm test'], auto: ['edits', 'commands'] })
+  assert.deepEqual(on.policy, {
+    audience: 'server',
+    approvals: 'owner',
+    commands: ['npm test'],
+    auto: ['edits', 'commands'],
+    respond: 'mention',
+  })
   assert.deepEqual([on.edits, on.commands], [true, true])
   assert.deepEqual(hello({ approvals: 'admins', auto: ['commands'] }).policy.auto, [], '"commands" with no command is nothing')
   // The approval rule follows: "auto" only for a kind the machine named, and only with approvals.
@@ -428,6 +469,13 @@ test('a session that takes edits: the agent’s own settings left out, only read
   const withCommands = tools(remoteEditSession('claude', { commands: ['npm test'] }))
   assert.ok(!withCommands.tools.includes('Bash'))
   assert.ok(withCommands.disallowedTools.includes('Bash'))
+  // Commands come through Shapewall's own tool server instead (exec-mcp.js): its tools need no
+  // permission request of their own (each checks and asks inside Shapewall). Bash stays off.
+  assert.equal(edits.allowedTools, undefined)
+  const withExec = tools(remoteEditSession('claude', { exec: true }))
+  assert.deepEqual(withExec.allowedTools, ['mcp__shapewall_exec'])
+  assert.ok(withExec.disallowedTools.includes('Bash'))
+  assert.ok(!withExec.tools.includes('Bash'))
   // So `agent connect` refuses to list a command for it, and says why.
   assert.throws(
     () => policyChanges({ 'allow-command': 'npm test' }, { ...DEFAULT_MACHINE_POLICY, approvals: 'owner' }, 'claude'),
@@ -449,4 +497,15 @@ test('a session that takes edits: the agent’s own settings left out, only read
     Object.keys(env).filter((name) => /SHAPEWALL|TOKEN/.test(name)),
     [],
   )
+})
+
+test('a command card (exec-mcp) carries no diff, and its hash covers the command line and why it asks', () => {
+  const command = edit({ name: 'command', label: 'Run test', detail: 'npm test\n\nIn the fix copy, in the OS sandbox.', diff: null })
+  const hash = cardHash(TURN, command)
+  assert.match(hash, /^[a-f0-9]{64}$/)
+  assert.equal(cardContent(command).diff, null)
+  // One sent with a diff is not a card anyone can answer.
+  assert.equal(cardHash(TURN, { ...command, diff: edit().diff }), null)
+  assert.notEqual(cardHash(TURN, { ...command, detail: 'npm test -- --x\n\nIn the fix copy, in the OS sandbox.' }), hash)
+  assert.notEqual(cardHash(TURN, { ...command, name: 'execute' }), hash)
 })

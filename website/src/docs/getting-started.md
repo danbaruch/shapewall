@@ -180,6 +180,23 @@ The transcription is done by your browser's own speech service, not by Shapewall
 Apple. Shapewall never receives or stores the audio, only the text you post. It only starts from a press, and the microphone's
 tooltip says who does the transcribing. On a phone, the keyboard's own microphone works as well.
 
+## Let your agent find the board
+
+`shapewall init` writes a short Shapewall section into `AGENTS.md` (and a `CLAUDE.md` that imports it), so a coding agent opened in
+the project knows the board is there. To give Claude Code and Codex the board's tools too:
+
+```sh
+npx shapewall agent setup
+```
+
+It shows what it would register and asks first. Then open Claude Code or Codex in the project and ask: "take the open Shapewall
+comments". The agent hands you a link to what it changed; `npx shapewall open --comment 12` opens one yourself, and **Follow agent**
+on the board keeps up with it while it works. Details: [your agent finds the board](/docs/agent-workflow#your-agent-finds-the-board)
+and [links to the board](/docs/agent-workflow#links-to-the-board).
+
+Prefer a plugin? The [Claude Code and Codex plugin](/docs/plugins) (experimental) installs the same MCP server plus skills. Use the
+plugin or `agent setup`, not both.
+
 ## Fix a comment with your agent
 
 Put `shapewall.config.json` in the checkout the agent should edit and run `shapewall serve` there: the agent works in the folder the
@@ -268,6 +285,7 @@ journeys (`node scripts/demo-export.js` builds it).
 ## Next steps
 
 - Signed-in pages, menus that need a click first, more viewports: [config reference](/docs/config).
-- Hand the comments to your coding agent: [the agent workflow](/docs/agent-workflow).
+- Hand the comments to your coding agent: [the agent workflow](/docs/agent-workflow), or the
+  [Claude Code and Codex plugin](/docs/plugins).
 - Every command and option: [CLI reference](/docs/cli).
 - Share the board with a team: [deployment and self-hosting](/docs/self-hosting).

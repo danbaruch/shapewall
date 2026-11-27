@@ -32,6 +32,7 @@ export const USER_GUIDES = [
   'docs/monitoring.md',
   'docs/notifications.md',
   'docs/page-checks.md',
+  'docs/plugins.md',
   'docs/pull-requests.md',
   'docs/performance.md',
   'docs/stability.md',

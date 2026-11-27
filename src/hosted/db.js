@@ -821,6 +821,42 @@ const MIGRATIONS = [
   WHERE json_valid(scopes) AND json_type(scopes) = 'array'
     AND EXISTS (SELECT 1 FROM json_each(api_tokens.scopes) AS j WHERE j.type = 'text' AND j.value = 'comment');
   `,
+  // 22. When a shared thread's agent answers (1.3.0). chat_threads.respond_mode
+  // is 'mention' (the default: only an @mention of the agent or Send to
+  // agent starts a turn) or 'always' (every message, set by the person who
+  // connected the thread's agent; src/agent/triggers.js). Private chats
+  // ignore it: they answer every message of their owner. Every thread
+  // starts as 'mention', so shared threads stop answering every message on
+  // upgrade. Additive; an older build ignores the column and answers every
+  // message again (docs/hosted.md, "Migration 22 and rollback").
+  // respond_agent_id is the agent 'always' was set for: it holds only while
+  // the thread still talks to that agent, so a thread that went to another
+  // agent (on this build or an older one) answers mentions only.
+  `
+  ALTER TABLE chat_threads ADD COLUMN respond_mode TEXT NOT NULL DEFAULT 'mention';
+  ALTER TABLE chat_threads ADD COLUMN respond_agent_id TEXT;
+  `,
+  // 23. Thread trust (1.4.0, src/agent/thread-trust.js): whether a thread
+  // may still get its agent's extensions (skills and MCP servers from the
+  // machine's agent config folder). chat_threads.tainted is 1 once the
+  // thread carried text nobody can vouch for, and never goes back to 0;
+  // taint_authors is the JSON array of the user ids whose text it carried.
+  // Only chat-store.js writes them, through nextThreadTrust. Every thread
+  // that exists now is tainted: who wrote its history was never kept, so it
+  // fails closed. A thread started after the upgrade starts clean.
+  // trust_v is the stamp of the thread as this build last judged it (its
+  // agent and its newest message, chat-store.js trustStamp): an older build
+  // that writes in the thread, or starts one, leaves it out of date, and the
+  // thread then reads as tainted, so a rollback and upgrade again without
+  // the rollback SQL still fails closed. Additive; an older build ignores
+  // the columns (it has no extensions to give) (docs/hosted.md, "Migration
+  // 23 and rollback").
+  `
+  ALTER TABLE chat_threads ADD COLUMN tainted INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE chat_threads ADD COLUMN taint_authors TEXT;
+  ALTER TABLE chat_threads ADD COLUMN trust_v TEXT;
+  UPDATE chat_threads SET tainted = 1;
+  `,
 ]
 
 export const openDatabase = (file) => openSqlite(file, migrate)

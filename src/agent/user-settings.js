@@ -23,6 +23,7 @@ import { DENIED_KEY_VARS, KEY_VAR_RE, validateAgent } from './config.js'
 import { cleanBranchPrefix } from './branch-mode.js'
 import { cleanBatchFixes } from './batch-fixes.js'
 import { IDENTITY_KEYS, cleanAgentName, isAgentIcon, isAgentTint } from './identity.js'
+import { CAPABILITY_KEYS, cleanCapabilityKeys } from './capabilities.js'
 
 export const SETTINGS_FILE_VAR = 'SHAPEWALL_AGENT_SETTINGS_FILE'
 export const ENTRY_KEYS = [
@@ -44,6 +45,14 @@ export const ENTRY_KEYS = [
   'icon',
   'tint',
   'fixedAgent',
+  // What each trust tier may do on this local board (capabilities.js): the
+  // same keys as a connected agent's agent-policy.json version 2.
+  'capabilities',
+  // The agent config folder whose skills and MCP servers this project's
+  // agent gets on trusted turns (agent-config-folder.js). Set only from the
+  // command line (`shapewall agent set agent-config DIR`): a save on the
+  // board keeps it and never changes it (settings-routes.js).
+  'agentConfig',
 ]
 const SECRET_KEYS = ['apiKey', 'key', 'token', 'secret', 'password']
 const ACP_COMMAND_MAX = 2000
@@ -97,7 +106,21 @@ export function validateUserEntry(raw) {
       problems.push(`${key}: keys are never saved; set the key in the environment and name its variable in apiKeyEnv`)
     else if (!ENTRY_KEYS.includes(key) && key !== 'updatedAt') problems.push(`${key}: not an agent setting`)
   }
-  const { keyHosts, acpCommand, profiles, updatedAt, branchMode, branchPrefix, batchFixes, icon, tint, fixedAgent, ...rest } = given
+  const {
+    keyHosts,
+    acpCommand,
+    profiles,
+    updatedAt,
+    branchMode,
+    branchPrefix,
+    batchFixes,
+    icon,
+    tint,
+    fixedAgent,
+    capabilities,
+    agentConfig,
+    ...rest
+  } = given
   const fields = {}
   for (const key of ['backend', 'baseUrl', 'model', 'apiKeyEnv', 'label', 'vision']) if (rest[key] !== undefined) fields[key] = rest[key]
   const agentProblems = []
@@ -202,6 +225,24 @@ export function validateUserEntry(raw) {
     problems.push(...checked.problems)
     if (checked.value) entry.batchFixes = checked.value
   }
+  // Capabilities: a key it does not know is a problem (a typo must not read
+  // as the default); a value it does not know reads as the narrowest.
+  if (capabilities !== undefined) {
+    if (!isObject(capabilities)) problems.push('capabilities: an object such as { "shell": "commands", "browser": "off" }')
+    else {
+      for (const key of Object.keys(capabilities))
+        if (!CAPABILITY_KEYS.includes(key)) problems.push(`capabilities.${key}: not a capability setting`)
+      const known = Object.fromEntries(Object.entries(capabilities).filter(([key]) => CAPABILITY_KEYS.includes(key)))
+      const cleaned = cleanCapabilityKeys(known)
+      entry.capabilities = Object.fromEntries(Object.keys(known).map((key) => [key, cleaned[key]]))
+    }
+  }
+  // The agent config folder: an absolute path ("none" is the same as not set).
+  if (agentConfig !== undefined && agentConfig !== 'none') {
+    if (typeof agentConfig !== 'string' || !path.isAbsolute(agentConfig) || agentConfig.length > 1000 || /[\0\n\r]/.test(agentConfig))
+      problems.push('agentConfig: the absolute path of a folder on this machine ("none": no folder)')
+    else entry.agentConfig = agentConfig
+  }
   if (typeof updatedAt === 'string') entry.updatedAt = updatedAt
   return { entry: problems.length ? null : entry, problems }
 }
@@ -242,6 +283,28 @@ export function legacyProfile(entry, known = []) {
   for (let n = 2; taken.has(id); n += 1) id = `${base}-${n}`
   const label = (agent?.label || entry.label || 'Agent command').slice(0, 80)
   return { id, label, acpCommand: entry.acpCommand }
+}
+
+// The machine policy of a local board (src/agent/capabilities.js
+// resolveCapabilities `machine`): the local owner answers its own cards, and
+// what each tier may do comes from the project's `capabilities` entry (the
+// defaults when none is saved). `agentConfig`: the agent config folder the
+// owner named for this project's agent (`shapewall agent set agent-config
+// DIR`), its skills and MCP servers given on trusted turns
+// (agent-config-folder.js); "none" when nothing is named. This file is the
+// machine's (outside every repository): a project's committed config never
+// names one.
+export function localMachinePolicy(entry) {
+  const named = typeof entry?.agentConfig === 'string' && path.isAbsolute(entry.agentConfig) ? entry.agentConfig : 'none'
+  return {
+    audience: 'owner',
+    approvals: 'owner',
+    commands: [],
+    remote: null,
+    instructions: 'all',
+    agentConfig: named,
+    ...cleanCapabilityKeys(entry?.capabilities || {}),
+  }
 }
 
 // The name saved for one of this project's agents, or null when none is

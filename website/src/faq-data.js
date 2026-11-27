@@ -18,7 +18,7 @@ export const FAQ = [
       },
   {
     q: 'Which coding agents does it work with?',
-    a: 'Any agent that can run a shell command and read JSON, including Claude Code, Codex and goose. Agents that speak MCP can use shapewall mcp, and shapewall watch starts a command-line agent for each new comment. Shapewall includes no model of its own: you bring the agent you already use.',
+    a: 'Any agent that can run a shell command and read JSON, including Claude Code, Codex and goose. Agents that speak MCP can use shapewall mcp, and shapewall watch starts a command-line agent for each new comment. Shapewall includes no model of its own: you bring the agent you already use. shapewall init tells the agent about the board in AGENTS.md, and shapewall agent setup registers the MCP server with Claude Code and Codex.',
   },
   {
     q: 'What does it need to run?',

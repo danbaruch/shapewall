@@ -27,6 +27,7 @@ import { agentPolicy } from './agent-policy.js'
 import { newId } from './crypto.js'
 import { HttpError } from './http.js'
 import { readLayout } from './usage-layout.js'
+import { boardLink, hostedBoardBase } from '../board-links.js'
 import { OUTCOME_GROUPS, USAGE_DIMENSIONS, USAGE_ROW_BYTES, USAGE_SORTS } from './usage-shape.js'
 import {
   USAGE_LIMITS,
@@ -238,9 +239,11 @@ export function createUsage(t, { now = () => new Date() } = {}) {
       labelOf,
       isMember: (userId) => loadNames().person.has(userId),
       linkUrl: (item) =>
-        `/w/${t.workspaceId}/p/${item.project_id}/?board=${encodeURIComponent(item.board_id)}${
-          item.comment_number ? `&c=${item.comment_number}` : ''
-        }`,
+        boardLink({
+          base: hostedBoardBase('', t.workspaceId, item.project_id),
+          board: item.board_id,
+          comment: item.comment_number || undefined,
+        }),
     })
 
   // ---- Aggregates ----

@@ -15,6 +15,7 @@ import { SAMPLE, tempDir } from './helpers.js'
 process.env.SHAPEWALL_USER_NAME = 'robin'
 delete process.env.SHAPEWALL_COMMENT_ID
 delete process.env.SHAPEWALL_SERVER_HOLDER
+delete process.env.SHAPEWALL_AGENT_RUN
 
 const V1 = '20261101T100000000Z-aaaa'
 const V2 = '20261102T100000000Z-bbbb'
@@ -528,4 +529,48 @@ test('every --json mutation prints one shape: { trust, note, board, comment }, p
   assert.deepEqual(replied.reply.files, { images: [], markup: null })
   const deleted = await json(['comments', 'delete', id, '--yes'])
   assert.deepEqual(deleted.board, board)
+})
+
+test('inside a process Shapewall started for an agent (SHAPEWALL_AGENT_RUN), comments add is an agent comment, never the owner stamp', async () => {
+  const { file } = project('cli-agent-run')
+  assert.equal(cliAuthor({ SHAPEWALL_AGENT_RUN: '1' }, { user: () => 'robin' }), 'agent')
+  const add = async (body) =>
+    JSON.parse((await run(['comments', 'add', '--config', file, '--page', 'home', '--body', body, '--json'])).text).comment
+  const mine = await add('From the person')
+  process.env.SHAPEWALL_AGENT_RUN = '1'
+  let theirs
+  try {
+    theirs = await add('From an agent @agent')
+  } finally {
+    delete process.env.SHAPEWALL_AGENT_RUN
+  }
+  const stored = (id) => getComment(loadConfig(file), 'sample', id)
+  assert.equal(stored(mine.id).byOwner, true)
+  assert.notEqual(stored(mine.id).authorAgent, true)
+  assert.equal(stored(theirs.id).byOwner, false)
+  assert.equal(stored(theirs.id).authorAgent, true)
+  assert.equal(stored(theirs.id).author, 'agent')
+})
+
+test('every agent process Shapewall starts carries the agent mark', async () => {
+  const { agentRunEnv, agentRunEnvEntries, runByAgent, AGENT_RUN_VAR } = await import('../src/agent-run.js')
+  assert.deepEqual(agentRunEnv(), { SHAPEWALL_AGENT_RUN: '1', SHAPEWALL_AGENT_HEADER: 'X-Shapewall-Agent: 1' })
+  assert.equal(runByAgent({ [AGENT_RUN_VAR]: '1' }), true)
+  assert.equal(runByAgent({}), false)
+  // The plugin launcher's copy is the same.
+  const launcher = await import('../plugins/shapewall/bin/shapewall-mcp.mjs')
+  assert.deepEqual(launcher.AGENT_RUN_ENV, agentRunEnv())
+  // The starter agent's container.
+  const { agentEnv } = await import('../src/agent/starter/runtime.js')
+  assert.equal(agentEnv('run1').SHAPEWALL_AGENT_RUN, '1')
+  // The board agent's own MCP server entry.
+  const { ownerMcpServers } = await import('../src/agent/owner-mcp.js')
+  const [server] = ownerMcpServers({ file: '/x/shapewall.config.json' }, 'sample', { env: {} })
+  for (const entry of agentRunEnvEntries()) assert.ok(server.env.some((item) => item.name === entry.name && item.value === entry.value))
+  // watch --exec.
+  const { commentEnv } = await import('../src/watch.js')
+  const item = { id: 3, page: { id: 'home', url: '' }, viewport: { name: 'desktop' }, files: { images: [] } }
+  const env = commentEnv({ file: '' }, { id: 'sample' }, item, '/tmp/c.json')
+  assert.equal(env.SHAPEWALL_AGENT_RUN, '1')
+  assert.equal(env.SHAPEWALL_AGENT_HEADER, 'X-Shapewall-Agent: 1')
 })
