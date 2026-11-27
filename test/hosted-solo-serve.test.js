@@ -434,16 +434,20 @@ test('with the real self-update router: Ctrl+C during an apply waits past the fo
   const cookie = String([].concat(signedIn.headers['set-cookie'])[0]).split(';')[0]
   const { owner } = handle.app.locals.solo
   const url = new URL(handle.origin)
-  const call = (method, pathname) =>
+  const call = (method, pathname, extra = {}) =>
     request(Number(url.port), method, `/w/${owner.workspaceId}/p/${owner.projectId}/api/app-update${pathname}`, {
       body: method === 'POST' ? {} : undefined,
-      headers: { Host: url.host, Cookie: cookie, ...(method === 'POST' ? { Origin: handle.origin } : {}) },
+      headers: { Host: url.host, Cookie: cookie, ...(method === 'POST' ? { Origin: handle.origin } : {}), ...extra },
     })
   assert.equal((await call('GET', '')).json.canUpdate, true, 'the signed-in owner on this machine may update')
   assert.equal((await call('POST', '/check')).status, 202)
   for (let i = 0; i < 300 && (await call('GET', '')).json.job?.state === 'running'; i++)
     await new Promise((resolve) => setTimeout(resolve, 10))
-  assert.equal((await call('POST', '/apply')).status, 202)
+  // The local session confirms the apply by typing the workspace's name (PR #53 F4).
+  const asked = await call('POST', '/apply')
+  assert.equal(asked.status, 403)
+  assert.equal(asked.json.error.code, 'confirm_required')
+  assert.equal((await call('POST', '/apply', { 'X-Shapewall-Confirm': encodeURIComponent(asked.json.error.confirm) })).status, 202)
   assert.equal(lifecycle.applying(), true)
 
   // Ctrl+C now: well past the 50 ms force timer, nothing exits while the helper runs.
