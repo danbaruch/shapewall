@@ -12,6 +12,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
   or a `push` token the owner made, used on this machine); the capture browser reaches the app's origin only, never the
   engine, its live HTML origin or this machine's LAN and tailnet addresses. `--no-capture` and `--read-only` turn it off.
   Team servers never capture. See docs/hosted.md, "The solo engine (experimental)".
+- Solo engine (experimental): batch fixes on the board's chat, as on a local board: the owner picks open comments
+  (Select in the comments panel), and the engine fixes them one after another through the link to the connected agent.
+  Each fix is its own turn with its own trust (a comment by someone else never runs solo-tier), its own approval cards and
+  its own branch. The engine's owner only, signed in from the terminal on this machine, checked again before each fix.
+  Off until `agent.batchFixes` turns it on; team servers have no batch routes. See
+  [the solo engine](docs/hosted.md#the-solo-engine-experimental).
 - Solo engine (experimental): the owner makes, edits and deletes the board's own journeys from the board, as on a local
   board, with the same validation against the config file's pages. They are stored in the board's `journeys.json` in the
   engine's folder; journeys from the config stay read only. Team servers keep journeys read only. See

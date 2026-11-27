@@ -28,6 +28,8 @@
 //   "echo"              -> every prompt block it got, as JSON
 //   "crash"             -> exits with code 3 mid-turn
 //   "edit PATH"         -> asks to edit PATH with ACP diff content (oldText/newText), then the option
+//   "fix REL"           -> asks to edit REL in the session cwd (rawInput Hello -> Hi there), then does it when
+//                          allowed; [[stub-fix:REL]] anywhere in the prompt does the same
 //   "rawedit PATH"      -> asks to edit PATH with Claude Code style rawInput (old_string/new_string)
 //   "longedit PATH"     -> like edit, adding a 1000-character line with a bidi override
 //   "loginsay"          -> answers only "Invalid API key · Please run /login" (an auth stop)
@@ -318,6 +320,12 @@ async function prompt({ sessionId, prompt: blocks }) {
     .join('\n')
     .match(/\[\[stub-exec:([a-z_]+)\]\]/)
   if (marked) last = 'exec ' + marked[1]
+  // [[stub-fix:REL]] anywhere in the prompt (a comment's text): "fix REL".
+  const fixMark = blocks
+    .map((block) => block.text || '')
+    .join('\n')
+    .match(/\[\[stub-fix:([A-Za-z0-9._/-]+)\]\]/)
+  if (fixMark) last = 'fix ' + fixMark[1]
   const [word, ...rest] = last.split(/\s+/)
   if (last === 'unsupported model') {
     say(sessionId, "The 'unavailable-model' model is not supported when using Codex with a ChatGPT account.")
@@ -528,6 +536,28 @@ async function prompt({ sessionId, prompt: blocks }) {
       ],
     })
     say(sessionId, result.outcome.outcome === 'selected' ? 'Permission: ' + result.outcome.optionId + '.' : 'Permission: cancelled.')
+    return 'end_turn'
+  }
+  if (word === 'fix') {
+    // As Claude Code edits: ask with rawInput (old_string/new_string) for REL inside the session cwd, then do the
+    // edit itself (Hello -> Hi there) when allowed.
+    const target = sessionCwd + '/' + rest.join(' ')
+    const result = await request('session/request_permission', {
+      sessionId,
+      toolCall: {
+        toolCallId: 'call-fix',
+        title: 'Edit ' + rest.join(' '),
+        kind: 'edit',
+        rawInput: { file_path: target, old_string: 'Hello', new_string: 'Hi there' },
+      },
+      options: [
+        { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+        { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+      ],
+    })
+    const allowed = result.outcome.outcome === 'selected' && result.outcome.optionId === 'allow'
+    if (allowed) fs.writeFileSync(target, fs.readFileSync(target, 'utf8').replace('Hello', 'Hi there'))
+    say(sessionId, allowed ? 'Fixed ' + rest.join(' ') + '.' : 'Not fixed.')
     return 'end_turn'
   }
   if (last === 'loginsay') {

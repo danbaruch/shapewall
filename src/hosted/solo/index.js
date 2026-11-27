@@ -33,8 +33,9 @@
 // `soloFeatures` on the board's /info, G16), events.js (events.jsonl and
 // notifications, G8), update.js (self-update, G10), capture.js (in-process
 // capture from the board and recapture_pages on /mcp, G3), journeys.js
-// (journey editing, G5). A surface the board turns on (client/src/board/solo.js)
+// (journey editing, G5), batch.js (batch fixes on the chat, G14a). A surface the board turns on (client/src/board/solo.js)
 // sets its flag in `features`.
+import { mountSoloBatch } from './batch.js'
 import { mountSoloCapture } from './capture.js'
 import { createSoloBoards } from './config.js'
 import { mountSoloEvents } from './events.js'
@@ -108,6 +109,9 @@ export function mountSolo(app, deps) {
   if (capture) closers.push(() => capture.close())
   // Journey editing on the board (G5): sets features.journeys.
   mountSoloJourneys(app, soloDeps, features)
+  // Batch fixes on the chat (G14a): sets features.batchFixes.
+  const batch = mountSoloBatch(soloDeps, features)
+  if (batch) closers.push(() => batch.close())
   const update = mountSoloUpdate(app, soloDeps)
   if (update) {
     features.appUpdates = true
