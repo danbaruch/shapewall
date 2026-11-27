@@ -1,0 +1,189 @@
+{
+  "nextId": 6,
+  "comments": [
+    {
+      "id": 1,
+      "pageId": "home",
+      "viewport": "desktop",
+      "x": 20,
+      "y": 30,
+      "body": "Make the hero card taller.",
+      "author": "Owner",
+      "anchor": {
+        "selector": "#hero",
+        "text": "Welcome",
+        "dx": 0.5,
+        "dy": 0.4
+      },
+      "captureVersion": "20261127T010625330Z-722b",
+      "status": "open",
+      "createdAt": "2026-01-10T10:01:00.000Z",
+      "updatedAt": "2026-01-10T10:11:00.000Z",
+      "resolvedAt": null,
+      "resolution": null,
+      "replies": [
+        {
+          "id": 1,
+          "author": "Visitor A",
+          "body": "Agreed, about 40px.",
+          "createdAt": "2026-01-10T10:06:00.000Z",
+          "reactions": [
+            {
+              "emoji": "🎉",
+              "by": [
+                {
+                  "name": "Owner"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "author": "Owner",
+          "body": "Mockup",
+          "createdAt": "2026-01-10T10:07:00.000Z",
+          "images": [
+            {
+              "id": "5b95c1de69fd6a5edda65793",
+              "file": "5b95c1de69fd6a5edda65793.png",
+              "name": "mock.png",
+              "mediaType": "image/png",
+              "bytes": 83,
+              "width": 4,
+              "height": 4
+            }
+          ]
+        }
+      ],
+      "agentStatus": "queued",
+      "agentStatusAt": "2026-01-10T10:11:00.000Z",
+      "reactions": [
+        {
+          "emoji": "👍",
+          "by": [
+            {
+              "name": "Visitor A"
+            },
+            {
+              "name": "Owner"
+            }
+          ]
+        }
+      ],
+      "agentClaim": {
+        "id": "OXhBEY0Bk506",
+        "pid": 268100,
+        "start": "46635029",
+        "at": "2026-01-10T10:11:00.000Z"
+      }
+    },
+    {
+      "id": 2,
+      "pageId": "pricing",
+      "viewport": "phone",
+      "x": 50,
+      "y": 40,
+      "body": "Plan B reads cramped here.",
+      "author": "Visitor A",
+      "captureVersion": "20261127T010628391Z-934f",
+      "status": "resolved",
+      "createdAt": "2026-01-10T10:02:00.000Z",
+      "updatedAt": "2026-01-10T10:10:00.000Z",
+      "resolvedAt": "2026-01-10T10:10:00.000Z",
+      "resolution": "Fixed for real.",
+      "replies": [],
+      "agentStatus": null,
+      "agentStatusAt": null,
+      "reopenCount": 1,
+      "reopenedAt": "2026-01-10T10:09:00.000Z",
+      "fixRef": "abc1234"
+    },
+    {
+      "id": 3,
+      "pageId": "home",
+      "viewport": "phone",
+      "x": 10,
+      "y": 70,
+      "body": "Button colour like this.",
+      "author": "Owner",
+      "captureVersion": "20261127T010626359Z-9cbb",
+      "status": "open",
+      "createdAt": "2026-01-10T10:03:00.000Z",
+      "updatedAt": "2026-01-10T10:03:00.000Z",
+      "resolvedAt": null,
+      "resolution": null,
+      "replies": [],
+      "agentStatus": null,
+      "agentStatusAt": null,
+      "images": [
+        {
+          "id": "b9434d03ec8e128441da783a",
+          "file": "b9434d03ec8e128441da783a.png",
+          "name": "swatch.png",
+          "mediaType": "image/png",
+          "bytes": 83,
+          "width": 4,
+          "height": 4
+        }
+      ],
+      "drawing": {
+        "shapes": [
+          {
+            "tool": "arrow",
+            "ink": "accent",
+            "width": 3,
+            "points": [
+              [
+                0.1,
+                0.1
+              ],
+              [
+                0.4,
+                0.4
+              ]
+            ]
+          }
+        ],
+        "captureVersion": "20261127T010626359Z-9cbb"
+      }
+    },
+    {
+      "id": 4,
+      "pageId": "pricing",
+      "viewport": "desktop",
+      "x": 33,
+      "y": 33,
+      "body": "Staging shows the old plan names.",
+      "author": "Owner",
+      "environment": "staging",
+      "captureVersion": null,
+      "status": "open",
+      "createdAt": "2026-01-10T10:04:00.000Z",
+      "updatedAt": "2026-01-10T10:04:00.000Z",
+      "resolvedAt": null,
+      "resolution": null,
+      "replies": [],
+      "agentStatus": null,
+      "agentStatusAt": null
+    },
+    {
+      "id": 5,
+      "pageId": "variant:alt-hero",
+      "viewport": "desktop",
+      "x": 5,
+      "y": 5,
+      "body": "I like this version.",
+      "author": "Visitor A",
+      "captureVersion": null,
+      "status": "open",
+      "createdAt": "2026-01-10T10:05:00.000Z",
+      "updatedAt": "2026-01-10T10:05:00.000Z",
+      "resolvedAt": null,
+      "resolution": null,
+      "replies": [],
+      "agentStatus": null,
+      "agentStatusAt": null
+    }
+  ]
+}

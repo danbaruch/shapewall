@@ -1,0 +1,29 @@
+{
+  "messages": [
+    {
+      "id": "msg_mwya6xk32d24b183",
+      "role": "user",
+      "text": "Look at this swatch",
+      "attachments": [
+        {
+          "id": "638ac4f3bfe154dbba4ae07d",
+          "name": "swatch.png",
+          "mediaType": "image/png",
+          "file": "638ac4f3bfe154dbba4ae07d.png",
+          "bytes": 73
+        }
+      ],
+      "createdAt": "2026-01-10T10:15:00.000Z"
+    },
+    {
+      "id": "msg_fixture_a2",
+      "role": "assistant",
+      "text": "A red square.",
+      "createdAt": "2026-01-10T10:16:00.000Z"
+    }
+  ],
+  "owner": "owner",
+  "title": "Look at this swatch",
+  "titleSource": "auto",
+  "createdAt": "2026-01-10T10:15:00.000Z"
+}

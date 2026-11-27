@@ -1,0 +1,174 @@
+{
+  "board": "site",
+  "capturedAt": "2026-11-27T01:06:51.609Z",
+  "durationMs": 4312,
+  "viewports": {
+    "desktop": {
+      "width": 800,
+      "height": 600
+    },
+    "phone": {
+      "width": 390,
+      "height": 640
+    }
+  },
+  "pages": {
+    "home": {
+      "desktop": {
+        "status": "ok",
+        "url": "http://127.0.0.1:4892/",
+        "finalUrl": "http://127.0.0.1:4892/",
+        "httpStatus": 200,
+        "networkSummary": {
+          "schemaVersion": 1,
+          "window": "navigation-through-screenshot",
+          "responses": 1,
+          "http4xx": 0,
+          "http5xx": 0,
+          "apiErrors": 0,
+          "rateLimited": 0,
+          "apiRateLimited": 0,
+          "failedRequests": 0,
+          "capped": false
+        },
+        "bytes": 14595,
+        "ms": 1024,
+        "html": {
+          "status": "ok",
+          "bytes": 998,
+          "sha256": "e2fe43472db8b5dd9dde9169bb023a4e6aa36940f82ed87b7b56352df18e1545",
+          "images": 0,
+          "imagesDropped": 0,
+          "fonts": 0,
+          "fontsDropped": 0,
+          "colorScheme": "light",
+          "elements": {
+            "status": "ok",
+            "count": 8
+          }
+        },
+        "links": [
+          "pricing"
+        ],
+        "version": "20261127T010647543Z-9e35"
+      },
+      "phone": {
+        "status": "ok",
+        "url": "http://127.0.0.1:4892/",
+        "finalUrl": "http://127.0.0.1:4892/",
+        "httpStatus": 200,
+        "networkSummary": {
+          "schemaVersion": 1,
+          "window": "navigation-through-screenshot",
+          "responses": 1,
+          "http4xx": 0,
+          "http5xx": 0,
+          "apiErrors": 0,
+          "rateLimited": 0,
+          "apiRateLimited": 0,
+          "failedRequests": 0,
+          "capped": false
+        },
+        "bytes": 13441,
+        "ms": 1021,
+        "html": {
+          "status": "ok",
+          "bytes": 998,
+          "sha256": "e2fe43472db8b5dd9dde9169bb023a4e6aa36940f82ed87b7b56352df18e1545",
+          "images": 0,
+          "imagesDropped": 0,
+          "fonts": 0,
+          "fontsDropped": 0,
+          "colorScheme": "light",
+          "elements": {
+            "status": "ok",
+            "count": 8
+          }
+        },
+        "links": [
+          "pricing"
+        ],
+        "version": "20261127T010648571Z-f50f"
+      }
+    },
+    "pricing": {
+      "desktop": {
+        "status": "ok",
+        "url": "http://127.0.0.1:4892/pricing",
+        "finalUrl": "http://127.0.0.1:4892/pricing",
+        "httpStatus": 200,
+        "networkSummary": {
+          "schemaVersion": 1,
+          "window": "navigation-through-screenshot",
+          "responses": 1,
+          "http4xx": 0,
+          "http5xx": 0,
+          "apiErrors": 0,
+          "rateLimited": 0,
+          "apiRateLimited": 0,
+          "failedRequests": 0,
+          "capped": false
+        },
+        "bytes": 11568,
+        "ms": 991,
+        "html": {
+          "status": "ok",
+          "bytes": 980,
+          "sha256": "5302bbbec0ad2f58b1b19fc0a2b714c41c7709a61285b9ce2e92d03366038c03",
+          "images": 0,
+          "imagesDropped": 0,
+          "fonts": 0,
+          "fontsDropped": 0,
+          "colorScheme": "light",
+          "elements": {
+            "status": "ok",
+            "count": 8
+          }
+        },
+        "links": [
+          "home"
+        ],
+        "version": "20261127T010649594Z-5a14"
+      },
+      "phone": {
+        "status": "ok",
+        "url": "http://127.0.0.1:4892/pricing",
+        "finalUrl": "http://127.0.0.1:4892/pricing",
+        "httpStatus": 200,
+        "networkSummary": {
+          "schemaVersion": 1,
+          "window": "navigation-through-screenshot",
+          "responses": 1,
+          "http4xx": 0,
+          "http5xx": 0,
+          "apiErrors": 0,
+          "rateLimited": 0,
+          "apiRateLimited": 0,
+          "failedRequests": 0,
+          "capped": false
+        },
+        "bytes": 10672,
+        "ms": 1014,
+        "html": {
+          "status": "ok",
+          "bytes": 980,
+          "sha256": "5302bbbec0ad2f58b1b19fc0a2b714c41c7709a61285b9ce2e92d03366038c03",
+          "images": 0,
+          "imagesDropped": 0,
+          "fonts": 0,
+          "fontsDropped": 0,
+          "colorScheme": "light",
+          "elements": {
+            "status": "ok",
+            "count": 8
+          }
+        },
+        "links": [
+          "home"
+        ],
+        "version": "20261127T010650588Z-06e0"
+      }
+    }
+  },
+  "brokenLinks": []
+}

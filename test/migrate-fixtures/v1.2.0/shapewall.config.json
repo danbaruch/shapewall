@@ -1,0 +1,38 @@
+{
+  "title": "Fixture Site",
+  "id": "site",
+  "outputDir": ".shapewall",
+  "concurrency": 1,
+  "viewports": {
+    "desktop": {
+      "width": 800,
+      "height": 600
+    },
+    "phone": {
+      "width": 390,
+      "height": 640
+    }
+  },
+  "environments": [
+    {
+      "id": "local",
+      "baseUrl": "http://127.0.0.1:4891"
+    },
+    {
+      "id": "staging",
+      "baseUrl": "http://127.0.0.1:4892"
+    }
+  ],
+  "pages": [
+    {
+      "id": "home",
+      "path": "/",
+      "title": "Home"
+    },
+    {
+      "id": "pricing",
+      "path": "/pricing",
+      "title": "Pricing"
+    }
+  ]
+}

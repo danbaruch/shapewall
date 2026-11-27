@@ -75,6 +75,7 @@ const BOOLEAN_FLAGS = new Set([
   'remove',
   'write',
   'no-agent-docs',
+  'rollback',
 ])
 // Old flag spellings each command still takes, hidden from its help: the
 // value moves to the new name and a one-line warning says to switch. null:
@@ -128,6 +129,7 @@ export const COMMAND_FLAGS = {
   auth: AUTH_FLAGS,
   init: ['base-url', 'sitemap', 'no-discover', 'force', 'limit', 'group', 'exclude', 'ci', 'no-agent-docs'],
   sitemap: ['limit', 'group', 'exclude', 'board', 'dry-run', 'json'],
+  migrate: ['dry-run', 'board', 'rollback', 'json'],
   capture: ['board', 'only', 'env', 'json', 'check-external'],
   // Every flag any `checks` action takes; SUBCOMMAND_FLAGS narrows it per action.
   checks: [...new Set([...CHECKS_FLAGS, ...LIGHTHOUSE_FLAGS])],

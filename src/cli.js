@@ -120,6 +120,11 @@ const COMMANDS = {
     await push(flags, out)
     return 0
   },
+  // Experimental in 1.5.0: local .shapewall/ into the solo engine (src/migrate).
+  migrate: async ({ flags, out }) => {
+    const { migrateCommand } = await import('./migrate/index.js')
+    return migrateCommand(loadConfig(flags.config), flags, out, { version: VERSION })
+  },
   hosted: async ({ positional, flags, out, err }) => {
     const { hostedCommand } = await import('./hosted/ops-cli.js')
     return hostedCommand(positional, flags, out, err)

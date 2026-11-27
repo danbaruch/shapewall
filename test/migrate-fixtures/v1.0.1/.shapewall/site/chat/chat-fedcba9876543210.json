@@ -1,0 +1,15 @@
+{
+  "messages": [
+    {
+      "id": "msg_mwya6xk5688b14b1",
+      "role": "user",
+      "text": "Hello from a visitor",
+      "attachments": [],
+      "createdAt": "2026-01-10T10:17:00.000Z"
+    }
+  ],
+  "owner": "key:00112233445566778899aabbccddeeff",
+  "title": "Hello from a visitor",
+  "titleSource": "auto",
+  "createdAt": "2026-01-10T10:17:00.000Z"
+}
