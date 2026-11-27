@@ -603,7 +603,7 @@ export async function rollback(config) {
           ? `The run that was stopped midway (${journal.backup}) stopped while writing its backup, before it changed anything; nothing needs restoring and ${JOURNAL} was removed.`
           : `The run that was stopped midway (${journal.backup}) was already put back; ${JOURNAL} was removed.`
     } else if (noBackup)
-      stuck = `The run that was stopped midway (${journal.backup}) cannot be put back: its backup is ${item ? 'incomplete' : 'gone'}, and the engine already has comments, chat or files of ${boards.join(', ')} from it. ${JOURNAL} stays. To give up on that run and keep what the engine has, delete ${JOURNAL}.`
+      stuck = `The run that was stopped midway (${journal.backup}) cannot be put back: its backup is ${item ? 'incomplete' : 'gone'}, and the engine already has comments, chat or files of ${boards.join(', ')} from it. ${JOURNAL} stays. Its board folders may be half moved: copy ${boards.map((id) => rel(config, boardDir(config, id))).join(', ')} aside first. Then, to give up on that run and keep what the engine has, delete ${JOURNAL}.`
   }
   return { restored, ignored, cleared, stuck }
 }
