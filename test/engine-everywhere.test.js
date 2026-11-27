@@ -6,6 +6,9 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { main } from '../src/cli.js'
 import { loadConfig } from '../src/config.js'
 import { boardHome } from '../src/cli/board-home.js'
@@ -17,17 +20,27 @@ import { createComment } from '../src/store.js'
 import { startEngineHeadless } from '../src/hosted/ops-cli.js'
 import { engineTarget } from '../src/engine-target.js'
 import { SAMPLE, isolatedEnv, tempDir } from './helpers.js'
+import { b64, solidPng } from './comment-media-fixtures.js'
 
 quietSqliteWarning()
+const CLI = fileURLToPath(new URL('../bin/shapewall.js', import.meta.url))
 const ENV = isolatedEnv('engine-everywhere-env', { SHAPEWALL_USER_NAME: 'Robin Tester' })
 
-async function migratedProject(name) {
+async function migratedProject(name, { image = false } = {}) {
   const dir = tempDir(name)
   const file = path.join(dir, 'shapewall.config.json')
   fs.writeFileSync(file, JSON.stringify({ ...structuredClone(SAMPLE), title: 'Everywhere Notes' }, null, 2))
   const config = loadConfig(file)
   const board = config.boards[0]
-  await createComment(config, board, { pageId: 'home', viewport: 'desktop', x: 10, y: 10, body: 'Bigger logo', author: 'Robin' })
+  await createComment(config, board, {
+    pageId: 'home',
+    viewport: 'desktop',
+    x: 10,
+    y: 10,
+    body: 'Bigger logo',
+    author: 'Robin',
+    ...(image ? { images: [{ name: 'shot.png', mediaType: 'image/png', data: b64(solidPng(8, 8)) }] } : {}),
+  })
   await createJourney(config, board, { name: 'Upgrade from 1x', steps: ['pricing', 'app'] })
   const lines = []
   assert.equal((await autoMigrate(config, (line) => lines.push(line), { env: ENV })).migrated, true, lines.join('\n'))
@@ -100,14 +113,31 @@ test('engine stopped: comments, watch and mcp start it for themselves and stop i
   }
 })
 
-test('export: refused with comments, the engine captures with --no-comments', async () => {
-  const { config, file } = await migratedProject('everywhere-export')
+test("export: the engine's comments through its token API (started for the command), its captures with --no-comments", async () => {
+  const { config, file } = await migratedProject('everywhere-export', { image: true })
+  // Without a start: still the refusal.
   await assert.rejects(engineMode('export', { config: file }, { env: ENV }), /holds this project's comments.*--no-comments/)
-  assert.equal(await engineMode('export', { config: file, 'no-comments': true }, { env: ENV }), null)
+
   const out = path.join(config.dir, 'exported')
-  const run = await cli(['export', '--config', file, '--no-comments', '--out', out])
+  const run = await cli(['export', '--config', file, '--out', out])
   assert.equal(run.code, 0, run.err)
-  assert.ok(fs.existsSync(out))
+  const exported = JSON.parse(fs.readFileSync(path.join(out, 'data', 'boards', 'sample', 'comments.json'), 'utf8')).comments
+  assert.deepEqual(
+    exported.map((comment) => [comment.body, comment.pageId, comment.status]),
+    [['Bigger logo', 'home', 'open']],
+  )
+  const view = JSON.parse(fs.readFileSync(path.join(out, 'data', 'boards', 'sample.json'), 'utf8'))
+  assert.deepEqual(view.commentCounts, { home: { open: 1, resolved: 0 } })
+  // The image, read from the engine under the name the comment lists.
+  const [image] = exported[0].images
+  assert.match(image.file, /^[a-f0-9]{24}\.png$/)
+  assert.ok(fs.statSync(path.join(out, 'data', 'boards', 'sample', 'comment-files', image.file)).size > 0)
+  assert.equal(engineTarget(config), null, 'the engine stopped after the export')
+
+  const bare = path.join(config.dir, 'exported-bare')
+  const captures = await cli(['export', '--config', file, '--no-comments', '--out', bare])
+  assert.equal(captures.code, 0, captures.err)
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(bare, 'data', 'boards', 'sample', 'comments.json'), 'utf8')).comments, [])
 })
 
 test("journeys and variants read the engine's board folder; github refuses", async () => {
@@ -134,4 +164,33 @@ test('share --remote stays refused on an engine board', async () => {
   const run = await cli(['share', '--config', file, '--remote', 'https://board.example.test', '--dry-run'])
   assert.notEqual(run.code, 0)
   assert.match(run.err, /lives in the solo engine now/)
+})
+
+test('an agent starts shapewall mcp with no serve running: the tools answer from the engine, and it stops with the session', async () => {
+  const { config, file } = await migratedProject('everywhere-mcp')
+  const client = new Client({ name: 'engine-everywhere', version: '1.0.0' })
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [CLI, 'mcp', '--config', file],
+      cwd: config.dir,
+      env: { ...process.env, ...ENV },
+      stderr: 'pipe',
+    }),
+  )
+  let closed = false
+  try {
+    const { tools } = await client.listTools()
+    assert.ok(tools.some((tool) => tool.name === 'list_comments'))
+    const listed = await client.callTool({ name: 'list_comments', arguments: {} })
+    assert.match(JSON.stringify(listed.content), /Bigger logo/)
+    assert.ok(engineTarget(config), 'the engine runs while the session does')
+    await client.close()
+    closed = true
+    const until = Date.now() + 15000
+    while (engineTarget(config) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100))
+    assert.equal(engineTarget(config), null, 'the engine stopped with the session')
+  } finally {
+    if (!closed) await client.close()
+  }
 })

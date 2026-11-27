@@ -71,7 +71,8 @@ export async function engineMode(command, flags, { env = process.env, err = () =
   let target = engineTarget(config, { which })
   let stop = null
   // Not running, and the engine holds the project: this command starts it (never for an agent's own process).
-  if (!target && command !== 'export' && startEngine && env[NO_ENGINE_VAR] !== '1' && (await boardHome(config, { env })).engine) {
+  const wanted = command !== 'export' || !flags['no-comments']
+  if (!target && wanted && startEngine && env[NO_ENGINE_VAR] !== '1' && (await boardHome(config, { env })).engine) {
     assertMigrationAllows(config)
     ;({ target, stop = null } = await engineForCommand(config, which, startEngine, err))
   }
@@ -82,13 +83,8 @@ export async function engineMode(command, flags, { env = process.env, err = () =
       throw new Error(
         "This command was started by an agent (shapewall watch without --pass-token, or a connected agent): it does not get the solo engine's tokens. Run it yourself, or give watch --pass-token.",
       )
-    if (command === 'export') {
-      if (!flags['no-comments'])
-        throw new Error(
-          `The solo engine runs for this project (${target.url}) and holds its comments; export reads the 1.x board files in ${config.outputDir}. Add --no-comments to export the captures only.`,
-        )
-      return null
-    }
+    // export --no-comments: the engine's folders only (commands.js), no token needed.
+    if (command === 'export' && flags['no-comments']) return { target: null, config, stop }
     // Whoever listens on the engine's port proves it is this start's engine before any token goes there.
     try {
       await verify(target)

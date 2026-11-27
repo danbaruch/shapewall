@@ -141,14 +141,25 @@ export function remoteMcpConfig(flags, err = () => {}, { env = process.env, cwd 
 const homeOf = async (config) => (config ? (await boardHome(config)).config : null)
 
 export async function exportCommand(flags, out) {
-  // With --no-comments (engine-mode.js refuses the rest once the engine holds the project): the engine's captures.
+  // Once the engine holds the project: its captures from its folders, and its comments through its token API
+  // (engine-mode.js points flags at it, started for this command when it does not run).
   const config = await projectConfig(flags)
   const { exportStatic } = await import('../export.js')
+  let commentSource = null
+  if (flags.remote !== undefined && !flags['no-comments']) {
+    const { createRemote, remoteSettings } = await import('../remote/remote.js')
+    const remote = createRemote(remoteSettings(flags))
+    commentSource = {
+      list: async (boardId) => (await remote.exportComments(boardId)).comments,
+      file: (boardId, name) => remote.commentFile(boardId, name),
+    }
+  }
   const result = await exportStatic(config, {
     out: flags.out || 'shapewall-export',
     includeComments: !flags['no-comments'],
     includeChecks: Boolean(flags['include-checks']),
     browserComments: Boolean(flags['browser-comments']),
+    commentSource,
     noindex: Boolean(flags['no-index']),
   })
   out(`Exported ${result.boards} board${result.boards === 1 ? '' : 's'} (${result.files} files) to ${result.out}`)
