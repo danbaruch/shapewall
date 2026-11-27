@@ -103,7 +103,8 @@ with one branch becomes that branch's steps).
 On a hosted board, journeys come from the pushed config and are read only. On the solo engine (`shapewall serve --engine hosted`,
 experimental) the owner, signed in on this machine, makes, edits and deletes them as on a local board, with the same checks against the
 config file's pages. They are stored in the board's `journeys.json` in the engine's folder (`.shapewall/.engine/files/`), where
-`shapewall migrate` moves a local board's journeys, and a `shapewall push` to the engine keeps them. Journeys from the config
+`shapewall migrate` moves a local board's journeys, and a `shapewall push` to the engine keeps them. If that file is not a
+regular file of at most 4 MB (a link, for example), the push is refused rather than losing it. Journeys from the config
 stay read only there too.
 
 The builder makes linear journeys and one level of forks: **Fork here** after a page splits the journey into named branches, a

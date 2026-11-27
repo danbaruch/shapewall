@@ -109,7 +109,7 @@ function staticPath(url) {
 // re-exports it), so `instanceof ApiError` holds whichever made the call.
 // `details`: the server's extra lines; `retryAfter`: seconds, on a 429.
 export class ApiError extends Error {
-  constructor(status, code, message, { details = null, retryAfter = null, stepUp = null } = {}) {
+  constructor(status, code, message, { details = null, retryAfter = null, stepUp = null, confirm = null } = {}) {
     super(message)
     this.status = status
     this.code = code
@@ -117,6 +117,8 @@ export class ApiError extends Error {
     this.retryAfter = retryAfter
     // Which rule asked for a passkey (src/hosted/step-up.js): 'always', a group, 'adminIdle' or 'restricted'.
     this.stepUp = stepUp
+    // confirm_required (passkeys off): the phrase to type, sent back in X-Shapewall-Confirm.
+    this.confirm = confirm
   }
 }
 
@@ -125,6 +127,7 @@ export const responseError = (status, data) =>
   new ApiError(status, data?.error?.code || 'http_error', data?.error?.message || `Request failed (${status})`, {
     details: data?.error?.details || null,
     stepUp: data?.error?.stepUp || null,
+    confirm: typeof data?.error?.confirm === 'string' ? data.error.confirm : null,
   })
 
 async function fetchJson(target) {
@@ -142,10 +145,10 @@ async function fetchJson(target) {
 // same way and say so in the answer (chat/stream.js).
 const TEST_RETRY_MS = 1000
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-async function request(method, url, body, keepalive = false) {
+async function request(method, url, body, keepalive = false, extraHeaders = null) {
   for (let waited = 0; ; waited += TEST_RETRY_MS) {
     try {
-      return await requestOnce(method, url, body, keepalive)
+      return await requestOnce(method, url, body, keepalive, extraHeaders)
     } catch (error) {
       if (method === 'GET' || error?.status !== 409 || error.code !== 'test_running' || waited >= TEST_WAIT_MS) throw error
       await wait(TEST_RETRY_MS)
@@ -153,7 +156,7 @@ async function request(method, url, body, keepalive = false) {
   }
 }
 
-async function requestOnce(method, url, body, keepalive) {
+async function requestOnce(method, url, body, keepalive, extraHeaders = null) {
   if (BROWSER_COMMENTS) {
     const answer = await browserCommentsRequest(method, url, body, fetchJson)
     if (answer !== undefined) return answer
@@ -163,6 +166,7 @@ async function requestOnce(method, url, body, keepalive) {
   if (!target || (STATIC && method !== 'GET')) throw new ApiError(404, 'static', 'Not available in a static export.')
   const headers = body === undefined ? { Accept: 'application/json' } : { Accept: 'application/json', 'Content-Type': 'application/json' }
   if (settingsToken && wantsToken(url, method)) headers[TOKEN_HEADER] = settingsToken
+  if (extraHeaders) Object.assign(headers, extraHeaders)
   const response = await fetch(target, {
     method,
     headers,
@@ -202,7 +206,8 @@ function noticeLostAccess(status, code) {
 
 export const api = {
   get: (url) => request('GET', url),
-  post: (url, body = {}) => request('POST', url, body),
+  // headers: extra request headers (the typed confirmation, X-Shapewall-Confirm).
+  post: (url, body = {}, { headers = null } = {}) => request('POST', url, body, false, headers),
   patch: (url, body = {}) => request('PATCH', url, body),
   delete: (url, { keepalive = false } = {}) => request('DELETE', url, undefined, keepalive),
 }

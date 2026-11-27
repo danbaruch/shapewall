@@ -20,7 +20,8 @@
 // renames board files without that lock while it runs, so the backup waits
 // (busyWaitMs) while any board holds a live board-job lock
 // (<board>/capture.lock, src/board-job.js), and fails if it does not end; a
-// capture starts only once the lock is free of a backup's pin. A board the snapshot lists with no folder makes the backup
+// capture starts only once the lock is free of a backup's pin, and a lock taken
+// while the pin ran (another process) drops the pin and waits. A board the snapshot lists with no folder makes the backup
 // incomplete (`complete: false`, listed under files.skipped.missing): the
 // backup command and the restore drill both fail on it.
 // Open pushes have no staging files in the backup. Restore closes those rows.
@@ -277,49 +278,78 @@ export async function backup({
         // released so the server's writes do not wait for the copy.
         // A capture running on a board (the solo engine) renames its files
         // without this lock: wait for it to end.
+        //
+        // A capture takes its board-job lock outside the write lock, so one
+        // can start while the pin runs (rev58 RR1-L1: another process's
+        // backup in the moment after the capture's empty transaction). The
+        // locks are read again once the pin is made: a lock that appeared
+        // meanwhile means the pin may hold a half-renamed tree, so the
+        // snapshot and the pin are dropped and the backup waits and tries
+        // again, within the same deadline.
         const deadline = Date.now() + busyWaitMs
-        for (let told = false; ;) {
-          conn.exec('BEGIN IMMEDIATE')
-          const busy = busyBoard(conn, source)
-          if (!busy) break
-          conn.exec('ROLLBACK')
+        let told = false
+        const waitFor = async (busy) => {
           if (Date.now() >= deadline) throw new BackupError(`a capture of board ${busy} is still running; back up when it finishes`)
           if (!told) log(`backup: waiting for the capture of board ${busy} to finish`)
           told = true
           await new Promise((resolve) => setTimeout(resolve, busyPollMs))
         }
-        const reader = await openRaw(dbFile, { readOnly: true })
-        try {
-          reader.prepare('VACUUM INTO ?').run(path.join(partial, 'shapewall.db'))
-        } finally {
-          reader.close()
-        }
-        fs.chmodSync(path.join(partial, 'shapewall.db'), 0o600)
-        const copy = await openRaw(path.join(partial, 'shapewall.db'), { readOnly: true })
-        try {
-          schema = copy.prepare('PRAGMA user_version').get().user_version
-          rows = counts(copy)
-          boards = copy.prepare('SELECT workspace_id, project_id, board_id FROM boards ORDER BY workspace_id, project_id, board_id').all()
-        } finally {
-          copy.close()
-        }
-        const pinAll = () => {
-          missing.length = 0
-          for (const row of boards) {
-            if (!ID_PATTERNS.workspace.test(row.workspace_id) || !ID_PATTERNS.project.test(row.project_id) || !ID_RE.test(row.board_id))
-              continue
-            const rel = `${row.workspace_id}/${row.project_id}/${row.board_id}`
-            if (!pinTree(path.join(source, 'files', rel), path.join(pin, 'files', rel), link)) missing.push(`${rel}/`)
+        for (;;) {
+          conn.exec('BEGIN IMMEDIATE')
+          const busy = busyBoard(conn, source)
+          if (busy) {
+            conn.exec('ROLLBACK')
+            await waitFor(busy)
+            continue
           }
-        }
-        try {
-          pinAll()
-        } catch (error) {
-          if (!(error instanceof NoLinks)) throw error
-          // Never a second copy of the capture store in the data folder.
-          fs.rmSync(pin, { recursive: true, force: true })
-          copyUnderLock(`hard links do not work in the data folder (${error.message})`)
-          pinAll()
+          const reader = await openRaw(dbFile, { readOnly: true })
+          try {
+            reader.prepare('VACUUM INTO ?').run(path.join(partial, 'shapewall.db'))
+          } finally {
+            reader.close()
+          }
+          fs.chmodSync(path.join(partial, 'shapewall.db'), 0o600)
+          const copy = await openRaw(path.join(partial, 'shapewall.db'), { readOnly: true })
+          try {
+            schema = copy.prepare('PRAGMA user_version').get().user_version
+            rows = counts(copy)
+            boards = copy.prepare('SELECT workspace_id, project_id, board_id FROM boards ORDER BY workspace_id, project_id, board_id').all()
+          } finally {
+            copy.close()
+          }
+          const pinAll = () => {
+            missing.length = 0
+            for (const row of boards) {
+              if (!ID_PATTERNS.workspace.test(row.workspace_id) || !ID_PATTERNS.project.test(row.project_id) || !ID_RE.test(row.board_id))
+                continue
+              const rel = `${row.workspace_id}/${row.project_id}/${row.board_id}`
+              if (!pinTree(path.join(source, 'files', rel), path.join(pin, 'files', rel), link)) missing.push(`${rel}/`)
+            }
+          }
+          let pinError = null
+          try {
+            try {
+              pinAll()
+            } catch (error) {
+              if (!(error instanceof NoLinks)) throw error
+              // Never a second copy of the capture store in the data folder.
+              fs.rmSync(pin, { recursive: true, force: true })
+              copyUnderLock(`hard links do not work in the data folder (${error.message})`)
+              pinAll()
+            }
+          } catch (error) {
+            // A capture renaming files under the pin (ENOENT) is told apart below.
+            pinError = error
+          }
+          const started = busyBoard(conn, source)
+          if (!started) {
+            if (pinError) throw pinError
+            break
+          }
+          conn.exec('ROLLBACK')
+          fs.rmSync(path.join(pin, 'files'), { recursive: true, force: true })
+          fs.rmSync(path.join(partial, 'shapewall.db'), { force: true })
+          await waitFor(started)
         }
         conn.exec('COMMIT')
       } finally {

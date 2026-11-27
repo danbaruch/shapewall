@@ -14,6 +14,7 @@ import { transaction } from './db.js'
 import { HttpError, fail, cleanWorkspaceName } from './http.js'
 import { LIMITS } from './ratelimit.js'
 import { moveInfo } from './rebind.js'
+import { SOLO_BOUND_DELETE_MESSAGE, deletesSoloBinding } from './solo/binding.js'
 import { consumeSetupCode, removeSetupLink, userCount } from './setup-link.js'
 import { mountTailnetAuth } from './tailnet-routes.js'
 import {
@@ -420,6 +421,8 @@ export function mountAuthRoutes(authRouter, deps) {
       // member joining or an owner leaving in between cannot change it.
       const { plan, removeFiles } = transaction(db, () => {
         const plan = accountDeletionPlan(user.id)
+        // The solo engine's owner stays (rev63 R1-L1), with the workspace the engine serves.
+        if (deletesSoloBinding(db, { userId: user.id })) throw new HttpError(409, 'solo_owner', SOLO_BOUND_DELETE_MESSAGE.account)
         if (plan.blocked.length)
           throw new HttpError(
             409,

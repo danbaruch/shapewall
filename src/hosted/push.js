@@ -1219,25 +1219,64 @@ function realDir(dir, rel) {
 }
 
 // -> [{ name, data }] of the board-local files in `dir` (and the search
-// previews of `reportIds`): regular files only, opened without following a
-// link, at most BOARD_LOCAL_MAX bytes each.
+// previews of `reportIds`): regular files only, at most BOARD_LOCAL_MAX bytes
+// each. lstat first, then open with O_NOFOLLOW and O_NONBLOCK, so nothing here
+// ever blocks inside the write lock: a FIFO swapped in after the lstat opens
+// at once and is refused by the fstat (rev58 RR1-L2).
+// A BOARD_LOCAL_FILES file that cannot be carried (a link, a FIFO or other
+// special file, or too large) refuses the commit: the swap would drop it, and
+// the journeys with it (rev58 RR1-L3). A search preview that cannot be carried
+// is left behind, as before: the next checks run writes it again.
 function boardLocalFiles(dir, reportIds = []) {
   const found = []
   const seo = realDir(dir, SEO_PREVIEW_DIR)
     ? reportIds.filter((id) => REPORT_ID_RE.test(String(id))).map((id) => `${SEO_PREVIEW_DIR}/${id}.json`)
     : []
+  const refuse = (name) => {
+    throw new PushError(
+      409,
+      'board_local_unreadable',
+      `The board's ${name} on this server is not a regular file of at most ${BOARD_LOCAL_MAX / 1024 / 1024} MB, so this push would lose it. Move it aside or fix it, then push again.`,
+    )
+  }
   for (const name of [...BOARD_LOCAL_FILES, ...seo]) {
+    const file = path.join(dir, name)
+    const unreadable = BOARD_LOCAL_FILES.includes(name) ? refuse : () => null
+    let seen
+    try {
+      seen = fs.lstatSync(file)
+    } catch (error) {
+      if (['ENOENT', 'ENOTDIR'].includes(error.code)) continue
+      throw error
+    }
+    if (!seen.isFile() || seen.size > BOARD_LOCAL_MAX) {
+      unreadable(name)
+      continue
+    }
     let fd
     try {
-      fd = fs.openSync(path.join(dir, name), fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
+      fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0))
     } catch (error) {
-      if (['ENOENT', 'ELOOP', 'ENOTDIR'].includes(error.code)) continue
+      // Gone since the lstat: nothing to carry.
+      if (['ENOENT', 'ENOTDIR'].includes(error.code)) continue
+      if (['ELOOP', 'ENXIO', 'EMLINK'].includes(error.code)) {
+        unreadable(name)
+        continue
+      }
       throw error
     }
     try {
       const stat = fs.fstatSync(fd)
-      if (!stat.isFile() || stat.size > BOARD_LOCAL_MAX) continue
-      found.push({ name, data: fs.readFileSync(fd) })
+      if (!stat.isFile() || stat.size > BOARD_LOCAL_MAX) {
+        unreadable(name)
+        continue
+      }
+      const data = fs.readFileSync(fd)
+      if (data.length > BOARD_LOCAL_MAX) {
+        unreadable(name)
+        continue
+      }
+      found.push({ name, data })
     } finally {
       fs.closeSync(fd)
     }
