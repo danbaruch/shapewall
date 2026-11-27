@@ -18,9 +18,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- Once the solo engine holds the project and it is stopped, `comments`, `watch` and `mcp` stop and say to start
-  `shapewall serve`, instead of reading the 1.x comment files (which are not the board) with a note. `export` is refused
-  without `--no-comments`, and `shapewall github` is refused, running or not. `SHAPEWALL_ENGINE=legacy` keeps the 1.x files.
+- Once the solo engine holds the project and no `shapewall serve` runs, `comments`, `watch`, `mcp` and `export` start the
+  engine for themselves (headless: a free loopback port, no project agent) and stop it when they end, instead of reading the
+  1.x comment files, which are not the board. An agent's `shapewall mcp` works with or without `serve`. A running engine is
+  used; serve.lock keeps a second one off the same data. A command an agent started never starts one. `export` writes the
+  engine's comments and images, read through the token API's new `/api/v1/boards/<id>/export/comments` (as a public viewer
+  sees them). `shapewall github` is refused on an engine board: the engine keeps no issue or pull request links yet.
+  `SHAPEWALL_ENGINE=legacy` keeps the 1.x files.
 - **`shapewall serve` runs the solo engine by default** (2.0.0): the hosted engine for this project, one owner, on this
   machine only, data in `.shapewall/.engine/`. `npx shapewall init && npx shapewall serve` is still a board in seconds with no
   account. The first start in a project with 1.x board data says which boards move, runs `shapewall migrate` (a backup in
