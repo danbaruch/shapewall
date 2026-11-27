@@ -22,7 +22,8 @@
 // (capture-egress.js): never the engine's own origin, its usercontent
 // origin, or this machine's LAN and tailnet addresses.
 //
-// One capture at a time on the engine, and none while a push of the same
+// One capture at a time on the engine, none while checks run (index.js
+// engineJobs, G6), and none while a push of the same
 // board is open (a push swaps the board folder in whole); a push or a push
 // commit waits (409) while a capture runs (push.js refuses on the live
 // board-job lock itself; the route guard here only answers first). An open
@@ -36,7 +37,8 @@
 // (<board>/capture.lock, src/board-job.js) and status.json are runCapture's
 // own, so the board view reads the capture's state with readCaptureState,
 // as a local board does. Closing the engine closes the capture's browser
-// and waits for the run to end (it marks itself failed).
+// and waits for the run to end (it marks itself failed), at most
+// CAPTURE_STOP_WAIT_MS: a run still going after that keeps its lock.
 //
 // solo options read here: allowCapture (false: --no-capture or
 // --read-only), readOnly, capture ({ run, chromium, lookup,
@@ -61,6 +63,12 @@ const PAGES_MAX = 50
 const LOG_LINES = 200
 // An open push with no upload for this long is taken as abandoned by "Capture now".
 export const STALE_PUSH_MS = 5 * 60_000
+// How long removing a board or closing the engine waits for a capture to
+// end once its proxy is closed. A run that is still going after that (a
+// login script awaiting something other than the browser) keeps its
+// board-job lock and the engine's capture slot, so no push swaps the folder
+// under it: the removal is refused (409), the engine closes without it.
+export const CAPTURE_STOP_WAIT_MS = 15_000
 
 // The newest modification time in a folder (a push's staging folder).
 function newestMtime(dir) {
@@ -107,6 +115,9 @@ export function createSoloCapture({
   interfaces,
   quotaOf = () => PUSH_LIMITS.workspaceBytes,
   now = () => new Date(),
+  // What else runs a browser on the engine (index.js engineJobs), as a message, or null.
+  busy = () => null,
+  stopWaitMs = CAPTURE_STOP_WAIT_MS,
 }) {
   const enginePort = Number(new URL(publicOrigin).port) || (new URL(publicOrigin).protocol === 'https:' ? 443 : 80)
   let current = null
@@ -176,6 +187,8 @@ export function createSoloCapture({
   // run's promise (it never rejects: { ok, result, error, lines }).
   async function start(boardId, { pages = null, env = null } = {}) {
     if (current) throw new HttpError(409, 'capture_running', 'A capture is already running on this engine.')
+    const other = busy()
+    if (other) throw new HttpError(409, 'engine_busy', other)
     const { bound, board, config } = target(boardId)
     if (env !== null && env !== undefined && env !== board.environments[0].id)
       throw new HttpError(400, 'unknown_environment', 'The engine captures the default environment only for now.')
@@ -306,26 +319,45 @@ export function createSoloCapture({
     }
   }
 
+  // Closes the slot's proxy and waits for its run to end: true when it did
+  // within stopWaitMs. `slot.done` is set once the proxy started; before
+  // that, start() itself sees `cancelled`/`closed` and gives up.
+  async function stopSlot(slot) {
+    await slot.egress?.close().catch(() => {})
+    if (!slot.done) return true
+    let timer
+    const ended = await Promise.race([
+      slot.done.then(() => true),
+      new Promise((resolve) => (timer = setTimeout(() => resolve(false), stopWaitMs))),
+    ])
+    clearTimeout(timer)
+    return ended
+  }
+
   return {
     start,
     recapture,
     running: () => (current ? current.boardId : null),
     // The board (or its project, boardId null) is being removed: stop its
     // capture and wait for the run to end, so nothing writes the folder after.
+    // A run that does not end in time refuses the removal (409) instead.
     async cancel(projectId, boardId = null) {
       const slot = current
       if (!slot || slot.projectId !== projectId || (boardId !== null && slot.boardId !== boardId)) return false
       slot.cancelled = true
-      await slot.egress?.close().catch(() => {})
-      await slot.done
-      return true
+      if (await stopSlot(slot)) return true
+      log(`Solo engine: the capture of "${slot.boardId}" did not stop in time; the board was not removed.`)
+      throw new HttpError(
+        409,
+        'capture_stuck',
+        'The capture of this board did not stop in time. Stop the engine and start it again, then remove the board.',
+      )
     },
     async close() {
       closed = true
       const slot = current
       if (!slot) return
-      await slot.egress?.close().catch(() => {})
-      await slot.done
+      if (!(await stopSlot(slot))) log(`Solo engine: the capture of "${slot.boardId}" did not stop in time; the engine closes without it.`)
     },
   }
 }
@@ -341,8 +373,10 @@ export function mountSoloCapture(app, deps, features) {
     ...deps,
     now: () => (deps.now ? new Date(deps.now()) : new Date()),
     quotaOf: deps.quotaOf || (() => PUSH_LIMITS.workspaceBytes),
+    busy: () => deps.engineJobs?.busy('capture') || null,
     ...(solo.capture || {}),
   })
+  deps.engineJobs?.set('capture', () => (capture.running() ? 'A capture is running on this engine. Try again when it finishes.' : null))
   const router = deps.boardApi
 
   // The board's /info: allowCapture for the owner here (the board shows

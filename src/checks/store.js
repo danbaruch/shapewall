@@ -64,12 +64,16 @@ function assertAssociation(config, report, exactDimensions = true) {
   if (exactDimensions && (size.width !== report.viewport.width || size.height !== report.viewport.height))
     throw new Error('Check viewport dimensions do not match the board.')
 }
-export async function saveReport(config, value) {
+// `fence`: called under the reports lock right before the write; it throws
+// when the caller may no longer write (runner.js fence).
+export async function saveReport(config, value, { fence = null } = {}) {
   const report = validateReport(value)
   assertAssociation(config, report)
   const dir = directory(config, report.boardId)
+  fence?.()
   fs.mkdirSync(dir, { recursive: true })
   await withFileLock(path.join(dir, 'reports.lock'), () => {
+    fence?.()
     const file = path.join(dir, `${report.id}.json`)
     // Report ids are immutable; replay may not overwrite another report.
     if (fs.existsSync(file)) {
@@ -127,7 +131,13 @@ export function listReports(config, boardId) {
     .sort((a, b) => b.auditedAt.localeCompare(a.auditedAt))
     .slice(0, REPORTS_MAX)
 }
-export function checksView(config, boardId, envId = null, { imported = false } = {}) {
+// `imported`: every report came with the board (a hosted board): none is
+// judged against this machine's sign-in and page setup. `ranHere(report)`:
+// instead, per report, whether it was run here (the solo engine's own runs);
+// the others count as imported. The view's `imported` is then true when any
+// report it shows was imported, and each view and run says which it is.
+export function checksView(config, boardId, envId = null, { imported = false, ranHere = null } = {}) {
+  const importedReport = (r) => imported || (ranHere ? !ranHere(r) : false)
   const board = getBoard(config, boardId)
   const environments = config.checksEnvironments
     ? validateCheckEnvironments(config.checksEnvironments)
@@ -167,7 +177,7 @@ export function checksView(config, boardId, envId = null, { imported = false } =
       const expected = imported ? null : targetFingerprint(config, board, page, env, viewport, auth)
       const outdated = (r) =>
         (!captureUnverified && r.captureVersion !== current) ||
-        (!imported && r.profile.stateFingerprint !== expected) ||
+        (!importedReport(r) && r.profile.stateFingerprint !== expected) ||
         r.viewport.width !== boardViewports(config, board)[viewport].width ||
         r.viewport.height !== boardViewports(config, board)[viewport].height
       const stale = outdated(report)
@@ -181,6 +191,7 @@ export function checksView(config, boardId, envId = null, { imported = false } =
         return {
           runner,
           state: outdated(candidate) ? 'stale' : candidate.state,
+          ...(ranHere ? { imported: importedReport(candidate) } : {}),
           report: candidate,
           history,
           ...summary(candidate),
@@ -192,6 +203,7 @@ export function checksView(config, boardId, envId = null, { imported = false } =
         canvasCapture: selectedEnvironment.captured,
         captureUnverified,
         state: stale ? 'stale' : report.state,
+        ...(ranHere ? { imported: runs.some((run) => run.imported) } : {}),
         report,
         runs,
         actionable: runs.reduce((n, run) => n + run.actionable, 0),
@@ -201,7 +213,7 @@ export function checksView(config, boardId, envId = null, { imported = false } =
   )
   return {
     schemaVersion: 1,
-    imported,
+    imported: imported || (ranHere ? views.some((view) => view.imported) : false),
     environment: env.id,
     environments,
     views,

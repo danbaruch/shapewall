@@ -12,6 +12,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
   or a `push` token the owner made, used on this machine); the capture browser reaches the app's origin only, never the
   engine, its live HTML origin or this machine's LAN and tailnet addresses. `--no-capture` and `--read-only` turn it off.
   Team servers never capture. See docs/hosted.md, "The solo engine (experimental)".
+- Solo engine (experimental): **Run checks** in the board's Checks panel runs the page checks in the engine itself, from the
+  live `shapewall.config.json`, and the SEO tab shows that run's search previews, as on a local board. Owner only, on this
+  machine; the check browser reaches the app's origin only, like the capture browser. One job at a time on the engine
+  (checks and captures wait for each other); `--read-only` and `--no-capture` turn runs off. Team servers never run checks.
+  Reports a push brought read as imported, the engine's own runs as its own. A run that does not stop in time is closed
+  and ends as stopped, and writes nothing after; a capture that does not stop in time keeps its board, and removing that
+  board answers that the engine needs a restart. See [the solo engine](docs/hosted.md#the-solo-engine-experimental).
 - Solo engine (experimental): batch fixes on the board's chat, as on a local board: the owner picks open comments
   (Select in the comments panel), and the engine fixes them one after another through the link to the connected agent.
   Each fix is its own turn with its own trust (a comment by someone else never runs solo-tier), its own approval cards and
