@@ -722,7 +722,11 @@ shapewall serve --engine hosted --open
   capture browser reaches the app's origin (scheme, host and port of `baseUrl`) and nothing else, through a proxy that also
   sees redirects and WebSockets: never the engine's own name or port, its live HTML name, or this machine's LAN or tailnet
   addresses (capture your dev server on `localhost`). Fonts, images or scripts the app loads from other origins do not load
-  in these captures. A team server never captures.
+  in these captures. The link check after a capture asks the same address only and stops at the first redirect that leaves
+  the app's origin. A push started more than 5 minutes ago with no upload since (a `shapewall push` that was stopped) does
+  not hold "Capture now" back: the capture ends it. A workspace over its storage quota does not capture, and each capture
+  counts toward it. Removing the board while it captures stops the capture first. `shapewall hosted backup` waits while a
+  capture runs. A team server never captures.
 - **A migration.** While `shapewall migrate` runs, or after one stopped midway, the engine, `shapewall serve` and
   `shapewall watch` do not start. After a migration, the local `serve` and `watch` refuse the boards that moved to the engine.
 - **Updates.** With `SHAPEWALL_UPDATE_RESTART=1` (set by a managed install), a finished update stops the engine with exit code

@@ -577,6 +577,9 @@ export async function runCapture({
   chromium = null,
   checkLinks: linkCheck = true,
   checkExternal = false,
+  // The solo engine only: the app origin's pinned address for the link
+  // check (link-request.js), so Node never looks the name up again.
+  linkPin = null,
   // The CLI only: Ctrl+C or SIGTERM marks the capture stopped and exits.
   exitOnSignal = false,
 }) {
@@ -760,7 +763,7 @@ export async function runCapture({
       let context = null
       try {
         context = await browser.newContext(storageState ? { storageState } : {})
-        const request = await linkRequester(context, baseUrl)
+        const request = await linkRequester(context, baseUrl, { pin: linkPin })
         const result = await checkLinks(found, { board, baseUrl, manifestPages: manifest.pages, request })
         linksChecked = result.checked
         manifest.brokenLinks = partial

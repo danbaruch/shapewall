@@ -24,8 +24,10 @@
 //
 // Other origins the app loads from (a font host, a CDN) are refused too, so
 // a capture from the engine shows the app without them. The capture's own
-// link check runs in Node (src/capture/link-request.js) and asks only the
-// app origin (external links are not checked here).
+// link check runs in Node (src/capture/link-request.js) with the same pinned
+// address (`linkPin`): it never looks the name up again, asks only the app
+// origin, and stops at the first redirect that leaves it (external links are
+// not checked here).
 import os from 'node:os'
 import { DENIED_LOOPBACK_PORTS } from '../../agent/agent-browser.js'
 import { addressKind, hostPort, isOwnAddress, ownAddresses, pinHost, startEgressProxy } from '../../agent/browser-egress.js'

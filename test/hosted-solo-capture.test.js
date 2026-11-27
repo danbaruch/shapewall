@@ -14,6 +14,7 @@ import { loadConfig } from '../src/config.js'
 import { quietSqliteWarning } from '../src/hosted/db.js'
 import { projectDir } from '../src/hosted/projects.js'
 import { CAPTURE_EGRESS_ARGS, captureEgress, pinAppOrigin } from '../src/hosted/solo/capture-egress.js'
+import { STALE_PUSH_MS } from '../src/hosted/solo/capture.js'
 import { soloOrigin } from '../src/hosted/solo/signin.js'
 import { writeJsonAtomic } from '../src/store.js'
 import { SAMPLE, request, tempDir } from './helpers.js'
@@ -251,6 +252,7 @@ test('the owner captures from the board: 202, the state in the board view, files
   assert.equal(call.boardId, 'sample')
   assert.deepEqual(call.only, ['home'])
   assert.equal(call.checkExternal, false)
+  assert.match(call.linkPin?.address || '', /^(127\.0\.0\.1|::1)$/, 'the link check uses the pinned address (rev58 G3-2)')
   assert.equal(typeof call.chromium.launch, 'function', 'the browser goes through the egress proxy')
   const dir = projectDir(hosted.dataDir, owner.workspaceId, owner.projectId)
   assert.equal(call.config.outputDir, dir)
@@ -266,6 +268,13 @@ test('the owner captures from the board: 202, the state in the board view, files
   const push = await request(hosted.port, 'POST', '/api/v1/pushes', { body: {}, headers: { Host: new URL(hosted.origin).host } })
   assert.equal(push.status, 409)
   assert.equal(push.json.error.code, 'capture_running')
+  // Any letter case of the route (rev58 G3-1).
+  const upper = await request(hosted.port, 'POST', '/api/v1/PUSHES/ps_x/COMMIT', {
+    body: {},
+    headers: { Host: new URL(hosted.origin).host },
+  })
+  assert.equal(upper.status, 409)
+  assert.equal(upper.json.error.code, 'capture_running')
 
   stub.release()
   const done = await settled(browser, base)
@@ -393,4 +402,89 @@ test('stopping the engine closes a running capture’s browser and waits for the
   servers.splice(servers.indexOf(hosted), 1)
   await hosted.close()
   assert.equal(ended, true)
+})
+
+test('rev58 G3-4: a workspace over its storage quota does not capture (413), and the run counts toward it', async () => {
+  const stub = stubRun()
+  const { hosted, browser, base, owner } = await startSolo('solo-capture-quota', { solo: { capture: { run: stub.run } } })
+  const started = await browser.post(`${base}/boards/sample/capture`, {})
+  assert.equal(started.status, 202, started.text)
+  await settled(browser, base)
+  const row = hosted.db.prepare('SELECT bytes FROM boards WHERE project_id = ? AND board_id = ?').get(owner.projectId, 'sample')
+  assert.ok(row.bytes > 0)
+  // Another board of the workspace holds everything the quota allows.
+  hosted.db
+    .prepare(
+      `INSERT INTO boards (workspace_id, project_id, board_id, definition, pushed_at, push_count, bytes, created_at)
+       VALUES (?, ?, 'other', '{}', ?, 1, ?, ?)`,
+    )
+    .run(owner.workspaceId, owner.projectId, new Date().toISOString(), 5 * 1024 * 1024 * 1024, new Date().toISOString())
+  const refused = await browser.post(`${base}/boards/sample/capture`, {})
+  assert.equal(refused.status, 413, refused.text)
+  assert.equal(refused.json.error.code, 'quota_exceeded')
+  assert.equal(stub.calls.length, 1)
+})
+
+test('rev58 G3-5: removing the board while it captures stops the capture first; no folder is left behind', async () => {
+  let closedBrowser = null
+  const browserClosed = new Promise((resolve) => (closedBrowser = resolve))
+  const real = {
+    executablePath: () => '/bin/true',
+    launch: async () => ({ close: async () => closedBrowser(), on: () => {} }),
+  }
+  let wrote = null
+  const run = async (options) => {
+    const dir = path.join(options.config.outputDir, options.boardId)
+    fs.mkdirSync(dir, { recursive: true })
+    const job = acquireBoardJob(options.config, options.boardId, 'capture')
+    try {
+      await options.chromium.launch({ args: [] })
+      await browserClosed
+      // A real run writes its status as it ends.
+      writeJsonAtomic(path.join(dir, 'status.json'), { state: 'failed', finishedAt: new Date().toISOString() })
+      wrote = dir
+      throw new Error('the browser closed')
+    } finally {
+      job.release()
+    }
+  }
+  const { hosted, browser, base, owner } = await startSolo('solo-capture-remove', { solo: { capture: { run, chromium: real } } })
+  assert.equal((await browser.post(`${base}/boards/sample/capture`, {})).status, 202)
+  for (let i = 0; i < 200 && !hosted.app.locals.soloCapture; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+  const removed = await hosted.app.locals.soloCapture.cancel(owner.projectId, 'other')
+  assert.equal(removed, false, 'another board: nothing to stop')
+  const gone = await browser.call('DELETE', `/api/workspaces/${owner.workspaceId}/projects/${owner.projectId}/boards/sample`)
+  assert.equal(gone.status, 200, gone.text)
+  assert.ok(wrote, 'the run ended before the folder went')
+  assert.equal(fs.existsSync(path.join(projectDir(hosted.dataDir, owner.workspaceId, owner.projectId), 'sample')), false)
+  const again = await browser.get(`${base}/boards/sample`)
+  assert.notEqual(again.json?.capture?.running, true)
+})
+
+test('rev58 G3-7: an open push with no upload for a few minutes does not hold Capture now back; a live one does', async () => {
+  const stub = stubRun()
+  const { hosted, browser, base, owner } = await startSolo('solo-capture-stale-push', { solo: { capture: { run: stub.run } } })
+  const at = (ms) => new Date(Date.now() - ms).toISOString()
+  const insert = hosted.db.prepare(
+    `INSERT INTO pushes (workspace_id, id, project_id, board_id, token_id, definition, status, created_at)
+     VALUES (?, ?, ?, 'sample', NULL, '{}', 'open', ?)`,
+  )
+  insert.run(owner.workspaceId, 'ps_aaaaaaaaaaaaaaaaaaaaaaaa', owner.projectId, at(60_000))
+  fs.mkdirSync(path.join(hosted.dataDir, 'staging', 'ps_aaaaaaaaaaaaaaaaaaaaaaaa'), { recursive: true })
+  const busy = await browser.post(`${base}/boards/sample/capture`, {})
+  assert.equal(busy.status, 409)
+  assert.equal(busy.json.error.code, 'push_running')
+  hosted.db.prepare("DELETE FROM pushes WHERE id = 'ps_aaaaaaaaaaaaaaaaaaaaaaaa'").run()
+
+  const stale = 'ps_bbbbbbbbbbbbbbbbbbbbbbbb'
+  insert.run(owner.workspaceId, stale, owner.projectId, at(STALE_PUSH_MS + 60_000))
+  const staging = path.join(hosted.dataDir, 'staging', stale)
+  fs.mkdirSync(staging, { recursive: true })
+  const old = new Date(Date.now() - STALE_PUSH_MS - 60_000)
+  fs.utimesSync(staging, old, old)
+  const started = await browser.post(`${base}/boards/sample/capture`, {})
+  assert.equal(started.status, 202, started.text)
+  assert.equal(hosted.db.prepare('SELECT status FROM pushes WHERE id = ?').get(stale).status, 'failed')
+  assert.equal(fs.existsSync(staging), false)
+  await settled(browser, base)
 })

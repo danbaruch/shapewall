@@ -21,17 +21,28 @@ function publicLookup(host, options, callback) {
   })
 }
 
-export async function linkRequester(context, baseUrl) {
+// `pin` ({ address }, the solo engine's capture, src/hosted/solo/capture.js):
+// the app origin's address was looked up and checked once, before the
+// capture; the probes connect to that address only, never look the name up
+// again, and stop at the first hop that leaves the origin (its 3xx is the
+// result), so nothing is dialled outside the capture's egress boundary.
+export async function linkRequester(context, baseUrl, { pin = null } = {}) {
   const base = new URL(baseUrl)
   // Resolve the configured origin once. A private development origin may
   // use those addresses only; every other origin must resolve publicly.
   const host = base.hostname.replace(/^\[|\]$/g, '')
-  const originAddresses = isIP(host) ? [{ address: host, family: isIP(host) }] : await dns.promises.lookup(host, { all: true })
-  if (
-    originAddresses.some(({ address }) => nonPublicAddress(address)) &&
-    !originAddresses.every(({ address }) => internalHostname(address))
-  )
-    throw new Error('Link check origin has a non-public address')
+  let originAddresses
+  if (pin) {
+    if (!isIP(pin.address)) throw new Error('Link check pin is not an address')
+    originAddresses = [{ address: pin.address, family: isIP(pin.address) }]
+  } else {
+    originAddresses = isIP(host) ? [{ address: host, family: isIP(host) }] : await dns.promises.lookup(host, { all: true })
+    if (
+      originAddresses.some(({ address }) => nonPublicAddress(address)) &&
+      !originAddresses.every(({ address }) => internalHostname(address))
+    )
+      throw new Error('Link check origin has a non-public address')
+  }
   const originLookup = (_host, options, callback) => {
     const addresses = originAddresses.filter(({ family }) => !options.family || family === options.family)
     if (!addresses.length) return callback(new Error('No matching address for the configured origin'))
@@ -56,10 +67,15 @@ export async function linkRequester(context, baseUrl) {
   }
   return async (href) => {
     let url = new URL(href)
+    let lastStatus = null
     const signal = AbortSignal.timeout(15000)
     for (let hop = 0; hop <= 10; hop++) {
       if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('Unsupported link target')
       const sameOrigin = url.origin === base.origin
+      if (pin && !sameOrigin) {
+        if (hop === 0) throw new Error('Link target outside the app origin')
+        return { status: lastStatus }
+      }
       const host = url.hostname.replace(/^\[|\]$/g, '')
       if (!sameOrigin && (internalHostname(host) || (isIP(host) && privateAddress(host)))) throw new Error('Private link target blocked')
       const headers = {}
@@ -79,6 +95,7 @@ export async function linkRequester(context, baseUrl) {
         for (const cookie of cookies) await jar.setCookie(cookie, url.href, { ignoreError: true })
       }
       if (![301, 302, 303, 307, 308].includes(status) || !location) return { status }
+      lastStatus = status
       url = new URL(location, url)
     }
     throw new Error('Too many redirects')
