@@ -90,7 +90,8 @@ export function channelMatches(channel, event) {
 
 // createNotifier(config, options) -> { channels, start, stop, flush, deliver, handle }
 // Options: env, fetch, log, boardUrl (fallback for the deep links: the URL
-// `serve` listens on), backoffMs (first retry wait), timeoutMs (per request).
+// `serve` listens on, or a function that returns it when a message is made:
+// the solo engine's board URL is known only once its owner exists), backoffMs (first retry wait), timeoutMs (per request).
 export function createNotifier(
   config,
   { env = process.env, fetch = globalThis.fetch, log = () => {}, boardUrl = null, backoffMs = 1000, timeoutMs = 10000 } = {},
@@ -102,7 +103,7 @@ export function createNotifier(
   const warned = new Set()
   let idleWaiters = []
   let unsubscribe = null
-  const linkBase = () => boardUrlFor(config, { boardUrl, env })
+  const linkBase = () => boardUrlFor(config, { boardUrl: typeof boardUrl === 'function' ? boardUrl() : boardUrl, env })
 
   const busy = () => [...queues.values()].some((queue) => queue.running || queue.items.length)
   const settleIdle = () => {
