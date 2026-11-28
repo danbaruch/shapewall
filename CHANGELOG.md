@@ -139,6 +139,12 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
   owner saves `--audience server`; a batch of fixes stays with the agent it was confirmed with; members' running turns
   stop when team mode goes off or they are removed; the agent's Read deny rules name a linked `.shapewall`,
   `.shapewall-auth` or storageState by both paths.
+- 2.0 final security review, re-check 1: on the team listener nobody renames, revokes or claims with this machine's own
+  tokens; `--no-chat` refuses the real chat routes (threads, permissions, batch); a merged pull request resolves a comment
+  only for the claim holder and never under a running fix, as a resolve would, and its reply records the token. The agent's
+  `create_github_issue` tool never files a share link guest's comment (`guest_comment`); an issue made from a guest's comment
+  by the owner's `shapewall github` says the name is unverified, and @-mentions in its title are quieted. A member made a
+  viewer, or an account deleted, has its running turns stopped. Glob characters in the agent's Read deny paths are escaped.
 
 ## 1.5.0 - 2026-11-27
 

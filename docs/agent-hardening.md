@@ -185,7 +185,11 @@ When the chat panel drives an agent CLI over ACP:
   it is reading. Reads of the store are refused too (its accounts, sessions, tokens, notification settings and the solo engine's keys
   live there; comments and captures reach the agent through Shapewall's tools, quoted), and so are reads of the recorded logins
   (`.shapewall-auth/`) and of the config's `auth.storageState` files. A Claude Code agent reads files itself as well, so its session
-  settings carry `Read` deny rules for the same paths. Writes to files that decide what runs later need a **Write** / **Don't write** card: any dotfile or dot folder
+  settings carry `Read` deny rules for the same paths, each both as the project spells it and as its real path when a link
+  is in the way, with the path's glob characters escaped. Two cases the rules cannot cover: a third spelling of the folder
+  through yet another link, and the same folder in other letter cases on a case-insensitive volume (the macOS and Windows
+  default). Keep `.shapewall` a plain folder in the project, and on those systems run the agent in an OS sandbox when that
+  matters to you. Writes to files that decide what runs later need a **Write** / **Don't write** card: any dotfile or dot folder
   (`.claude`, `.codex`, `.husky`, `.vscode`, `.envrc`, `.github/workflows`, ...), `package.json`, `shapewall.config.json`, `Makefile`,
   `Dockerfile`, `justfile`.
 - **Diffs on edit cards.** An edit or write card shows the change as a diff Shapewall computes from the file as it is and the new

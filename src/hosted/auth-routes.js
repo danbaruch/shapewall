@@ -449,6 +449,8 @@ export function mountAuthRoutes(authRouter, deps) {
         return { plan, removeFiles }
       })
       for (const remove of removeFiles) remove()
+      // The account is gone: its running turns end, in every workspace it was in (C R1-4).
+      for (const item of [...plan.deleted, ...plan.left]) req.app.locals.chat?.stopTurnsOf?.(item.id, (id) => id === user.id)
       setCookie(res, SESSION_COOKIE, '', 0)
       res.json({ ok: true, deleted: plan.deleted.length, left: plan.left.length })
     }),
