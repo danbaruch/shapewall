@@ -10,7 +10,7 @@ const WAYS = [
   {
     icon: Laptop,
     title: 'On your machine',
-    text: 'The default. shapewall serve listens on 127.0.0.1 with no login, refuses requests with a non-local Host header, and only accepts JSON writes, so other sites cannot reach it.',
+    text: 'The default. shapewall serve runs the board for you alone, on 127.0.0.1 at a private host name of its own, signed in from your terminal. shapewall serve --team invites people over your tailnet to the same board.',
     code: 'shapewall serve',
     link: ['/docs/getting-started', 'Getting started'],
   },
@@ -41,9 +41,10 @@ const WAYS = [
 export default function OpenSource() {
   return (
     <>
-      <PageHeader eyebrow="Licenses and self-hosting" title="Local tool: Apache 2.0. Team server: self-hosted.">
-        The local tool keeps captures and comments on your disk and is open source under Apache 2.0. The team server is yours to host, and
-        its source is available under the Functional Source License.
+      <PageHeader eyebrow="Licenses and self-hosting" title="Core: Apache 2.0. The engine: yours to run.">
+        Shapewall keeps captures and comments on your disk or on a server you host. The CLI, capture and the MCP server are open source
+        under Apache 2.0. The engine that runs the board, alone on your machine or as the team server, is source-available under the
+        Functional Source License.
       </PageHeader>
       <Container className="py-16 sm:py-20">
         <div className="grid gap-5 md:grid-cols-2">
@@ -79,18 +80,19 @@ export default function OpenSource() {
             <Scale className="size-5 text-wall" aria-hidden="true" />
             <h2 className="mt-3 text-[19px] font-bold tracking-tight text-ink">Two licenses</h2>
             <p className="mt-2 text-[15px] leading-7 text-slate">
-              The CLI, capture, the board, MCP and the agents are Apache 2.0: use them at work, fork them, ship them inside your own tools,
-              and keep the license and NOTICE file when you redistribute. The team server (src/hosted) is under the Functional Source
-              License 1.1: free to read, modify and self-host, not to offer as a competing service, and each release becomes Apache 2.0 two
-              years later. Copyright Dan Baruch and Shapewall contributors.
+              The CLI, capture, the board's client, MCP and the agents are Apache 2.0: use them at work, fork them, ship them inside your
+              own tools, and keep the license and NOTICE file when you redistribute. The engine (src/hosted), both the solo engine that
+              shapewall serve runs and the team server, is under the Functional Source License 1.1: free to use, modify and self-host, not
+              to offer as a competing hosted service, and each release becomes Apache 2.0 two years later. Copyright Dan Baruch and
+              Shapewall contributors.
             </p>
           </div>
           <div>
             <Package className="size-5 text-wall" aria-hidden="true" />
             <h2 className="mt-3 text-[19px] font-bold tracking-tight text-ink">The stack</h2>
             <p className="mt-2 text-[15px] leading-7 text-slate">
-              Node.js, Playwright for capture, parse5 for sanitizing, Express for the board server, React Flow for the wall. Data is JSON
-              files written atomically under a file lock for local projects; the team server uses SQLite and files.
+              Node.js, Playwright for capture, parse5 for sanitizing, Express for the board server, React Flow for the wall. The engine
+              keeps comments and chat in SQLite and captures as files, on your machine and on the team server alike.
             </p>
           </div>
           <div>

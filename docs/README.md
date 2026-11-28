@@ -8,13 +8,13 @@ A few pages are written for the site and live only there; they are linked below 
 
 ## 1. Getting started
 
-| Guide                                                         | What it covers                                                                             |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| [Getting started](https://shapewall.com/docs/getting-started) | Install, write a config, capture every screen, open the wall. (On the site.)               |
-| [where-to-run.md](where-to-run.md)                            | Local board or a team server: who can reach each, and where the work happens.              |
-| [upgrading.md](upgrading.md) | Upgrading a 1.x project to 2.0: what moves, the backup, rollback, staying on 1.x, what was removed. |
-| [deployment.md](deployment.md#linux-system-libraries)         | Linux system libraries for Chromium, and capturing inside the Playwright image.            |
-| [FAQ](https://shapewall.com/docs/faq)                         | Single-page apps, signed-in screens, where the data lives, teams, licenses. (On the site.) |
+| Guide                                                         | What it covers                                                                                      |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| [Getting started](https://shapewall.com/docs/getting-started) | Install, write a config, capture every screen, open the wall. (On the site.)                        |
+| [where-to-run.md](where-to-run.md)                            | Local board or a team server: who can reach each, and where the work happens.                       |
+| [upgrading.md](upgrading.md)                                  | Upgrading a 1.x project to 2.0: what moves, the backup, rollback, staying on 1.x, what was removed. |
+| [deployment.md](deployment.md#linux-system-libraries)         | Linux system libraries for Chromium, and capturing inside the Playwright image.                     |
+| [FAQ](https://shapewall.com/docs/faq)                         | Single-page apps, signed-in screens, where the data lives, teams, licenses. (On the site.)          |
 
 ## 2. Capture your app
 

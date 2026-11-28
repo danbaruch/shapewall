@@ -331,13 +331,15 @@ export const SECTIONS = {
       --browser-comments    visitors may comment; their comments stay in their own browser
       --no-index            ask search engines not to index the export`,
   share: `  share --remote URL        move local captures, history and comments to a shared project
+                            (a 1.x board; a board the solo engine holds is refused: use serve --team)
       --include-checks      explicitly include private diagnostic reports
       --board ID            move only this board (default all)
       --dry-run             show counts; sends nothing
       --no-comments         captures, history and journeys only`,
   migrate: `  migrate                   move this project's .shapewall/ into the solo engine (.shapewall/.engine/)${EXPERIMENTAL}
                             captures, comments, chat and the local account; a backup goes to
-                            .shapewall/backup-1x-<time>/ first; the solo engine serves it after. Refuses while
+                            .shapewall/backup-1x-<time>/ first; the solo engine serves it after (the first
+                            serve of 2.x runs it; https://shapewall.com/docs/upgrading). Refuses while
                             serve (either engine), capture, watch or an agent runs
       --dry-run             counts, and every item that would not come along; writes nothing
       --board ID            only this board (default: every board)

@@ -38,7 +38,7 @@ const TODAY = [
   ],
   [
     'Yours',
-    'Runs on your machine with plain files, no account and no telemetry. Apache 2.0, with the team server under the Functional Source License.',
+    'Runs on your machine with no account to make and no telemetry. An Apache 2.0 core, with the engine and team server under the Functional Source License.',
   ],
 ]
 

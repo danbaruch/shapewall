@@ -678,11 +678,11 @@ shapewall serve --open             # alone, on this machine
 shapewall serve --team             # the same board, for the people you invite on your tailnet
 ```
 
-| Profile                     | Who                                        | Sign-in                                  | Where                         |
-| --------------------------- | ------------------------------------------ | ---------------------------------------- | ----------------------------- |
-| Solo (`serve`)              | You, the one owner                         | From the terminal, a one-time page       | 127.0.0.1 only                |
-| Solo, team mode (`--team`)  | You, and the people you invite             | You: the terminal; them: tailnet sign-in | Also your tailnet, never Funnel |
-| Team server (`hosted`)      | Workspaces, roles, invites                 | Passkeys, or tailnet sign-in             | Tailnet, or your own domain   |
+| Profile                    | Who                            | Sign-in                                  | Where                           |
+| -------------------------- | ------------------------------ | ---------------------------------------- | ------------------------------- |
+| Solo (`serve`)             | You, the one owner             | From the terminal, a one-time page       | 127.0.0.1 only                  |
+| Solo, team mode (`--team`) | You, and the people you invite | You: the terminal; them: tailnet sign-in | Also your tailnet, never Funnel |
+| Team server (`hosted`)     | Workspaces, roles, invites     | Passkeys, or tailnet sign-in             | Tailnet, or your own domain     |
 
 It is this server's code (`src/hosted`), so it is under this server's license, the
 [Functional Source License 1.1, ALv2 future license](../src/hosted/LICENSE.md), not the core's Apache 2.0: anyone may use, change

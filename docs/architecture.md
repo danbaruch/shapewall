@@ -283,10 +283,10 @@ and the other way round, and threads with activity since you last opened them ca
 **The solo engine (the default from 2.0).** Its data lives in `.shapewall/.engine/` (0700, with a `.gitignore` of `*`; the
 engine refuses to start while git tracks anything there):
 
-| Path in `.shapewall/.engine/`              | What                                                                                  |
-| ------------------------------------------ | ------------------------------------------------------------------------------------- |
-| `shapewall.db`                             | `node:sqlite`, the hosted server's schema and migrations: comments, replies, chat, the owner, members, tokens, audit |
-| `files/<workspace>/<project>/<board>/`     | Captures, versions, variants, environments, diffs, journeys and checks, in the layout below (`src/store.js`) |
+| Path in `.shapewall/.engine/`                    | What                                                                                                                 |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `shapewall.db`                                   | `node:sqlite`, the hosted server's schema and migrations: comments, replies, chat, the owner, members, tokens, audit |
+| `files/<workspace>/<project>/<board>/`           | Captures, versions, variants, environments, diffs, journeys and checks, in the layout below (`src/store.js`)         |
 | `host.key`, `serve.json`, `*.token`, `team.json` | The host name's random part, the running engine's address, this start's machine tokens (0600), the team mode setting |
 
 `shapewall capture`, `links`, `push`, `journeys`, `variant` and `checks` write and read `files/` directly; comments, chat and

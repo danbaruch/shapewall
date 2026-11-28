@@ -26,16 +26,16 @@ left behind; run `shapewall migrate --rollback`), and a board the engine cannot 
 
 ## What moves
 
-| 1.x data in `.shapewall/<board>/`                                       | In 2.0                                                    |
-| ----------------------------------------------------------------------- | --------------------------------------------------------- |
-| Captures, versions, variants, environments, diffs, journeys, checks     | Moved as files into `.shapewall/.engine/files/`           |
-| Comments, replies, reactions, comment images and drawings               | Rows in the engine's database, with their numbers         |
-| Chat threads                                                            | Rows in the engine's database                             |
-| A `serve --accounts` owner, with passkeys, recovery codes and photo     | The engine's owner (same user id)                         |
-| Agent settings (Settings > Agent, in your user config folder)           | Stay where they are; the engine reads them as before      |
-| `.shapewall/events.jsonl`                                                | Stays where it is; the engine keeps writing it             |
-| Sign-in sessions, paired devices                                        | Not moved: sign in again (see below)                      |
-| A watcher's claims, its working state, leftover locks and logs          | Not moved; the comment keeps its agent status             |
+| 1.x data in `.shapewall/<board>/`                                   | In 2.0                                               |
+| ------------------------------------------------------------------- | ---------------------------------------------------- |
+| Captures, versions, variants, environments, diffs, journeys, checks | Moved as files into `.shapewall/.engine/files/`      |
+| Comments, replies, reactions, comment images and drawings           | Rows in the engine's database, with their numbers    |
+| Chat threads                                                        | Rows in the engine's database                        |
+| A `serve --accounts` owner, with passkeys, recovery codes and photo | The engine's owner (same user id)                    |
+| Agent settings (Settings > Agent, in your user config folder)       | Stay where they are; the engine reads them as before |
+| `.shapewall/events.jsonl`                                           | Stays where it is; the engine keeps writing it       |
+| Sign-in sessions, paired devices                                    | Not moved: sign in again (see below)                 |
+| A watcher's claims, its working state, leftover locks and logs      | Not moved; the comment keeps its agent status        |
 
 The backup stays until you delete it. Keep it until you are sure.
 
@@ -96,20 +96,20 @@ aside into `<backup>/replaced-<time>/`. Rollback is part of the Apache 2.0 core 
 
 Each removed spelling stops with a one-line error that names its replacement (`... was removed in Shapewall 2.0; use ...`).
 
-| Removed                                                   | Use instead                                                    |
-| --------------------------------------------------------- | -------------------------------------------------------------- |
-| `agent run`, `agent watch`, `agent doctor`, `agent build-image` | `agent sandbox run`, `watch`, `doctor`, `build-image`    |
-| `audit`                                                   | `checks lighthouse`                                            |
-| `checks lighthouse --production`                          | `--build-mode`                                                 |
-| `checks lighthouse BOARD`                                 | `checks lighthouse --board BOARD`                              |
-| `hosted --setup`                                          | `hosted setup`                                                 |
-| `variant rm`                                              | `variant remove`                                               |
-| `export --noindex`                                        | `export --no-index`                                            |
-| `capture --yes` (`-y`)                                    | Leave it out: capture never prompts                            |
-| Config `versions`                                         | `keepVersions`                                                 |
-| Config `notifications.boardUrl`, `github.boardUrl`        | The top-level `boardUrl`, or `SHAPEWALL_BOARD_URL`             |
-| Config `agent.localSession: "own"`                        | Leave it out: a local board's Claude Code session is always the restricted one |
-| `SHAPEWALL_USERCONTENT_ORIGIN`                            | `SHAPEWALL_HOSTED_USERCONTENT_ORIGIN` (a server with only the old name stops at start) |
+| Removed                                                         | Use instead                                                                            |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `agent run`, `agent watch`, `agent doctor`, `agent build-image` | `agent sandbox run`, `watch`, `doctor`, `build-image`                                  |
+| `audit`                                                         | `checks lighthouse`                                                                    |
+| `checks lighthouse --production`                                | `--build-mode`                                                                         |
+| `checks lighthouse BOARD`                                       | `checks lighthouse --board BOARD`                                                      |
+| `hosted --setup`                                                | `hosted setup`                                                                         |
+| `variant rm`                                                    | `variant remove`                                                                       |
+| `export --noindex`                                              | `export --no-index`                                                                    |
+| `capture --yes` (`-y`)                                          | Leave it out: capture never prompts                                                    |
+| Config `versions`                                               | `keepVersions`                                                                         |
+| Config `notifications.boardUrl`, `github.boardUrl`              | The top-level `boardUrl`, or `SHAPEWALL_BOARD_URL`                                     |
+| Config `agent.localSession: "own"`                              | Leave it out: a local board's Claude Code session is always the restricted one         |
+| `SHAPEWALL_USERCONTENT_ORIGIN`                                  | `SHAPEWALL_HOSTED_USERCONTENT_ORIGIN` (a server with only the old name stops at start) |
 
 ## Deprecated in 2.0, removed in 3.0
 

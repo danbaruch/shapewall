@@ -141,7 +141,7 @@ and sign-in stay private. When people outside your tailnet need accounts, put th
 | How you reach it             | Sign-in                                                                                    |
 | ---------------------------- | ------------------------------------------------------------------------------------------ |
 | Local board                  | From the terminal (`serve --open`), no account to make; team mode: tailnet sign-in         |
-| Over an SSH tunnel           | A local board: as if you sat at that machine.      A hosted server: a passkey each        |
+| Over an SSH tunnel           | A local board: as if you sat at that machine. A hosted server: a passkey each              |
 | Tailnet, `--tailnet-sign-in` | Your Tailscale account, on every tailnet device of yours. No passkey. An admin invites you |
 | Own domain                   | A passkey each                                                                             |
 

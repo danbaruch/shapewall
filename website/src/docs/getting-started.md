@@ -205,9 +205,8 @@ several repositories, serve one project per checkout and switch between them in 
 
 1. Capture the state you want to work on. For a signed-in page, run `shapewall auth record` first.
 2. Pin a comment to the element that should change, on the desktop or phone frame where you see the problem.
-3. Open the board as its owner: the tab `serve --open` opened, or the **Private owner link** that `shapewall serve` printed in the
-   terminal. A plain http://127.0.0.1:4600/ tab can read the
-   board but cannot connect an agent; its Agent panel shows the exact command for this board.
+3. Open the board as its owner: the tab `serve --open` opened (`shapewall serve --open` again, while it runs, opens a fresh
+   one-time sign-in; `--print-owner-link` prints it instead).
 4. Connect your agent: click **Connect** next to the agent CLI the board found, or set up an endpoint in Settings.
 5. Press **Fix with agent** and read the diff. The board recaptures the pages it changed. The agent runs under its own permission
    settings: in a mode that asks (Claude Code's `default`), its requests show in the panel for you to answer; in one that acts
@@ -221,9 +220,12 @@ gives an agent the same comments with their selectors and screenshots, and `shap
 
 ## Share the board
 
-`shapewall serve` listens on 127.0.0.1 only and has no login, so at first it is yours alone. To go further:
+`shapewall serve` listens on 127.0.0.1 only and signs you in from the terminal, so at first it is yours alone. Start alone, and
+invite people when you are ready:
 
-- **Your other devices:** `shapewall serve --tailscale` serves the board over HTTPS on your tailnet; you pair each device.
+- **A few people, while you work:** `shapewall serve --team` (or **Invite people** on the console's Members page) puts the same
+  board on your tailnet for the people you invite, with tailnet sign-in and nothing copied; `shapewall serve --team off` takes it
+  back. See [team mode](/docs/hosted#inviting-people-team-mode).
 - **A read-only copy:** `shapewall export` writes a static copy any web host can serve. See [deployment](/docs/self-hosting).
 - **A team:** `shapewall hosted` runs a server (beta) with accounts, workspaces, roles, share links and connected agents. Start with
   [where to run Shapewall](/docs/where-to-run), then the [hosted operator guide](/docs/hosted).
@@ -233,14 +235,10 @@ gives an agent the same comments with their selectors and screenshots, and `shap
 `shapewall serve` has a **Workspace Console** at `/console` that lists your local boards; open it from the profile menu. The version
 at the bottom of the board opens **About & Updates**. Updates are manual: see [manual updates](/docs/updates).
 
-Accounts are optional. `shapewall serve --accounts` adds a local owner account with a passkey: open the private owner link the server
-prints, create the passkey and save the recovery codes, which are shown once. Use the printed `localhost` address, not an IP, because a
-passkey is bound to a hostname. The profile menu then has **Account and security**: profile photo, sessions, passkeys and recovery.
-Accounts keep your existing captures and comments. See [local accounts and profile photos](/docs/local-accounts).
-
-On a Tailscale account board, agent settings are changed from the Shapewall computer with the **Host agent settings** command the
-server prints: [local account setup](/docs/local-accounts#tailscale-account-origin) and
-[host-only agent management](/docs/chat#host-only-agent-management).
+The board has one owner account, yours, made on the first start with your name (`SHAPEWALL_USER_NAME`, else `git config user.name`):
+there is nothing to sign up for and no passkey to set up. Coming from 1.x? The first `shapewall serve` of 2.0 moves the project's
+board into the engine, with a backup and a rollback, and a `serve --accounts` owner comes along with their passkeys: see
+[upgrading from 1.x](/docs/upgrading).
 
 ## Other ways to install
 

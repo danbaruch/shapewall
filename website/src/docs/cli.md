@@ -151,6 +151,11 @@ http://127.0.0.1:4600/?board=site&c=12&filter=all&vp=phone
 
 ## shapewall serve
 
+From 2.0, `shapewall serve` runs the solo engine ([below](#shapewall-serve-engine-hosted)): start alone on this machine, and
+invite people when you are ready with `serve --team`. Coming from 1.x, read [upgrading from 1.x](/docs/upgrading). The rest of
+this section is the 1.x board server, `shapewall serve --engine legacy` (deprecated, removed in 3.0), which any flag only it
+takes also runs:
+
 ```text
 shapewall serve [--port 4600] [--host 127.0.0.1] [--open] [--read-only] [--no-capture] [--allowed-host NAME] [--chat | --no-chat]
                 [--agent-acp "CMD"] [--allow-remote-agent] [--tailscale[=print]] [--lan[=IP|INTERFACE]] [--no-identity]
@@ -201,8 +206,8 @@ From 2.0 this is what `shapewall serve` runs by default; the first start in a pr
 so does any flag only it takes (`--host`, `--lan`, `--tailscale`, `--accounts`, `--agent-acp`, ...).
 
 ```sh
-shapewall serve --engine hosted [--port 4600] [--open] [--print-owner-link] [--read-only] [--no-chat] [--no-capture]
-                [--skip-git-check]
+shapewall serve [--engine hosted] [--port 4600] [--open] [--print-owner-link] [--read-only] [--no-chat] [--no-capture]
+                [--team [on|off]] [--team-port N] [--skip-git-check]
 ```
 
 Runs the hosted engine for this project, on this machine only, at `http://<project>-<random>.shapewall.localhost:<port>`, with
@@ -215,11 +220,14 @@ address instead; run either again while the engine runs to get a fresh one. `sha
 connect straight to 127.0.0.1 for it, never through a proxy. Prefer `SHAPEWALL_REMOTE`: other users of the machine can read
 a command line. The start prints `SHAPEWALL_REMOTE=http://<name>:<port> shapewall agent connect` for agents. While it runs,
 `shapewall comments`, `watch` and `mcp` in the project folder go to the engine with tokens it made for this machine at
-start (private files in `.shapewall/.engine/`, a new secret each start), not to the 1.x files; `export` is refused unless
-`--no-comments`. The engine also runs this project's agent (Settings > Agent: a coding agent, or a model endpoint such as
+start (private files in `.shapewall/.engine/`, a new secret each start), not to the 1.x files, and with no engine running they
+start one for themselves and stop it when they end; `export` writes the engine's comments too. The engine also runs this project's agent (Settings > Agent: a coding agent, or a model endpoint such as
 Ollama or DeepSeek) as `shapewall agent connect --as local`, on the same link a team server's agents use, with a token it
 made at start; the board's chat and Fix with go through it. `--no-chat` (or `--read-only`) runs without it. The flags that
-reach beyond this machine (`--host`, `--lan`, `--tailscale`, `--tls-cert`, `--accounts`, `--agent-acp`, ...) are refused.
+reach beyond this machine (`--host`, `--lan`, `--tailscale`, `--tls-cert`, `--accounts`, `--agent-acp`, ...) run the 1.x
+server instead. `--team` puts the same board on your tailnet for the people you invite (tailnet sign-in, nothing copied, you
+stay the owner) and `--team off` takes it back to this machine; while the engine runs it switches there
+([team mode](/docs/hosted#inviting-people-team-mode)).
 The engine is the hosted server's code, under its Functional Source License (Apache 2.0 two years after each release), not the
 core's Apache 2.0. An existing `.shapewall/` moves into it with [`shapewall migrate`](#shapewall-migrate).
 Details: [the solo engine](/docs/hosted#the-solo-engine-experimental).
@@ -560,7 +568,8 @@ shapewall share --remote URL [--board ID] [--dry-run] [--no-comments] [--include
 
 `login` opens the hosted console to get a project token and saves it privately for remote commands (on a server with tailnet
 sign-in, `--project` signs in from a tailnet machine without a browser; experimental, like all of tailnet sign-in). `share` moves local captures,
-history, journeys and comments into a shared project. `--dry-run` reports counts without sending; `--no-comments` omits comments.
+history, journeys and comments of a 1.x board into a shared project; a board the solo engine holds is refused (to bring people
+to it, use `serve --team`). `--dry-run` reports counts without sending; `--no-comments` omits comments.
 Private diagnostic reports are excluded unless `--include-checks` is explicitly selected. See [the operator guide](/docs/hosted).
 
 ## shapewall migrate
@@ -573,7 +582,7 @@ shapewall migrate --rollback [--dry-run] [--json]
 ```
 
 Moves this project's `.shapewall/` into the [solo engine](/docs/hosted#the-solo-engine-experimental) (`.shapewall/.engine/`), so
-`shapewall serve --engine hosted` serves it: captures, versions, environments and journeys as files, comments and chat threads as
+`shapewall serve` serves it (the first `serve` of 2.x runs it for you; [upgrading from 1.x](/docs/upgrading)): captures, versions, environments and journeys as files, comments and chat threads as
 engine rows, and a `serve --accounts` owner with their passkeys. A hard-link backup goes to `.shapewall/backup-1x-<time>/` first,
 and a failed run puts the folder back. `--dry-run` prints the counts and every item that would not come along, and writes nothing.
 It refuses while `serve` (either engine), a capture, `watch` or an agent runs. After a migration the plain `serve` and `watch`
@@ -1026,13 +1035,15 @@ Commands
       --browser-comments    visitors may comment; their comments stay in their own browser
       --no-index            ask search engines not to index the export
   share --remote URL        move local captures, history and comments to a shared project
+                            (a 1.x board; a board the solo engine holds is refused: use serve --team)
       --include-checks      explicitly include private diagnostic reports
       --board ID            move only this board (default all)
       --dry-run             show counts; sends nothing
       --no-comments         captures, history and journeys only
   migrate                   move this project's .shapewall/ into the solo engine (.shapewall/.engine/) (experimental)
                             captures, comments, chat and the local account; a backup goes to
-                            .shapewall/backup-1x-<time>/ first; the solo engine serves it after. Refuses while
+                            .shapewall/backup-1x-<time>/ first; the solo engine serves it after (the first
+                            serve of 2.x runs it; https://shapewall.com/docs/upgrading). Refuses while
                             serve (either engine), capture, watch or an agent runs
       --dry-run             counts, and every item that would not come along; writes nothing
       --board ID            only this board (default: every board)
