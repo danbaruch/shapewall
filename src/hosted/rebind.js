@@ -94,7 +94,9 @@ export function recordMove(db, { from, to, days = MOVE_DAYS_MAX, now = new Date(
 // Called when the app is made: remembers the origin, labels passkeys made
 // before migration 5 with the host they were made for, and works out the
 // previous origin's mode ('move' while the window is open, then 'redirect').
-export function prepareOrigins({ db, origin, rpId, previousOrigin = null, now = () => new Date(), log = () => {} }) {
+// `solo`: the solo engine, which has no passkeys and takes any --port, so a
+// changed origin there is normal and gets no warning.
+export function prepareOrigins({ db, origin, rpId, previousOrigin = null, solo = false, now = () => new Date(), log = () => {} }) {
   // Validate first, write last: a mistyped --previous-origin changes nothing
   // (not the recorded origin, so the "ran at X without a move" warning still
   // fires on the next attempt).
@@ -108,7 +110,7 @@ export function prepareOrigins({ db, origin, rpId, previousOrigin = null, now = 
     // passkey belongs to the origin it runs on now (or, mid-move, the old one).
     const rp = previous ? new URL(previous).hostname : rpId
     accounts(db).run('UPDATE passkeys SET rp_id = :rp WHERE rp_id IS NULL', { rp })
-  } else if (stored.origin !== origin && stored.origin !== previous) {
+  } else if (!solo && stored.origin !== origin && stored.origin !== previous) {
     log(
       `Warning: this server ran at ${stored.origin} and now runs at ${origin} without a move. Passkeys made for ${new URL(stored.origin).hostname} do not work here; people sign in with a recovery code. See "shapewall hosted move-origin".`,
     )

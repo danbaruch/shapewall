@@ -438,6 +438,8 @@ export async function startHosted({
       dataDir: dir,
       hours: retentionHours,
       keepDefault: retentionKeep,
+      // The solo engine keeps each board's own keepVersions, and its first start prunes nothing (retention.js).
+      solo: Boolean(solo),
       log: (line) => out(line),
     })
     cleanup.push(() => stopRetention())
