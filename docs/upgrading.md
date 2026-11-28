@@ -87,6 +87,10 @@ Rollback is part of the Apache 2.0 core and never needs the engine.
   `capture`, `links`, `push`, `journeys`, `variant` and `checks` work on the engine's board folders, running or not.
   `github issue`, `link` and `sync` work on the engine's comments, with this machine's GitHub token, which never goes to the
   engine. The GitHub webhook stays the 1.x server's: on the engine, `shapewall github sync` picks up merged pull requests.
+  `watch --no-claim` looks at the engine's open comments without taking any, as on a 1.x board.
+- **Version history** keeps the project's `keepVersions` (shapewall.config.json, 5 by default) per page and viewport, as
+  in 1.x, plus every older version a comment points at. The first start after a migration prunes nothing, so the versions
+  that moved arrive as they were; later starts trim to `keepVersions`, as the next 1.x capture would have.
 - **Stable surfaces keep their 1.x shapes**: `comments --json`, the `watch` and `watch --exec` JSON, the MCP tools and their
   arguments, and the lines of `.shapewall/events.jsonl` ([stability](stability.md)).
 
