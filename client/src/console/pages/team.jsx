@@ -10,10 +10,10 @@
 //   TeamOnDialog      what turning it on does, then the switch
 //   useTeam()         { team (the workspace's features.team or null), owner }
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Network, Power, UserPlus } from 'lucide-react'
 import { Button, Spinner } from '../../components/ui'
-import { Card, CardHeader, ConfirmDialog, CopyField, Notice } from '../components'
+import { Card, CardHeader, ConfirmDialog, CopyField, LoadError, Notice } from '../components'
 import { api } from '../lib/api'
 import { useAction, useLoad, useToast } from '../state'
 import { useWorkspace } from './workspace'
@@ -28,7 +28,10 @@ export function useTeam() {
 export function TeamOnDialog({ open, onClose, onDone }) {
   const { reload } = useWorkspace()
   const toast = useToast()
-  const { run, busy, error } = useAction()
+  const { run, busy, error, setError } = useAction()
+  useEffect(() => {
+    if (open) setError(null)
+  }, [open, setError])
   const turnOn = () =>
     run(async () => {
       await api.post('/solo/team', { on: true })
@@ -60,14 +63,22 @@ export function TeamOnDialog({ open, onClose, onDone }) {
   )
 }
 
-export function TeamCard({ onInvite }) {
+export function TeamCard({ onInvite, onStartTeam, refreshKey = 0 }) {
   const { team, owner } = useTeam()
   const { reload } = useWorkspace()
   const toast = useToast()
   const [asking, setAsking] = useState(false)
   const [stopping, setStopping] = useState(false)
   const status = useLoad(team?.on && owner ? '/solo/team' : null)
+  const { reload: reloadStatus } = status
   const stop = useAction()
+  const { setError: setStopError } = stop
+  useEffect(() => {
+    if (stopping) setStopError(null)
+  }, [stopping, setStopError])
+  useEffect(() => {
+    if (refreshKey && team?.on && owner) reloadStatus()
+  }, [refreshKey, team?.on, owner, reloadStatus])
   if (!team || !owner) return null
   if (!team.on)
     return (
@@ -78,7 +89,13 @@ export function TeamCard({ onInvite }) {
             title="Only you can reach this board"
             description="It runs on this machine. Invite people to put the same board on your tailnet for them, with nothing copied."
             actions={
-              <Button size="touch" variant="secondary" className="lg:h-9" onClick={() => setAsking(true)} data-sw-team-on>
+              <Button
+                size="touch"
+                variant="secondary"
+                className="lg:h-9"
+                onClick={() => (onStartTeam ? onStartTeam() : setAsking(true))}
+                data-sw-team-on
+              >
                 <UserPlus size={15} aria-hidden="true" /> Invite people
               </Button>
             }
@@ -91,17 +108,20 @@ export function TeamCard({ onInvite }) {
             </div>
           ) : null}
         </Card>
-        <TeamOnDialog
-          open={asking}
-          onClose={() => setAsking(false)}
-          onDone={() => {
-            setAsking(false)
-            onInvite?.()
-          }}
-        />
+        {onStartTeam ? null : (
+          <TeamOnDialog
+            open={asking}
+            onClose={() => setAsking(false)}
+            onDone={() => {
+              setAsking(false)
+              onInvite?.()
+            }}
+          />
+        )}
       </>
     )
   const lines = status.data?.lines || []
+  const problem = status.data?.problem || team.problem || null
   return (
     <>
       <Card className="mb-5" data-sw-team="on">
@@ -117,7 +137,18 @@ export function TeamCard({ onInvite }) {
         />
         <div className="space-y-3 px-4 py-3 sm:px-5">
           {team.origin ? <CopyField value={team.origin} testId="team-origin" /> : null}
-          {status.loading && !lines.length ? <Spinner /> : null}
+          {problem ? (
+            <Notice tone="warn" title="Team sign-in is suspended" data-sw-team-problem>
+              {problem}
+            </Notice>
+          ) : null}
+          {status.error ? <LoadError error={status.error} onRetry={status.reload} /> : null}
+          {status.loading && !lines.length ? (
+            <div className="flex items-center gap-2 text-xs text-muted" role="status">
+              <Spinner />
+              <span className="sr-only">Loading team status</span>
+            </div>
+          ) : null}
           {lines.length ? (
             <ul className="space-y-1 text-sm text-muted" data-sw-team-reach>
               {lines.slice(1).map((line) => (

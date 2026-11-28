@@ -443,7 +443,7 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
             </p>
             <ul className="list-disc space-y-0.5 pl-5">
               <li>
-                Codex: <code className="font-mono">sandbox_mode = "workspace-write"</code> or <code className="font-mono">"read-only"</code>
+                Codex: <code className="font-mono">sandbox_mode = "workspace-write"</code> or <code className="font-mono">"read-only"</code>{' '}
                 with <code className="font-mono">approval_policy = "on-request"</code>, never{' '}
                 <code className="font-mono">danger-full-access</code>.
               </li>

@@ -9,7 +9,7 @@ import { KeyRound } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui'
 import { Card, CardHeader, FormError, Notice, Switch } from '../components'
 import { api, wsUrl } from '../lib/api'
-import { useAction, useToast } from '../state'
+import { useAction, useSession, useToast } from '../state'
 import { useWorkspace } from './workspace'
 import {
   STEP_UP_ALWAYS,
@@ -43,6 +43,7 @@ const State = ({ on }) => (
 
 export function StepUpCard() {
   const { data, isOwner, workspaceId, reload } = useWorkspace()
+  const { me } = useSession()
   const toast = useToast()
   const change = useAction()
   const settings = data.workspace.settings.stepUp
@@ -55,6 +56,24 @@ export function StepUpCard() {
     ...(settings.adminIdle ? ['Admin pages after 12 hours away'] : []),
     ...(settings.cliApproval ? ['Approve command line logins in the browser'] : []),
   ]
+  const soloLocal = me?.via === 'local' || Boolean(data.features?.team?.available)
+  if (data.features?.passkeys === false && soloLocal)
+    return (
+      <Card data-sw-settings-step-up="local-only">
+        <CardHeader
+          icon={KeyRound}
+          title="Confirming changes"
+          description="You are signed in locally on this machine, so there is no passkey to ask for again."
+        />
+        <div className="space-y-2 px-4 py-4 text-ui text-muted sm:px-5">
+          <p>
+            Your local sign-in on this machine is the trust boundary here. Before high-impact changes (such as turning on team mode or
+            inviting people), Shapewall asks you to type the workspace’s name to confirm.
+          </p>
+          <p>This local engine does not use passkeys, so the per-action passkey switches do not apply here.</p>
+        </div>
+      </Card>
+    )
   if (data.features?.passkeys === false)
     return (
       <Card data-sw-settings-step-up="tailnet-only">

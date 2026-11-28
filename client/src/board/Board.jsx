@@ -42,6 +42,8 @@ import {
   FOLLOW_ROOM,
   MAX_ZOOM,
   MIN_ZOOM,
+  PHONE_FOLLOW_ROOM,
+  PHONE_TIP_ROOM,
   TIP_ROOM,
   clusterBounds,
   fitOptionsWithRoom,
@@ -145,9 +147,19 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // once, not on the next poll (hooks/useBoardEvents.js).
   const refetchView = view.refetch
   const refetchComments = commentsQuery.refetch
+  const [importedRefresh, setImportedRefresh] = useState(0)
+  const [importedOkShown, setImportedOkShown] = useState(false)
+  const prevCommentsData = useRef(commentsQuery.data)
+  useEffect(() => {
+    if (commentsQuery.data === prevCommentsData.current) return
+    const hadPrev = prevCommentsData.current !== null && prevCommentsData.current !== undefined
+    prevCommentsData.current = commentsQuery.data
+    if (hadPrev) setImportedRefresh((count) => count + 1)
+  }, [commentsQuery.data])
   useBoardEvents(boardId, Boolean(info?.boardEvents) && !STATIC, () => {
     refetchView()
     refetchComments()
+    setImportedRefresh((count) => count + 1)
   })
   const projectQuery = useResource(info?.localProjectsEnabled ? '/api/local-projects' : null, { pollMs: 30000 })
   const localProjects = projectQuery.data?.projects || []
@@ -394,14 +406,21 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     setFocusedKey(null)
     setSelectingKey(null)
   }, [])
+  // Where the Follow bar can show for a hosted member (followEnabled below, once its agents are online).
+  const followRow = Boolean(info?.hosted && !DEMO && !STATIC && !info?.guest && info?.role && boardId)
+  // Room above the board for CanvasNotes (first-run tip or ImportedOk banner) and, on hosted/solo boards,
+  // the Follow and Presence bars.
+  const noteRow = (tipOpen && !tryOpen) || importedOkShown
+  const topRoom = wide ? (followRow ? FOLLOW_ROOM : noteRow ? TIP_ROOM : 0) : followRow ? PHONE_FOLLOW_ROOM : noteRow ? PHONE_TIP_ROOM : 0
   const fitBoard = useCallback(() => {
     clearFocus()
     setSettledZoom(null)
+    const box = canvasRef.current?.getBoundingClientRect()
     // From the top when the fit leaves room above and below (camera.js).
-    const view = fitWholeViewport(flow.getNodes(), canvasRef.current?.getBoundingClientRect())
+    const view = fitWholeViewport(flow.getNodes(), box, { top: topRoom })
     if (view) flow.setViewport(view, { duration: motionDuration(400) })
-    else flow.fitView({ ...FIT_OPTIONS, duration: motionDuration(400) })
-  }, [clearFocus, flow, setSettledZoom])
+    else flow.fitView({ ...fitOptionsWithRoom(topRoom, box?.height), duration: motionDuration(400) })
+  }, [clearFocus, flow, setSettledZoom, topRoom])
 
   // Entering or leaving compare mode, or filtering to changed pages, reshapes
   // the board: refit. Null while the board or the comparison loads (the shape is not known yet).
@@ -682,6 +701,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     initialCamera,
     selectedCommentId,
     linkedTarget: Boolean(startTarget),
+    top: topRoom,
     canvasRef,
     nodes: layout.nodes,
     flow,
@@ -692,8 +712,6 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // until placed, so it never flashes at 100%.
   // A link to a journey step flies to that step instead (useJourneyActions).
   const startPending = useRef(!initialCamera.current && !selectedCommentId && !params.get('j'))
-  // Where the Follow bar can show for a hosted member (followEnabled below, once its agents are online).
-  const followRow = Boolean(info?.hosted && !DEMO && !STATIC && !info?.guest && info?.role && boardId)
   const fitOnMount = useRef(!initialCamera.current && Boolean(selectedCommentId))
   const [startShown, setStartShown] = useState(() => !wide || !startPending.current)
   useEffect(() => {
@@ -723,21 +741,16 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       return
     }
     const box = canvasRef.current?.getBoundingClientRect()
-    // The first-run tip shows at the top of the canvas (CanvasNotes.jsx; the demo's Try this card replaces it): room for
-    // it above the board, so it does not cover the first section's name.
-    // A hosted member's board (the solo engine's among them) can show the Follow bar under the tip once its agents
-    // answer, which may be after this first view: room for that row up front, so it never covers the name either.
-    const room = followRow ? FOLLOW_ROOM : tipOpen && !tryOpen ? TIP_ROOM : 0
     // A small board: the whole of it, from the top (camera.js fitWholeViewport).
     const view =
-      startViewport(layout.nodes, box, undefined, { top: room }) ||
-      fitWholeViewport(layout.nodes, box, { top: room, padding: 0.06, maxZoom: 1 })
+      startViewport(layout.nodes, box, undefined, { top: topRoom }) ||
+      fitWholeViewport(layout.nodes, box, { top: topRoom, padding: 0.06, maxZoom: 1 })
     setSettledZoom(null)
     // React Flow runs a fitView on a later frame: show the board once it is
     // placed, or the frame in between paints it at 100%.
-    const placed = view ? flow.setViewport(view) : flow.fitView(fitOptionsWithRoom(room, box?.height))
+    const placed = view ? flow.setViewport(view) : flow.fitView(fitOptionsWithRoom(topRoom, box?.height))
     Promise.resolve(placed).finally(() => setStartShown(true))
-  }, [comparePair, flow, followRow, layout.nodes, layout.targets, nodesReady, panelStart, setSettledZoom, shapeKey, tipOpen, tryOpen, wide])
+  }, [comparePair, flow, layout.nodes, layout.targets, nodesReady, panelStart, setSettledZoom, shapeKey, topRoom, wide])
 
   // After a pick from a toolbar list, focus goes back to the canvas (not the
   // trigger), so the next shortcut (C, the arrows) reaches the board.
@@ -2078,6 +2091,9 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                           <ImportedOk
                             boardId={boardId}
                             wide={wide}
+                            titleOf={targetTitle}
+                            refreshKey={importedRefresh}
+                            onVisibleChange={setImportedOkShown}
                             onSent={() => {
                               commentsQuery.refetch()
                               agentsQuery.refetch()
@@ -2086,6 +2102,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                         </Suspense>
                       ) : null
                     }
+                    hideTip={importedOkShown}
                     wide={wide}
                     commentMode={commentMode}
                     canComment={canComment}
@@ -2259,6 +2276,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                       view.refetch()
                       // An agent took or finished something.
                       agentsQuery.refetch()
+                      setImportedRefresh((count) => count + 1)
                     }}
                   />
                 ) : null}

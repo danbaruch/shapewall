@@ -356,13 +356,15 @@ export function TailnetInvites({ onJoined }) {
 // ---- Members: who arrived through the tailnet ---------------------------------------
 
 export function TailnetVisitors({ onInvited }) {
-  const { workspaceId, data, role: myRole } = useWorkspace()
+  const { workspaceId, data, role: myRole, isOwner } = useWorkspace()
   const toast = useToast()
   const on = Boolean(data.features?.tailnetSignIn)
+  const ownerOnlyInvites = Boolean(data.features?.ownerOnlyInvites) && (!isOwner || !data.features?.team?.available)
   const visitors = useLoad(on ? wsUrl(workspaceId, '/tailnet-visitors') : null)
   const act = useAction()
   const [roles, setRoles] = useState({})
-  const choices = invitableRoles(myRole)
+  // The solo engine keeps one owner: nobody is invited as one there.
+  const choices = invitableRoles(myRole).filter((item) => !(data.features?.team && item === 'owner'))
   useEffect(() => setRoles({}), [workspaceId])
   const list = visitors.data?.visitors || []
   if (!on || !list.length) return null
@@ -384,7 +386,11 @@ export function TailnetVisitors({ onInvited }) {
       <CardHeader
         icon={Network}
         title="Arrived through the tailnet"
-        description="People on your tailnet who opened this server and are in no workspace. Being on the tailnet gives them nothing: invite the ones who belong here, with a role."
+        description={
+          ownerOnlyInvites
+            ? 'People on your tailnet who opened this server and are in no workspace. Only the owner can invite them, from the machine that runs this board.'
+            : 'People on your tailnet who opened this server and are in no workspace. Being on the tailnet gives them nothing: invite the ones who belong here, with a role.'
+        }
       />
       <ul className="divide-y divide-line">
         {list.map((visitor) => (
@@ -397,31 +403,39 @@ export function TailnetVisitors({ onInvited }) {
                 {visitor.login} · last here <Time value={visitor.lastSeenAt} />
               </p>
             </div>
-            <Select
-              value={roles[visitor.login] || 'member'}
-              onValueChange={(value) => setRoles((all) => ({ ...all, [visitor.login]: value }))}
-            >
-              <SelectTrigger size="touch" className="w-32 lg:h-9" aria-label={`Role for ${visitor.login}`}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {choices.map((item) => (
-                  <SelectItem key={item} value={item}>
-                    {ROLE_LABEL[item]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              size="touch"
-              variant="default"
-              className="lg:h-9"
-              disabled={act.busy}
-              onClick={() => admit(visitor)}
-              data-sw-tailnet-admit
-            >
-              <UserPlus size={15} aria-hidden="true" /> Invite
-            </Button>
+            {ownerOnlyInvites ? (
+              <span className="text-xs text-muted" data-sw-owner-only-invites>
+                Only the owner can invite
+              </span>
+            ) : (
+              <>
+                <Select
+                  value={roles[visitor.login] || 'member'}
+                  onValueChange={(value) => setRoles((all) => ({ ...all, [visitor.login]: value }))}
+                >
+                  <SelectTrigger size="touch" className="w-32 lg:h-9" aria-label={`Role for ${visitor.login}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {choices.map((item) => (
+                      <SelectItem key={item} value={item}>
+                        {ROLE_LABEL[item]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="touch"
+                  variant="default"
+                  className="lg:h-9"
+                  disabled={act.busy}
+                  onClick={() => admit(visitor)}
+                  data-sw-tailnet-admit
+                >
+                  <UserPlus size={15} aria-hidden="true" /> Invite
+                </Button>
+              </>
+            )}
             <Button
               size="touch"
               variant="ghost"

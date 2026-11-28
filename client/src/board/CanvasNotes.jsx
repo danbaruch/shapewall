@@ -72,6 +72,8 @@ export function CanvasNotes({
   comparePair,
   // A note that goes first in the stack (the 1.x comments waiting for the owner's OK, ImportedOk.jsx).
   lead = null,
+  // Defer the first-run tip while a lead banner is visible so CanvasNotes stays single-row above FollowBar/PresenceBar.
+  hideTip = false,
 }) {
   const modeLabel = (id) => modes.find((item) => item.id === id)?.label || id
   const touchInput = useTouchInput()
@@ -124,7 +126,7 @@ export function CanvasNotes({
           </Button>
         </div>
       ) : null}
-      {tipOpen && !tryOpen && data && !commentMode && !composing && !showLinks && !journey && !builder && !revealed ? (
+      {tipOpen && !hideTip && !tryOpen && data && !commentMode && !composing && !showLinks && !journey && !builder && !revealed ? (
         <div
           className="pointer-events-auto flex w-max max-w-full items-center gap-1.5 rounded-full border border-line bg-surface py-0.5 pr-0.5 pl-3 text-xs text-fg shadow-pop"
           role="note"
