@@ -539,6 +539,8 @@ export function createHostedApp({
     // The solo engine's team mode (src/hosted/solo/team.js), read per request: invites for tailnet logins and
     // the team address in invite links while it is on. null on every other server.
     team: solo ? soloTeamView(() => app.locals.soloTeam) : null,
+    // The solo engine's team listener: invites are reserved for the owner on their machine.
+    ownerOnlyInvites: Boolean(teamGuard),
   }
   mountInviteLinks(consoleApi, consoleDeps)
   // Share link preview and opening: no session, the link is the secret.
@@ -589,6 +591,7 @@ export function createHostedApp({
     links,
     chat,
     solo: Boolean(solo),
+    syncBoards: shared?.syncBoards || null,
   })
 
   // Solo-only surfaces (src/hosted/solo/): mounted once, here, before the
@@ -657,6 +660,7 @@ export function createHostedApp({
     links,
     chat,
     solo: Boolean(soloLocal),
+    syncBoards: shared?.syncBoards || null,
   })
   // On the solo engine the token API and the MCP endpoint answer this machine's own OS user only (soloLocalGate
   // admitsMachine: a loopback peer, no proxy headers, the engine's name or a loopback address on its port, and on
@@ -789,20 +793,29 @@ export function createHostedApp({
   // The solo profile's board router (src/hosted/solo/index.js); null on a team server.
   app.locals.soloBoardApi = soloBoardApi
   app.locals.close = async () => {
-    presence.close()
-    if (ownsPresence) hub.close()
-    if (ownsEvents) events.close()
-    for (const check of [...streams]) check(true)
-    if (sweepTimer) clearInterval(sweepTimer)
-    if (turnTimer) clearInterval(turnTimer)
-    if (claimTimer) clearInterval(claimTimer)
-    // A shared turn hub, links and chat service belong to the app they came from.
-    if (!shared) {
-      chat.close()
-      links.closeAll()
+    const steps = [
+      () => presence.close(),
+      () => ownsPresence && hub.close(),
+      () => ownsEvents && events.close(),
+      () => {
+        for (const check of [...streams]) check(true)
+      },
+      () => sweepTimer && clearInterval(sweepTimer),
+      () => turnTimer && clearInterval(turnTimer),
+      () => claimTimer && clearInterval(claimTimer),
+      // A shared turn hub, links and chat service belong to the app they came from.
+      () => !shared && chat.close(),
+      () => !shared && links.closeAll(),
+      () => soloSurfaces?.close?.(),
+      () => cleaner.close(),
+    ]
+    for (const step of steps) {
+      try {
+        await step()
+      } catch (error) {
+        log(`shutdown cleanup failed: ${error?.message || error}`)
+      }
     }
-    await soloSurfaces?.close?.()
-    await cleaner.close()
   }
   return app
 }

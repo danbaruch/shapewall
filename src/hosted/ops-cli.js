@@ -48,7 +48,7 @@ export async function startEngineHeadless(config, { env = process.env, team = {}
   return serveEngine({ engine: 'hosted', config: config.file, port: 0, 'no-chat': true }, () => {}, {
     // A copy: `mcp` marks its own process.env as an agent's afterwards, which is not the engine's.
     env: { ...env },
-    start: (options) => startHosted({ ...options, exitOnStop: false }),
+    start: (options) => startHosted({ ...options, exitOnStop: false, retentionHours: 0 }),
     team: { ...team, headless: true },
   })
 }

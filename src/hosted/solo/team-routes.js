@@ -49,10 +49,13 @@ export function mountSoloTeamRoutes(
   async function change(req, res, controller, confirm) {
     const on = req.body?.on
     if (typeof on !== 'boolean') return fail(res, 400, 'invalid_body', 'Send { "on": true } or { "on": false }.')
-    const httpsPort = req.body?.httpsPort ?? controller.status().httpsPort ?? DEFAULT_TEAM_PORT
-    if (on && teamPortProblem(httpsPort)) return fail(res, 400, 'invalid_port', teamPortProblem(httpsPort))
+    const rawPort = req.body?.httpsPort ?? controller.status().httpsPort ?? DEFAULT_TEAM_PORT
+    if (on && teamPortProblem(rawPort)) return fail(res, 400, 'invalid_port', teamPortProblem(rawPort))
+    const httpsPort = Number(rawPort)
+    const before = controller.status()
+    const unchanged = on ? before.on && before.httpsPort === httpsPort : !before.on
     try {
-      if (on) confirm?.()
+      if (on && !unchanged) confirm?.()
       if (on) await controller.start({ httpsPort })
       else await controller.stop()
     } catch (error) {
@@ -61,10 +64,12 @@ export function mountSoloTeamRoutes(
       log(`team mode: ${error.message}`)
       return fail(res, 500, 'error', 'Something went wrong on the server.')
     }
-    const t = tenant(db, owner.workspaceId)
-    auditOf(req, on ? 'team_mode_on' : 'team_mode_off', owner.projectId, on ? { origin: controller.status().origin } : {}, t)
-    log(on ? `Team mode: on, at ${controller.status().origin}.` : 'Team mode: off. The board is on this machine only again.')
-    if (on) for (const line of controller.lines()) log(line)
+    if (!unchanged) {
+      const t = tenant(db, owner.workspaceId)
+      auditOf(req, on ? 'team_mode_on' : 'team_mode_off', owner.projectId, on ? { origin: controller.status().origin } : {}, t)
+      log(on ? `Team mode: on, at ${controller.status().origin}.` : 'Team mode: off. The board is on this machine only again.')
+      if (on) for (const line of controller.lines()) log(line)
+    }
     return res.json(view(controller))
   }
 

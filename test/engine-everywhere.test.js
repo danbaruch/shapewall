@@ -222,3 +222,48 @@ test('watch --no-claim on the engine hands out only dispatchable comments and cl
   assert.notEqual(remote.code, 0)
   assert.match(remote.err, /--no-claim works on this project's board only \(its solo engine or a 1\.x board\), not with --remote/)
 })
+
+test('F5: export excludes share-link guest comments and images by default; --include-guests opts in', async () => {
+  const { openDatabase } = await import('../src/hosted/db.js')
+  const { engineDir } = await import('../src/engine-folder.js')
+  const { readSoloBinding } = await import('../src/hosted/solo/binding.js')
+  const { config, file } = await migratedProject('everywhere-export-guests', { image: true })
+  const db = await openDatabase(path.join(engineDir(config.outputDir), 'shapewall.db'))
+  const bound = readSoloBinding(db)
+  const at = new Date().toISOString()
+  // Seed a share-link guest comment with an attached image in the engine database.
+  db.prepare(
+    `INSERT INTO shares (workspace_id, id, project_id, token_hash, name, mode, created_by, created_at, expires_at)
+     VALUES (?, 'sh_guest1', ?, 'hash_guest1', 'Guest link', 'comment', ?, ?, '2099-01-01T00:00:00.000Z')`,
+  ).run(bound.workspaceId, bound.projectId, db.prepare('SELECT id FROM users LIMIT 1').get().id, at)
+  const guestImgFile = 'a'.repeat(24) + '.png'
+  const guestImages = JSON.stringify([{ file: guestImgFile, name: 'guest.png', mediaType: 'image/png', bytes: 8, width: 8, height: 8 }])
+  db.prepare(
+    `INSERT INTO comments (workspace_id, project_id, board_id, number, page_id, viewport, x, y, body, author, author_share_id, status, images, created_at, updated_at)
+     VALUES (?, ?, 'sample', 2, 'home', 'desktop', 20, 20, 'Untrusted guest note', 'Mallory', 'sh_guest1', 'open', ?, ?, ?)`,
+  ).run(bound.workspaceId, bound.projectId, guestImages, at, at)
+  db.prepare(
+    `INSERT INTO comment_files (workspace_id, project_id, board_id, file, comment_number, reply_id, name, media_type, bytes, width, height, data, created_at)
+     VALUES (?, ?, 'sample', ?, 2, NULL, 'guest.png', 'image/png', ?, 8, 8, ?, ?)`,
+  ).run(bound.workspaceId, bound.projectId, guestImgFile, solidPng(8, 8).length, solidPng(8, 8), at)
+  db.close()
+
+  // Default export: guest comment and guest image are excluded.
+  const outDefault = path.join(config.dir, 'exported-no-guests')
+  const runDefault = await cli(['export', '--config', file, '--out', outDefault])
+  assert.equal(runDefault.code, 0, runDefault.err)
+  const defaultComments = JSON.parse(fs.readFileSync(path.join(outDefault, 'data', 'boards', 'sample', 'comments.json'), 'utf8')).comments
+  assert.deepEqual(
+    defaultComments.map((comment) => comment.body),
+    ['Bigger logo'],
+  )
+  assert.equal(fs.existsSync(path.join(outDefault, 'data', 'boards', 'sample', 'comment-files', guestImgFile)), false)
+
+  // Explicit --include-guests: guest comment and guest image are included.
+  const outWithGuests = path.join(config.dir, 'exported-with-guests')
+  const runWithGuests = await cli(['export', '--config', file, '--include-guests', '--out', outWithGuests])
+  assert.equal(runWithGuests.code, 0, runWithGuests.err)
+  const guestComments = JSON.parse(fs.readFileSync(path.join(outWithGuests, 'data', 'boards', 'sample', 'comments.json'), 'utf8')).comments
+  assert.deepEqual(guestComments.map((comment) => comment.body).sort(), ['Bigger logo', 'Untrusted guest note'])
+  assert.equal(fs.existsSync(path.join(outWithGuests, 'data', 'boards', 'sample', 'comment-files', guestImgFile)), true)
+})

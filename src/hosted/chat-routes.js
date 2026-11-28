@@ -391,15 +391,14 @@ export function mountChatRoutes(
   // ---- Who reads what an agent asked to change ----
 
   // The diff on a card is a piece of the project's code. It goes to the
-  // people the agent works for: someone in its audience whom the project
-  // trusts, whoever may answer its cards, and whoever asked for this turn.
-  // Everyone else who can open the thread reads that the agent asked to
-  // edit a file, which file, and how that ended. Live and stored alike.
-  function seesDiffs(req, boardId, agentId, startedBy = null) {
+  // people the agent works for now: someone in its audience whom the project
+  // trusts, or whoever may answer its cards. Everyone else who can open the
+  // thread reads that the agent asked to edit a file, which file, and how
+  // that ended. Live and stored alike.
+  function seesDiffs(req, boardId, agentId) {
     const agents = agentsFor(req.t)
     const agent = agentId ? agents.get(req.project.id, agentId) : null
     if (!agents.live(agent)) return false
-    if (startedBy && startedBy === req.user.id) return true
     if (agents.inAudience(agent, req.user.id) && agents.trusted(req.project.id, boardId, req.user.id)) return true
     return agents.answerCheck(agent, viewerOf(req, boardId)).ok
   }
@@ -453,7 +452,7 @@ export function mountChatRoutes(
       // Agent stores memoize reads for one request. A stream must recheck the current policy at each write.
       return { user: req.user, t: tenant(db, req.t.workspaceId), project: req.project, role }
     }
-    const canSeeDiffs = (viewer) => seesDiffs(viewer, live.boardId, live.agentId, live.startedBy)
+    const canSeeDiffs = (viewer) => seesDiffs(viewer, live.boardId, live.agentId)
     const pump = () => {
       // One check per pass: everything written in it goes out at one moment.
       let access = null
@@ -1022,13 +1021,14 @@ export function mountChatRoutes(
     return row
   }
 
-  // Stops every running turn of a workspace whose asker `shouldStop(userId)` names (C-5: a member removed, or team
-  // mode off on the solo engine): the same stop as the Stop button, with no request. -> how many were stopped.
+  // Stops every running turn of a workspace whose asker `shouldStop(userId, live)` names (C-5: a member removed,
+  // demoted out of agent trust, or team mode off on the solo engine): the same stop as the Stop button, with no
+  // request. -> how many were stopped.
   function stopTurnsOf(workspaceId, shouldStop) {
     const t = tenant(db, workspaceId)
     let stopped = 0
     for (const live of hub.list()) {
-      if (live.workspaceId !== workspaceId || live.cancel || !live.startedBy || !shouldStop(live.startedBy)) continue
+      if (live.workspaceId !== workspaceId || live.cancel || !live.startedBy || !shouldStop(live.startedBy, live)) continue
       const row = chatFor(t).turn(live.id)
       const agent = agentsFor(t).get(live.projectId, live.agentId)
       live.cancel = true

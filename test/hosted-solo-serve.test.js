@@ -516,3 +516,57 @@ test('update answers: stale folders of this user are removed after a day; nothin
   assert.equal(removeStaleAnswerFolders({ tmp, now, uid: (process.getuid?.() ?? 0) + 1 }), 0)
   assert.equal(fs.existsSync(mine), true)
 })
+
+test('F18: failing closers do not skip remaining shutdown cleanup; post-startHosted failure cleans up without exiting', async () => {
+  const { CLI_TOKEN_FILE } = await import('../src/hosted/solo/machine-tokens.js')
+  const { readLock } = await import('../src/lock.js')
+  // --accounts refusal message drops "(experimental)".
+  const accountsMsg = engineFlagProblem({ engine: 'hosted', accounts: true })
+  assert.match(accountsMsg, /shapewall migrate moves local passkey accounts/)
+  assert.doesNotMatch(accountsMsg, /\(experimental\)/)
+
+  // 1. Failing closer during startHosted.stop() still lets later closers (retireMachineTokens, server.close) run.
+  const { config: cfg1 } = project('solo-f18-closer')
+  const data1 = tempDir('solo-f18-closer-data')
+  const logs = []
+  const handle = await noExit({
+    dataDir: data1,
+    port: 0,
+    out: (line) => logs.push(String(line)),
+    solo: { signIn: 'local', config: cfg1, configPath: cfg1.file },
+    origin: (port) => `http://f18-closer-abcdefghijklmn.shapewall.localhost:${port}`,
+  })
+  assert.equal(fs.existsSync(path.join(data1, CLI_TOKEN_FILE)), true)
+  // Sabotage team.close() so it throws first during stopAll() reverse iteration.
+  handle.app.locals.soloTeam.close = async () => {
+    throw new Error('simulated closer boom')
+  }
+  await handle.stop()
+  assert.equal(handle.server.listening, false, 'server still closed after failing closer')
+  assert.equal(fs.existsSync(path.join(data1, CLI_TOKEN_FILE)), false, 'machine tokens still retired after failing closer')
+  assert.match(logs.join('\n'), /simulated closer boom/)
+
+  // 2. Failure after startHosted returns in serveEngine() cleans up lock, serve.json, tokens, and server without calling exit().
+  const { config: cfg2 } = project('solo-f18-post-start')
+  const dir2 = engineDir(cfg2.outputDir)
+  const exits = []
+  let startedHandle = null
+  await assert.rejects(
+    serveEngine({ engine: 'hosted', config: cfg2.file, port: 0, open: true, 'no-chat': true }, () => {}, {
+      env: ENV,
+      start: async (options) => {
+        startedHandle = await startHosted({ ...options, exitOnStop: true, exit: (code) => exits.push(code) })
+        startedHandle.app.locals.soloOpenFile = () => {
+          throw new Error('simulated open-file failure')
+        }
+        return startedHandle
+      },
+    }),
+    /simulated open-file failure/,
+  )
+  assert.deepEqual(exits, [], 'post-startHosted failure must not call process.exit')
+  assert.equal(startedHandle.server.listening, false, 'server stopped on post-startHosted failure')
+  assert.equal(fs.existsSync(path.join(dir2, 'serve.json')), false, 'serve.json removed')
+  assert.equal(readLock(path.join(dir2, 'serve.lock')), null, 'serve.lock released')
+  assert.equal(fs.existsSync(path.join(dir2, CLI_TOKEN_FILE)), false, 'machine tokens retired')
+})

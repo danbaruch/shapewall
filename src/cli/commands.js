@@ -149,9 +149,10 @@ export async function exportCommand(flags, out) {
   if (flags.remote !== undefined && !flags['no-comments']) {
     const { createRemote, remoteSettings } = await import('../remote/remote.js')
     const remote = createRemote(remoteSettings(flags))
+    const guests = Boolean(flags['include-guests'])
     commentSource = {
-      list: async (boardId) => (await remote.exportComments(boardId)).comments,
-      file: (boardId, name) => remote.commentFile(boardId, name),
+      list: async (boardId) => (await remote.exportComments(boardId, { guests })).comments,
+      file: (boardId, name) => remote.commentFile(boardId, name, { guests }),
     }
   }
   const result = await exportStatic(config, {

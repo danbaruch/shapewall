@@ -74,6 +74,8 @@ export function mountBoardRoutes(
     // The solo profile (src/hosted/solo/index.js): its members-only board
     // routes answer before this API's catch-all.
     solo = false,
+    // Live config sync shared from the owner's solo app to its team listener (F19).
+    syncBoards = null,
   },
 ) {
   // ---- Usercontent: live HTML through signed URLs ----
@@ -107,6 +109,11 @@ export function mountBoardRoutes(
     (req.method === 'GET' && BOARD_FILE_RE.test(req.path) ? sessionLimits.files : sessionLimits.api)(req, res, next),
   )
   boardApi.use(inWorkspace('viewer'), inProject)
+  if (syncBoards)
+    boardApi.use((req, res, next) => {
+      syncBoards(req.project?.id)
+      next()
+    })
 
   boardApi.get(
     '/boards/:bid/agent-budget',

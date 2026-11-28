@@ -113,6 +113,8 @@ export function mountConsoleRoutes(consoleApi, deps) {
     // The solo engine's team mode (src/hosted/solo/team-view.js), or null: while it is on, invites may be for a
     // tailnet login and their links carry the team address (the people invited never reach this app's origin).
     team = null,
+    // The solo engine's team listener: invites are reserved for the owner on their own machine (teamGuard).
+    ownerOnlyInvites = false,
   } = deps
   // Making, changing or removing an owner always asks for the passkey; the
   // same for an admin when the workspace asks for it ("Members and roles").
@@ -211,6 +213,8 @@ export function mountConsoleRoutes(consoleApi, deps) {
           tailnetSignIn: Boolean(tailnet) || Boolean(team?.on()),
           // The solo engine: team mode (shapewall serve --team; the console's Invite people).
           ...(team ? { team: team.view() } : {}),
+          // The solo engine's team listener refuses invites from invited admins (only the owner invites).
+          ownerOnlyInvites: Boolean(ownerOnlyInvites),
           // false: Tailscale is the only sign-in here (no passkeys, so nothing in "Ask for a passkey again" applies).
           passkeys: passkeys ? passkeys.on() : true,
         },
@@ -238,11 +242,14 @@ export function mountConsoleRoutes(consoleApi, deps) {
       if (!ROLES.includes(role)) throw new HttpError(400, 'invalid_role', `Role: ${ROLES.join(', ')}.`)
       roleStepUp(req, { owner: role === 'owner', admin: role === 'admin', makesAdmin: role === 'admin' })
       let revoked = { invites: 0, shares: 0, tokens: 0 }
+      let previousRole = null
+      const uid = String(req.params.uid)
       transaction(db, () => {
         const target = req.t.get('SELECT role FROM memberships WHERE workspace_id = :ws AND user_id = :user', {
-          user: String(req.params.uid),
+          user: uid,
         })
         if (!target) throw new HttpError(404, 'unknown_member', 'No such member.')
+        previousRole = target.role
         if (!canManage(req.role, target.role, role)) throw new HttpError(403, 'forbidden', 'Only an owner can change owners and admins.')
         if (leavesNoOwner({ targetRole: target.role, newRole: role, owners: ownerCount(req.t) }))
           throw new HttpError(409, 'last_owner', 'A workspace needs an owner.')
@@ -250,15 +257,23 @@ export function mountConsoleRoutes(consoleApi, deps) {
         roleStepUp(req, { owner: roleChangeTouchesOwner(target.role, role), admin: roleChangeTouchesAdmin(target.role, role) })
         req.t.run('UPDATE memberships SET role = :role WHERE workspace_id = :ws AND user_id = :user', {
           role,
-          user: String(req.params.uid),
+          user: uid,
         })
-        auditOf(req, 'member_role_changed', String(req.params.uid), { from: target.role, to: role })
+        auditOf(req, 'member_role_changed', uid, { from: target.role, to: role })
         // Below admin also revokes the API tokens they made (they can no
         // longer make or manage tokens; grantsToRevoke).
-        if (target.role !== role) revoked = revokeGrantsOf(req, String(req.params.uid), role)
+        if (target.role !== role) revoked = revokeGrantsOf(req, uid, role)
       })
-      // A viewer sends no work: what they asked an agent and is still running ends now (C R1-4).
-      if (role === 'viewer') req.app.locals.chat?.stopTurnsOf?.(req.t.workspaceId, (id) => id === String(req.params.uid))
+      // A viewer sends no work, and a demotion can revoke agent-policy trust on projects that trust admins/owners only:
+      // stop running turns where this person is now viewer or no longer trusted (C R1-4, F6).
+      if (role === 'viewer') req.app.locals.chat?.stopTurnsOf?.(req.t.workspaceId, (id) => id === uid)
+      else if (previousRole && previousRole !== role) {
+        const agents = agentsFor(tenant(db, req.t.workspaceId))
+        req.app.locals.chat?.stopTurnsOf?.(
+          req.t.workspaceId,
+          (id, live) => id === uid && (!live || !agents.trusted(live.projectId, live.boardId, uid)),
+        )
+      }
       res.json({ ok: true, revoked })
     }),
   )

@@ -33,6 +33,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { readBoardJob } from '../board-job.js'
 import { ID_RE, VERSIONS_DEFAULT } from '../config.js'
 import { listVersions } from '../store.js'
 import { transaction } from './db.js'
@@ -144,6 +145,7 @@ function pruneBoard(db, t, dataDir, projectId, boardId, keep, dryRun) {
     const config = boardConfig(dataDir, t.workspaceId, projectId, row)
     if (typeof keep === 'function') keep = keep(config)
     if (keep === null) return { files: 0, bytes: 0 }
+    if (readBoardJob(config, boardId)) return { files: 0, bytes: 0 }
     const referenced = referencedVersions(t, projectId, boardId)
     const names = planBoardRetention(listVersions(config, boardId), referenced, keep)
     const dir = path.join(config.outputDir, boardId, 'versions')
@@ -187,7 +189,7 @@ export function startRetention({
   if (!hours) return () => {}
   const run = () => {
     try {
-      const result = runRetention({ db, dataDir, keepDefault, solo })
+      const result = runRetention({ db, dataDir, keepDefault, solo, now })
       if (result.usageRows) log(`retention: removed ${result.usageRows} old usage records`)
       if (result.files)
         log(`retention: removed ${result.files} old version files (${(result.bytes / 1048576).toFixed(1)} MB) from ${result.boards} boards`)
