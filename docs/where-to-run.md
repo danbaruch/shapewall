@@ -1,22 +1,21 @@
 # Where to run Shapewall
 
-Shapewall has two shapes. Pick by who needs the board and when, not by how big the app is.
+Shapewall has one engine in two shapes: on your machine for one project, or on a server for a team. Start alone, and invite
+people when you are ready. Pick by who needs the board and when, not by how big the app is.
 
 | You are                                         | Run                                                          | Who can open it                      | Always on?                 |
 | ----------------------------------------------- | ------------------------------------------------------------ | ------------------------------------ | -------------------------- |
 | One person, building with an agent              | `npx shapewall serve` in the project, next to its dev server | You, on this machine                 | No: start it when you work |
-| One person, also on your phone or second laptop | `npx shapewall serve --tailscale`                            | Your own devices on your tailnet     | No                         |
-| One person, on the hosted engine (experimental) | `npx shapewall serve --engine hosted` in the project         | You, on this machine                 | No: start it when you work |
 | The same, with a few people invited             | `npx shapewall serve --team` (or Invite people)              | You, and tailnet users you invite    | No: while it runs          |
 | A team, or you and your agents around the clock | `shapewall hosted --tailscale` on a machine that stays on    | Everyone you invite, on your tailnet | Yes                        |
 | The same, with no passkeys to set up            | `shapewall hosted --tailscale --tailnet-sign-in`             | Tailnet users you invite by login    | Yes                        |
 | A team with people outside your tailnet         | `shapewall hosted` behind your own domain                    | Everyone you invite, from anywhere   | Yes                        |
 
-The first two are the same local board. The last three are the same hosted server, reached in different ways. The third is that
-hosted server run for one project on your own machine (the solo engine). From 2.0 it is what `shapewall serve` runs, so the local
-board is the solo engine too ([upgrading a 1.x project](#upgrading-a-1x-project)). Moving between the local board and a hosted server
-changes nothing about the project's config; `shapewall push` and `shapewall share` move captures and comments to a server, and
-`shapewall migrate` moves them into the solo engine.
+The first two are the local board: the solo engine, the hosted server's engine run for one project on your own machine, alone
+or with the people you invite. The last three are the same hosted server, reached in different ways. Moving between the local
+board and a hosted server changes nothing about the project's config: `shapewall push` sends captures to a server. Coming from
+1.x? The first `shapewall serve` of 2.0 moves the project's board into the engine, with a backup first
+([upgrading from 1.x](upgrading.md)).
 
 ## The local board
 
@@ -28,12 +27,13 @@ npx shapewall serve --open
 ```
 
 It lives in the project folder, runs while you work and stops when you close it, like a dev server. Captures, comments and agent fixes
-all happen on this machine. There is no account and nothing to host. Details: [Running and sharing a board](deployment.md).
+all happen on this machine. There is no account to make and nothing to host. Details: [Running and sharing a board](deployment.md).
 
-From 2.0, `serve` runs the local board on the solo engine: the same engine as the hosted server, for one project and one owner, on
-this machine only, with its data in `.shapewall/.engine/` ([the solo engine](hosted.md#the-solo-engine-experimental)). You sign the
-browser in from the terminal (`serve --open`); there is still no account to make. `shapewall capture` writes into the engine's board
-folder, and `comments`, `watch` and `mcp` in the project folder go to the engine while it runs.
+`serve` runs the solo engine: the same engine as the hosted server, for one project and one owner, on this machine only, with its
+data in `.shapewall/.engine/` ([the solo engine](#the-solo-engine-experimental)). `serve --open` signs the browser in from the terminal.
+`shapewall capture` writes into the engine's board folder, and `comments`, `watch` and `mcp` in the project folder go to the engine
+(and start it for themselves when it is not running). When you want other people on the board, turn on
+[team mode](#inviting-people-to-the-engine): the same board, nothing copied.
 
 ### Upgrading a 1.x project
 
@@ -62,8 +62,9 @@ server. Once the engine holds the project (after the move, or in a project whose
   the captures only.
 - `github` (`issue`, `link`, `sync`) works on the engine's comments, running or not: it asks GitHub itself, with this machine's
   token, and records the issue and pull request links through the engine's token API. `migrate` carries a 1.x board's links
-  over. The webhook is the 1.x server's only (`sync` does the same by polling). `share --remote` refuses an engine board:
-  `shapewall serve --team` moves a solo board to a team server.
+  over. The webhook is the 1.x server's only (`sync` does the same by polling).
+- `share --remote` refuses an engine board. To bring people to it, run `shapewall serve --team`: the same board on your tailnet,
+  nothing copied. Moving an engine board to a team server is not in 2.0.
 - `comments add --selector` and `comments selectors` read the engine's latest captures.
 
 `SHAPEWALL_ENGINE=legacy` puts every command back on the 1.x files (deprecated).
@@ -77,40 +78,36 @@ text, which stays marked as an agent's), and the lines of `.shapewall/events.jso
 `--accounts`, `--agent-acp`, `--allowed-host`, `--buzz-bridge` and the device flags) also runs it, with the same warning, so
 `serve --host 0.0.0.0` in a container keeps working. With `SHAPEWALL_ENGINE=legacy`, `capture` writes the 1.x board folders again.
 
-To use the same board from your phone, add `--tailscale`: Shapewall asks Tailscale to serve it at this machine's private HTTPS name,
-and your other devices pair once. See [Your own other devices](deployment.md#your-own-other-devices-local-mode).
+`serve --tailscale` (your own other devices, paired once) is one of those 1.x-only flags: it runs the deprecated 1.x server. See
+[Your own other devices](deployment.md#your-own-other-devices-local-mode). On the engine, the tailnet way in is team mode.
 
 Working on several projects? Each one has its own board on its own port, and the board switcher switches between the ones that are
 running. See [Several local projects](deployment.md#several-local-projects).
 
-## The solo engine (experimental)
-
-**Experimental.** Outside the [stability promise](stability.md): it can change, or go, in a minor release.
+## The solo engine <a id="the-solo-engine-experimental"></a>
 
 ```sh
-npx shapewall migrate --dry-run         # optional: what an existing .shapewall/ would bring along
-npx shapewall migrate                   # optional: move it, with a backup first
-npx shapewall serve --engine hosted --open
+npx shapewall migrate --dry-run         # optional: what an existing 1.x .shapewall/ would bring along
+npx shapewall serve --open              # the engine; a 1.x project moves in on the first start
 ```
 
-`serve --engine hosted` runs the hosted server's engine for this one project, on this machine, for you alone: one owner with no
+`serve` (also `serve --engine hosted`) runs the hosted server's engine for this one project, on this machine, for you alone: one owner with no
 passkey (a one-time sign-in page from the terminal), on 127.0.0.1 at `http://<project>-<random>.shapewall.localhost:<port>`, with its
 data in `.shapewall/.engine/`. The board is the hosted board, and the work that a team server leaves to your machine happens in the
 engine itself: "Capture now", page checks, journeys made on the board, environments and compare, batch fixes and installation
 updates. The project's agent runs as a connected agent (`shapewall agent connect --as local`) on the same link a team server's
 agents use, so the chat, Fix with and Send to agent go through one protocol whether the board is on your machine or a server. While
-it runs, `shapewall comments`, `watch` and `mcp` in the project folder go to it.
-In 1.5.0 it is opt-in: the plain `shapewall serve` is unchanged and stays the default.
+it runs, `shapewall comments`, `watch` and `mcp` in the project folder go to it. It has been the default since 2.0 (opt-in in 1.5.0).
 
-`shapewall migrate` (experimental) moves an existing project's `.shapewall/` (captures, versions, environments, journeys,
+`shapewall migrate` moves an existing project's `.shapewall/` (captures, versions, environments, journeys,
 comments, chat threads, a `serve --accounts` owner) into the engine, after a hard-link backup; `shapewall migrate --rollback` puts
-it back. After a migration the plain `shapewall serve` and `shapewall watch` refuse the boards that moved. A project with no
-`.shapewall/` yet needs no migration: start the engine and capture.
+it back. The first `serve` runs it for you. After a migration the 1.x server and the 1.x writers refuse the boards that moved. A
+project with no `.shapewall/` yet needs no migration: start the engine and capture.
 
 The engine is the hosted server's code (`src/hosted`), so it is under the hosted server's license, not the core's: the
 [Functional Source License 1.1, ALv2 future license](../src/hosted/LICENSE.md). Anyone may use, change and run it, at work too;
 what it does not allow is offering it as a competing hosted service, and each release becomes Apache 2.0 two years after it ships.
-The CLI, capture, the local board and the migration planner, backup and rollback stay Apache 2.0.
+The CLI, capture, the MCP server, the deprecated 1.x board server and the migration planner, backup and rollback stay Apache 2.0.
 
 ### Inviting people to the engine
 
@@ -118,7 +115,7 @@ The CLI, capture, the local board and the migration planner, backup and rollback
 you invite: `tailscale serve` with tailnet sign-in, the same data, nothing copied, and you stay the owner. `shapewall serve --team
 off` (or **Stop sharing**) puts it back on this machine only. Every start prints exactly who can reach the board. It is never on
 the public internet: for that, run a team server on your own domain. The board is there only while the engine runs, so a team
-that needs it around the clock wants a team server on a machine that stays on; `shapewall share` moves the project there.
+that needs it around the clock wants a team server on a machine that stays on.
 Details: [team mode](hosted.md#inviting-people-team-mode).
 
 Every detail (sign-in, tokens, the board's own agent, capturing, what it refuses): [the solo engine](hosted.md#the-solo-engine-experimental).
@@ -143,8 +140,8 @@ and sign-in stay private. When people outside your tailnet need accounts, put th
 
 | How you reach it             | Sign-in                                                                                    |
 | ---------------------------- | ------------------------------------------------------------------------------------------ |
-| Local board                  | None. It is yours, on your machine                                                         |
-| Over an SSH tunnel           | A local board: none, as if you sat at that machine. A hosted server: a passkey each        |
+| Local board                  | From the terminal (`serve --open`), no account to make; team mode: tailnet sign-in         |
+| Over an SSH tunnel           | A local board: as if you sat at that machine. A hosted server: a passkey each              |
 | Tailnet, `--tailnet-sign-in` | Your Tailscale account, on every tailnet device of yours. No passkey. An admin invites you |
 | Own domain                   | A passkey each                                                                             |
 
@@ -295,12 +292,14 @@ One process holds an agent's link: a second `agent connect` on the same token is
 
 ## Which one should I start with?
 
-Start local. It takes four commands and nothing to maintain. To try the solo engine, run it on a copy of a project, or
-migrate a project and keep the backup until you are sure (`shapewall migrate --rollback`). Move to the hosted server when one of these is true:
+Start local. It takes four commands and nothing to maintain. Coming from 1.x, keep the migration's backup until you are sure
+(`shapewall migrate --rollback` puts the 1.x board back; [upgrading from 1.x](upgrading.md)). When a few people should see the
+board while you work, turn on team mode (`shapewall serve --team`). Move to the hosted server when one of these is true:
 
-- someone else needs to comment, and a share link or a screenshot is not enough;
-- you want to leave comments from anywhere and have an agent on another machine act on them;
-- the board should be there when your laptop is closed.
+- people need the board when your laptop is closed;
+- someone outside your tailnet needs an account;
+- you want agents on other machines to act on comments around the clock.
 
-`shapewall share --remote https://your-server` moves a local project's captures, history and comments to a hosted project in one go
-([Move a local project to your team](hosted.md#move-a-local-project-to-your-team)).
+`shapewall share --remote https://your-server` moves a 1.x local project's captures, history and comments to a hosted project in
+one go ([Move a local project to your team](hosted.md#move-a-local-project-to-your-team)). It refuses a board the solo engine
+holds.

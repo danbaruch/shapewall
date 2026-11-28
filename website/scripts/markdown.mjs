@@ -37,6 +37,7 @@ const SAME_NAME = [
   'stability',
   'starter-agent',
   'updates',
+  'upgrading',
   'where-to-run',
 ]
 const SITE_PATHS = {

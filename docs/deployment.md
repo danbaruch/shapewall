@@ -5,10 +5,20 @@ Not sure whether you want the local board or a hosted server? Start with [Where 
 ## Locally (the default)
 
 ```sh
-shapewall serve            # http://127.0.0.1:4600/
+shapewall serve --open     # the solo engine, http://<project>-<random>.shapewall.localhost:4600/
 ```
 
-The server binds to 127.0.0.1 and has no login. Two protections are always on:
+From 2.0 `serve` runs the solo engine: the hosted server's engine for this one project, on 127.0.0.1 only, one owner signed
+in by a one-time page from the terminal (`--open`), data in `.shapewall/.engine/` ([the solo engine](#the-solo-engine-experimental)).
+`--read-only`, `--no-chat` and `--no-capture` work as below. To let people in, turn on team mode (`shapewall serve --team`):
+the same board on your tailnet, nothing copied. A 1.x project moves into the engine on the first start, with a backup first
+([upgrading from 1.x](upgrading.md)).
+
+The rest of this section, and [Legacy local-board proxy access](#legacy-local-board-proxy-access) and
+[Your own other devices](#your-own-other-devices-local-mode) below, describe the 1.x board server: `serve --engine legacy`
+(or `SHAPEWALL_ENGINE=legacy`), deprecated in 2.0 and removed in 3.0. A flag only it has (`--host`, `--lan`, `--tailscale`,
+`--allowed-host`, `--tls-cert`, `--accounts`, ...) picks it, with a warning. It binds to 127.0.0.1 and has no login. Two
+protections are always on:
 
 - **Host check.** Requests whose `Host` header is not `127.0.0.1`, `localhost` or `[::1]` get a 421. This stops DNS rebinding, where a
   web page you visit points its own domain at your machine to reach local servers.
@@ -41,30 +51,32 @@ other projects for you.
 `127.0.0.1` always means the device opening the link. On a phone it means the phone, even with Tailscale connected. Use the computer's
 Tailscale HTTPS link for phone access; the desktop project list is intentionally hidden there. See the team access guidance below.
 
-### The solo engine (experimental)
+### The solo engine <a id="the-solo-engine-experimental"></a>
 
 ```sh
-shapewall serve --engine hosted --open
+shapewall serve --open     # the same as shapewall serve --engine hosted --open
 ```
 
-**Experimental** (outside the [stability promise](stability.md)). Runs the hosted server's engine for this project instead of the
-local board: on 127.0.0.1 only, at `http://<project>-<random>.shapewall.localhost:<port>` (the port defaults to 4600, as for
+The default board server from 2.0 (opt-in and experimental in 1.5.0): the
+hosted server's engine for this project, on 127.0.0.1 only, at `http://<project>-<random>.shapewall.localhost:<port>` (the port defaults to 4600, as for
 `serve`), one owner signed in by a one-time page from the terminal, data in `.shapewall/.engine/`. It refuses to start when git
 tracks that folder, and refuses every flag that reaches beyond this machine (`--host`, `--lan`, `--tailscale`, `--tls-cert`,
-`--accounts`, `--allowed-host`, ...): use a team server for other devices and people. `--read-only`, `--no-chat` and
+`--accounts`, `--allowed-host`, ...: those run the deprecated 1.x server instead). For other people, use team mode
+(`serve --team`, [team mode](hosted.md#inviting-people-team-mode)) or a team server. `--read-only`, `--no-chat` and
 `--no-capture` work as on the local board. A managed install's update restarts it like `serve` (exit code 75). It is under the
 hosted server's license (Functional Source License, Apache 2.0 two years after each release), not the core's.
 
-While it runs, `shapewall comments`, `watch` and `mcp` in the project folder go to the engine, not to the local board's files.
-To move an existing board in, use `shapewall migrate` (experimental, with `--dry-run` and `--rollback`).
+`shapewall comments`, `watch` and `mcp` in the project folder go to the engine, not to the 1.x board files, and start it for
+themselves when it is not running. The first `serve` moves a 1.x board in with `shapewall migrate` (with `--dry-run`
+and `--rollback`).
 Everything else: [the solo engine](hosted.md#the-solo-engine-experimental).
 
 ## For a team
 
 Use `shapewall hosted` for multiplayer: one server, each person's passkey account, workspace roles, invitations, comments, scoped
 agents and live presence. Start with [Tailscale deployment](hosted.md#tailnet-deployment-mode-1), then walk through the
-[checklist before you invite the team](hosted.md#before-you-invite-the-team). Capture on your machine and push, or move an existing local project
-with `shapewall share`. The server does not need a public domain for a private tailnet team.
+[checklist before you invite the team](hosted.md#before-you-invite-the-team). Capture on your machine and push, or move an existing 1.x local project
+with `shapewall share`. For a few people while you work, team mode on the solo engine needs no second server. The server does not need a public domain for a private tailnet team.
 
 The team server is in **beta**.
 
@@ -239,8 +251,9 @@ a large machine. Live HTML files are capped at 5 MB each; screenshots are usuall
 
 ## Your own other devices (local mode)
 
-Local mode has one owner; optional `--accounts` adds that owner's local passkey gate. Use it for your own phone and computers.
-Use `shapewall hosted` for other people and workspaces.
+This is the 1.x board server (deprecated, removed in 3.0): `--tailscale` and `--lan` run it. Local mode has one owner;
+optional `--accounts` adds that owner's local passkey gate. Use it for your own phone and computers. On the solo engine, the
+tailnet way in is [team mode](hosted.md#inviting-people-team-mode). Use `shapewall hosted` for other people and workspaces.
 
 ### Tailscale (recommended)
 

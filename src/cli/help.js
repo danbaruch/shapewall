@@ -8,7 +8,7 @@ import { DEFAULT_PORT } from '../serve-state.js'
 
 export const VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version
 
-// The marker on a command or option that the 1.x stability promise does not
+// The marker on a command or option that the stability promise does not
 // cover (https://shapewall.com/docs/stability): always this suffix, at the
 // end of the line that names it.
 export const EXPERIMENTAL = ' (experimental)'
@@ -331,13 +331,15 @@ export const SECTIONS = {
       --browser-comments    visitors may comment; their comments stay in their own browser
       --no-index            ask search engines not to index the export`,
   share: `  share --remote URL        move local captures, history and comments to a shared project
+                            (a 1.x board; a solo engine board is refused: invite people with serve's team mode)
       --include-checks      explicitly include private diagnostic reports
       --board ID            move only this board (default all)
       --dry-run             show counts; sends nothing
       --no-comments         captures, history and journeys only`,
-  migrate: `  migrate                   move this project's .shapewall/ into the solo engine (.shapewall/.engine/)${EXPERIMENTAL}
+  migrate: `  migrate                   move this project's .shapewall/ into the solo engine (.shapewall/.engine/)
                             captures, comments, chat and the local account; a backup goes to
-                            .shapewall/backup-1x-<time>/ first; the solo engine serves it after. Refuses while
+                            .shapewall/backup-1x-<time>/ first; the solo engine serves it after (the first
+                            serve of 2.x runs it; https://shapewall.com/docs/upgrading). Refuses while
                             serve (either engine), capture, watch or an agent runs
       --dry-run             counts, and every item that would not come along; writes nothing
       --board ID            only this board (default: every board)

@@ -8,7 +8,7 @@ docs cover installing it, configuring your screens, steering your agents and run
 
 1. **Capture.** Playwright opens each page in your config at every viewport (by default 1440 x 2200 desktop and 390 x 1800 phone; add a tablet or your own). It
    writes a screenshot, a thumbnail and a live HTML snapshot with every script removed.
-2. **The wall.** `shapewall serve` starts a small local server with the board: a canvas with your pages grouped into sections. Zoomed
+2. **The wall.** `shapewall serve` starts the board on your machine, yours alone until you invite people: a canvas with your pages grouped into sections. Zoomed
    out you see thumbnails of everything; zoomed in, a tile turns into the captured page itself. It pans and zooms like a design
    tool: wheel or trackpad to pan, a pinch or Ctrl/Cmd+wheel to zoom at the cursor.
 3. **Comments.** Click a page and press **Comment** on its bar (or pick **Comment** in the tools at the bottom of the board), click an element, and type or dictate what should change. On live HTML the comment is anchored to the element
@@ -59,8 +59,8 @@ docs cover installing it, configuring your screens, steering your agents and run
 
 ## Versions and licenses
 
-These docs describe the current release. [Stability and versioning](/docs/stability) says what stays the same within 1.x and
-what is marked experimental. The local tool is open source under Apache 2.0; the self-hosted team server (`shapewall
-hosted`) and the experimental solo engine (`shapewall serve --engine hosted`), both in `src/hosted`, are source-available
+These docs describe the current release. [Stability and versioning](/docs/stability) says what stays the same within a major version and
+what is marked experimental. The core (CLI, capture, MCP server) is open source under Apache 2.0; the solo engine that `shapewall serve` runs and
+the self-hosted team server (`shapewall hosted`), both in `src/hosted`, are source-available
 under the Functional Source License: anyone may use, change and run them, at work too, but not offer competing hosting, and each
 release becomes Apache 2.0 two years after it ships. See [licenses and self-hosting](/open-source).

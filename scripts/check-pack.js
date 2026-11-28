@@ -38,6 +38,7 @@ export const USER_GUIDES = [
   'docs/stability.md',
   'docs/starter-agent.md',
   'docs/updates.md',
+  'docs/upgrading.md',
   'docs/where-to-run.md',
 ]
 

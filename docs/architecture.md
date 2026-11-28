@@ -1,6 +1,9 @@
 # Architecture
 
-Shapewall is three parts that share one folder of plain files.
+Shapewall is three parts that share one project folder: capture, the board server and the React client. From 2.0 the board
+server is the solo engine (the hosted server's code, `src/hosted`, run for one project), which keeps comments and chat in SQLite
+and the captures as files ([Storage](#storage)). The diagram shows the files capture writes, which both engines read; the 1.x
+board server (`serve --engine legacy`, deprecated) keeps everything as the plain files below.
 
 ```
 shapewall.config.json ──► capture (Playwright) ──► .shapewall/<board>/captures/*.png|*.thumb.png|*.html + manifest.json
@@ -276,6 +279,23 @@ and the other way round, and threads with activity since you last opened them ca
 (`localStorage`, `client/src/lib/unread.js`), not stored on the server.
 
 ## Storage
+
+**The solo engine (the default from 2.0).** Its data lives in `.shapewall/.engine/` (0700, with a `.gitignore` of `*`; the
+engine refuses to start while git tracks anything there):
+
+| Path in `.shapewall/.engine/`                    | What                                                                                                                 |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `shapewall.db`                                   | `node:sqlite`, the hosted server's schema and migrations: comments, replies, chat, the owner, members, tokens, audit |
+| `files/<workspace>/<project>/<board>/`           | Captures, versions, variants, environments, diffs, journeys and checks, in the layout below (`src/store.js`)         |
+| `host.key`, `serve.json`, `*.token`, `team.json` | The host name's random part, the running engine's address, this start's machine tokens (0600), the team mode setting |
+
+`shapewall capture`, `links`, `push`, `journeys`, `variant` and `checks` write and read `files/` directly; comments, chat and
+everything people do on the board go through the engine's API, so `comments`, `watch` and `mcp` talk to the running engine (and
+start it for themselves when none runs). `shapewall migrate` moves a 1.x `.shapewall/<board>/` into this layout, after a backup
+in `.shapewall/backup-1x-<time>/`, and `.shapewall/MIGRATED-TO-2` records each run ([upgrading from 1.x](upgrading.md)).
+`.shapewall/events.jsonl` stays beside it, and the engine writes it as the 1.x board did.
+
+**The 1.x files** (`serve --engine legacy`, and the board folders capture writes):
 
 All JSON is written to a temporary file, fsynced and renamed over the old one. Comment and variant changes run under
 `<file>.lock` (exclusive create, with stale-lock takeover), so concurrent writers never lose an update and never see a partial file.

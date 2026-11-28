@@ -29,7 +29,7 @@ export const GITHUB_LABEL = LAUNCHED ? 'GitHub' : 'GitHub (invite only)'
 export const ACCESS_LABEL = LAUNCHED ? 'Free to use' : 'Private early access'
 // One sentence on the two licenses, the same wording wherever the site states them.
 export const LICENSE_SUMMARY =
-  'The local tool is open source under Apache 2.0. The self-hosted team server is source-available under the Functional Source License and becomes Apache 2.0 two years after each release.'
+  'The CLI, capture and the MCP server are open source under Apache 2.0. The engine that runs your board, on your machine or as the self-hosted team server, is under the Functional Source License: free to use and change, not to offer as competing hosting, and each release becomes Apache 2.0 two years after it ships.'
 // The team server (`shapewall hosted`) is in beta. Other pages show a Beta badge; this sentence, on the Licenses
 // page only, says what that means for the reader.
 export const BETA_NOTE = 'The team server is in beta: keep backups and expect changes between releases.'

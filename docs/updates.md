@@ -94,7 +94,7 @@ do not trust a client-supplied header or configure the header on a multi-user bo
 
 This capability can replace executable app code. Enable it only for the installation owner, independently of comment or board access.
 
-### On the solo engine (experimental)
+### On the solo engine <a id="on-the-solo-engine-experimental"></a>
 
 The solo engine (`shapewall serve --engine hosted`) offers the same About and updates dialog with the same rules: only the
 installer's fixed helper runs, an apply is never stopped, and the engine restarts only when the installer opted in. The owner is

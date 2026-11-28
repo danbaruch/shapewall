@@ -84,7 +84,8 @@ function Hero() {
             between them, and lets you point at anything and tell your agent what to build. 10 screens or 500.
           </p>
           <p className="mx-auto mt-4 max-w-2xl text-[15px] leading-6 text-pretty text-ink">
-            {LAUNCHED ? 'Free and open source. ' : ''}Runs on your machine, or host the team server yourself for one shared wall.
+            {LAUNCHED ? 'Free to use. ' : ''}Start alone on your machine, invite people when you are ready, or host the team server
+            yourself.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <GetStarted where="hero" />
@@ -265,8 +266,8 @@ const FEATURES = [
   },
   {
     icon: FolderOpen,
-    title: 'Plain files in your project',
-    text: 'Captures and comments are files in .shapewall/. Export a static, read-only copy any host can serve.',
+    title: 'Everything in your project',
+    text: 'Captures and comments stay in .shapewall/ in your project, with no account to make. Export a static, read-only copy any host can serve.',
   },
 ]
 
@@ -429,15 +430,16 @@ function Teams() {
             eyebrow="Teams"
             title={
               <>
-                <span id="teams">One shared wall for your team, on your server</span>{' '}
+                <span id="teams">Start alone, invite when ready</span>{' '}
                 <span className="align-middle">
                   <Badge tone="amber">Beta</Badge>
                 </span>
               </>
             }
           >
-            Run <code>shapewall hosted</code> on a machine you control and everyone steers from the same wall. Captures run on your machines
-            and upload straight to your server.
+            <code>shapewall serve</code> is your board, on your machine. When people should see it, <code>shapewall serve --team</code>{' '}
+            invites them over your tailnet to the same board, with nothing copied. When the wall should stay on, run{' '}
+            <code>shapewall hosted</code> on a machine you control and the whole team steers its agents from it.
           </SectionHead>
           <div className="mt-8 flex flex-wrap gap-3">
             <Button to="/features#teams" variant="secondary">
@@ -476,8 +478,8 @@ function OpenSourceSection() {
             {[
               ['No account', 'Nothing to sign up for. No telemetry.'],
               ['Local by default', 'The board listens on 127.0.0.1 and checks the Host header.'],
-              ['Share safely', 'Pair your own devices, host the team server, or export a read-only copy.'],
-              ['Hackable', 'Built on Node.js, Playwright, Express and React Flow, with plain JSON data.'],
+              ['Share safely', 'Invite people over your tailnet, host the team server, or export a read-only copy.'],
+              ['Hackable', 'Built on Node.js, Playwright, Express, SQLite and React Flow.'],
             ].map(([term, text]) => (
               <div key={term}>
                 <dt className="text-[15px] font-semibold text-ink">{term}</dt>
@@ -516,7 +518,9 @@ function OpenSourceSection() {
               {'\n'}
               <span className="text-wall-bright">$</span> npx shapewall serve
               {'\n'}
-              <span className="text-zinc-400">Shapewall is serving 1 board at http://127.0.0.1:4600/</span>
+              <span className="text-zinc-400">
+                Shapewall is serving 1 board at http://lumen-notes-k3x7q2mvw9a4bd.shapewall.localhost:4600 (the solo engine)
+              </span>
             </code>
           </pre>
         </div>

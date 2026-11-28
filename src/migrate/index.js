@@ -1,5 +1,5 @@
 // `shapewall migrate`: move one project's .shapewall/ into the solo engine
-// (experimental in 1.5.0).
+// (experimental in 1.5.0, stable from 2.0).
 //
 //   shapewall migrate --dry-run   counts, and every item that would not come along
 //   shapewall migrate             backup, rows, files, marker

@@ -5,6 +5,30 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Upgrading from 1.x
+
+2.0.0 makes the solo engine the local board: `shapewall serve` runs the hosted engine for this project, one owner, on this
+machine only, with its data in `.shapewall/.engine/`. Start alone with `npx shapewall init && npx shapewall serve` (no
+account), and invite people when you are ready with `shapewall serve --team`. The whole guide:
+[Upgrading from 1.x to 2.0](docs/upgrading.md).
+
+- **What moves.** The first `serve` in a 1.x project runs `shapewall migrate`: a full backup in
+  `.shapewall/backup-1x-<time>/` first, then comments, replies, reactions, images, drawings and chat threads become engine
+  rows, captures, versions, variants, environments, diffs, journeys and checks move as files, and a `serve --accounts` owner
+  becomes the engine's owner with their passkeys and recovery codes. Agent settings and `events.jsonl` stay where they are.
+  `shapewall migrate --dry-run` shows the plan and writes nothing.
+- **Rollback.** `shapewall migrate --rollback` puts the 1.x board back from the backup, checked byte for byte; anything made
+  on the engine since goes aside into `<backup>/replaced-<time>/`, never deleted.
+- **Staying on 1.x.** Roll back, then run `npx shapewall@1 serve` pinned. Or keep the 1.x board server on 2.x with
+  `serve --engine legacy` or `SHAPEWALL_ENGINE=legacy` (deprecated, removed in 3.0).
+- **What re-pairs or changes.** Sign-in sessions and paired devices do not move: `serve --open` signs the browser in from
+  the terminal, and other devices and people come in through team mode. The board's address becomes
+  `http://<project>-<random>.shapewall.localhost:<port>`. Your comments are the owner account's: only comments the 1.x board
+  stamped as the owner's become the owner's, others signed with your name come in as imported text, and other names stay
+  labels. An agent's `--author` (and the MCP `author`) still labels its text.
+- **Refused on the engine.** `share --remote` refuses an engine board and points to `serve --team`; `comments delete` is
+  not on the engine yet. The removed spellings are listed under Removed, each with its replacement.
+
 ### Added
 
 - **Team mode on the solo engine** (2.0.0): `shapewall serve --team`, or **Invite people** on the console's Members page,
@@ -29,13 +53,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- Once the solo engine holds the project and no `shapewall serve` runs, `comments`, `watch`, `mcp` and `export` start the
+- The solo engine (`serve`, with its flags) and `shapewall migrate` are stable from 2.0, under the
+  [stability promise](docs/stability.md); they were experimental in 1.5.0. The promise now reads per major version (2.x).
+- Once the solo engine holds the project and no `shapewall serve` runs, `comments`, `watch`, `mcp`, `export` and `github` start the
   engine for themselves (headless: a free loopback port, no project agent) and stop it when they end, instead of reading the
   1.x comment files, which are not the board. An agent's `shapewall mcp` works with or without `serve`. A running engine is
   used; serve.lock keeps a second one off the same data. A command an agent started never starts one. `export` writes the
   engine's comments and images, read through the token API's new `/api/v1/boards/<id>/export/comments` (as a public viewer
-  sees them).
-  `SHAPEWALL_ENGINE=legacy` keeps the 1.x files.
+  sees them). `SHAPEWALL_ENGINE=legacy` keeps the 1.x files.
 - **`shapewall serve` runs the solo engine by default** (2.0.0): the hosted engine for this project, one owner, on this
   machine only, data in `.shapewall/.engine/`. `npx shapewall init && npx shapewall serve` is still a board in seconds with no
   account. The first start in a project with 1.x board data says which boards move, runs `shapewall migrate` (a backup in
@@ -44,8 +69,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
   and changes nothing. See [Upgrading a 1.x project](docs/where-to-run.md#upgrading-a-1x-project).
 - The 1.x writers refuse a board the engine holds (409 `board_migrated`): comments and replies, the board chat, the starter
   agent and `capture` into the 1.x folders, also from a `shapewall mcp` or `watch` started before the move.
-- `shapewall share --remote` stops on a board the engine holds instead of sending what is left in the 1.x folders. Moving an
-  engine board to a hosted server is not in this build yet; `shapewall migrate --rollback` puts the 1.x board back.
+- `shapewall share --remote` stops on a board the engine holds instead of sending what is left in the 1.x folders, and says
+  to run `shapewall serve --team` to bring people to the same board. Moving an engine board to a hosted server is not in
+  this build yet; `shapewall migrate --rollback` puts the 1.x board back.
 - The stable surfaces keep their 1.x shapes on the engine, checked against a committed 1.x snapshot
   (test/contract-1x.test.js): `comments --json`, `watch` and `watch --exec` JSON, the MCP tools and their arguments, and the
   lines of `.shapewall/events.jsonl`. New fields may appear, as docs/stability.md allows.

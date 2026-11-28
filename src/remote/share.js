@@ -198,7 +198,7 @@ async function runShare(
   const moved = boards.filter((board) => held.has(board.id)).map((board) => board.id)
   if (moved.length)
     throw new Error(
-      `share --remote moves a 1.x board, and ${moved.join(', ')} ${moved.length === 1 ? 'lives' : 'live'} in the solo engine now (MIGRATED-TO-2). Moving an engine board to a hosted server is not in this build yet; shapewall migrate --rollback puts the 1.x board back to share it.`,
+      `share --remote moves a 1.x board, and ${moved.join(', ')} ${moved.length === 1 ? 'lives' : 'live'} in the solo engine now (MIGRATED-TO-2). To bring people to it, run shapewall serve --team (the same board on your tailnet, nothing copied); moving an engine board to a hosted server is not in this build yet, and shapewall migrate --rollback puts the 1.x board back to share it.`,
     )
   const projectPath = fs.realpathSync(config.dir)
   const plans = boards.map((board) => {

@@ -42,7 +42,7 @@ export const FAQ = [
   },
   {
     q: 'Where does my data go?',
-    a: 'Nowhere, unless you connect something. Captures and comments are plain files in .shapewall/ in your project, with no account. No usage data is collected. Error reports are opt-in and off by default: you turn them on with the address of your own error tracker. An agent endpoint, notifications, GitHub connect or a team server you set up receive only what you send them.',
+    a: 'Nowhere, unless you connect something. Captures and comments stay in .shapewall/ in your project, with no account to make. No usage data is collected. Error reports are opt-in and off by default: you turn them on with the address of your own error tracker. An agent endpoint, notifications, GitHub connect or a team server you set up receive only what you send them.',
   },
   {
     q: 'Can my team use it together?',

@@ -28,10 +28,11 @@ No. Captures use Chromium, and thumbnails depend on a Chromium DevTools call. Us
 
 ## Where is my data?
 
-In `outputDir` (default `.shapewall/`): PNGs, HTML snapshots, `manifest.json`, `comments.json`, `variants.json`, `journeys.json`,
-earlier captures in `versions/`, other environments in `envs/`, cached diffs in `diffs/` and `agent/` (what `shapewall watch` ran).
-Board files use atomic writes. Optional [local accounts](/docs/local-accounts) also store account data in SQLite under
-`outputDir/.accounts`. A [self-hosted team server](/docs/hosted) keeps SQLite account/workspace data and uploaded files in its
+In `outputDir` (default `.shapewall/`), in your project. From 2.0 the board's engine keeps its data in `.shapewall/.engine/`:
+comments, replies, chat and your owner account in a SQLite file (`shapewall.db`), and the captures as files (PNGs, HTML snapshots,
+`manifest.json`, earlier captures, other environments, diffs, journeys and checks) under `files/`. The folder is private and
+ignored by git. A 1.x project's files (`comments.json` and the rest in `.shapewall/<board>/`) move there on the first 2.0 start,
+after a backup in `.shapewall/backup-1x-<time>/` ([upgrading from 1.x](/docs/upgrading)). A [self-hosted team server](/docs/hosted) keeps SQLite account/workspace data and uploaded files in its
 configured data directory; follow its operator backup procedure.
 
 ## Does Shapewall send anything anywhere?
@@ -127,10 +128,10 @@ Node.js 22.19 or newer and Chromium, on Linux, macOS or Windows; Linux is the pr
 
 ## How is Shapewall licensed?
 
-The local tool is open source under Apache 2.0. The self-hosted team server and the experimental solo engine
-(`shapewall serve --engine hosted`), both in `src/hosted`, are source-available under the Functional Source License: anyone may
-use, change and run them, at work too, but not offer competing hosting, and each release becomes Apache 2.0 two years after it
-ships. See [licenses and self-hosting](/open-source).
+The core (the CLI, capture, the MCP server, the agent tools and the clients of the team server) is open source under Apache 2.0.
+The solo engine that `shapewall serve` runs and the self-hosted team server, both in `src/hosted`, are source-available under the
+Functional Source License: anyone may use, change and run them, at work too, but not offer competing hosting, and each release
+becomes Apache 2.0 two years after it ships. Not everything is Apache 2.0. See [licenses and self-hosting](/open-source).
 
 ## How do I capture many pages quickly?
 

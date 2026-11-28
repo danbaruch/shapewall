@@ -283,6 +283,16 @@ export const DOC_GROUPS = [
         og: 'docs-self-hosting',
       },
       {
+        path: '/docs/upgrading',
+        file: 'upgrading',
+        repo: 'upgrading',
+        nav: 'Upgrading from 1.x',
+        title: 'Upgrading from Shapewall 1.x to 2.0 | Shapewall',
+        description:
+          'What the first 2.0 start moves into the solo engine, where the backup goes, how to roll back or stay on 1.x, and what was removed.',
+        og: 'docs-self-hosting',
+      },
+      {
         path: '/docs/self-hosting',
         file: 'self-hosting',
         repo: 'deployment',
@@ -346,9 +356,9 @@ export const DOC_GROUPS = [
         file: 'stability',
         repo: 'stability',
         nav: 'Stability and versioning',
-        title: 'Stability and versioning: what 1.x keeps | Shapewall',
+        title: 'Stability and versioning: what a major keeps | Shapewall',
         description:
-          'What Shapewall 1.x keeps stable under semantic versioning: commands, config, JSON, the token API and files on disk, and what is experimental.',
+          'What Shapewall keeps stable within a major version under semantic versioning: commands, config, JSON, the token API and files on disk, and what is experimental.',
         og: 'docs-config',
       },
       {

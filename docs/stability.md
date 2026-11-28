@@ -1,11 +1,12 @@
 # Stability and versioning
 
 Shapewall follows [Semantic Versioning](https://semver.org/) from 1.0.0. This page says what that covers: what you can build on
-without it changing under you within 1.x, and what is marked experimental or internal and may change in a minor release.
+without it changing under you within a major version (2.x now), and what is marked experimental or internal and may change in a
+minor release.
 
 ## The promise
 
-Within 1.x we will not remove or rename, or change the meaning of:
+Within a major version (1.x before, 2.x now) we will not remove or rename, or change the meaning of:
 
 - the CLI commands and their flags, and the exit codes;
 - the keys of `shapewall.config.json`;
@@ -34,8 +35,15 @@ The core of Shapewall:
 - the commands `init`, `sitemap`, `capture`, `serve` (its base flags), `comments`, `watch`, `mcp`, `events`, `journeys`, `links`,
   `variant`, `export`, `notify`, `github`, `ci`, `doctor`, `auth record`, `push`, `share`, `login --remote`, `agent connect`
   (except the link policy flags below), `agent status` (its human-readable output is not covered, see Internal), and `hosted`
-  (its server flags, `backup` and `restore`). From 2.0 `serve` runs the solo engine; `serve --engine legacy` and
-  `SHAPEWALL_ENGINE=legacy` (the 1.x board server) are deprecated and go in 3.0;
+  (its server flags, `backup` and `restore`);
+- the solo engine, stable from 2.0 (experimental in 1.5.0): `serve` runs it, with `--engine hosted`, `--port`, `--open`,
+  `--print-owner-link`, `--read-only`, `--no-chat`, `--no-capture`, `--skip-git-check`, `--team [on|off]` and `--team-port`,
+  and what the project-folder commands (`comments`, `watch`, `mcp`, `export`, `capture`, `push`, ...) do once the engine holds
+  the project ([the solo engine](hosted.md#the-solo-engine)). `serve --engine legacy` and `SHAPEWALL_ENGINE=legacy` (the 1.x
+  board server) are deprecated and go in 3.0;
+- the migration, stable from 2.0: `shapewall migrate` with `--dry-run`, `--board`, `--rollback` and `--json`, its JSON
+  output and exit codes, and where it puts the backup (`.shapewall/backup-1x-<time>/`)
+  ([upgrading from 1.x](upgrading.md));
 - the core config keys, including `commands`, `agent.browser.allow`, `agent.fixIn` and `agent.localSession` (1.4.0; its value
   `"own"` was removed in 2.0), the comment item JSON, the MCP tools, `/api/v1` (except `/api/v1/agent/*`), `/mcp`, the webhook payload and
   its signature, `events.jsonl`, the environment variables that are not listed as experimental below, the exit codes, and the
@@ -47,13 +55,6 @@ Anything marked experimental may change, or go, in a minor release, with a note 
 all`), an experimental command or option ends its first line with `(experimental)`; in these docs, its section or page says
 **Experimental** at the top.
 
-- **The solo engine (1.5.0):** `serve --engine hosted` and every flag it takes there, `--skip-git-check`, the board's
-  `/info` fields `solo` and `soloFeatures`, `.shapewall/.engine/` and its `serve.json` and token files, and what the
-  project-folder commands do while the engine runs ([the solo engine](hosted.md#the-solo-engine-experimental)). The hosted
-  server itself, its token API and `/mcp` stay covered as before.
-- **The migration (1.5.0):** `shapewall migrate` with `--dry-run`, `--board`, `--rollback` and `--json`, its JSON output, and
-  the files it leaves in `.shapewall/` (`backup-1x-<time>/`, `MIGRATING-TO-2`, `MIGRATED-TO-2`, `migrate.lock`)
-  ([moving a local project into the engine](hosted.md#moving-a-local-project-into-the-engine-shapewall-migrate)).
 - **Endpoint agents on the link:** `agent connect --endpoint`.
 - **The sandboxed starter agent:** `shapewall agent sandbox run|watch|doctor|build-image`, the `starterAgent` config key,
   `Dockerfile.agent`, `SHAPEWALL_AGENT_IMAGE`, `SHAPEWALL_AGENT_RUNTIME`, `SHAPEWALL_AGENT_REGISTRY`, `SHAPEWALL_AGENT_EGRESS`,
@@ -94,7 +95,9 @@ Never promised, and free to change in any release:
 - human-readable output: the wording of messages, tables and progress lines (use `--json` to read results);
 - the owner MCP tools of the board chat, and the tools of Shapewall's command and browser tool server (`exec-mcp`) that an agent
   session gets;
-- files on disk other than the stable ones below.
+- files on disk other than the stable ones below, including the solo engine's `.shapewall/.engine/` (its database,
+  `serve.json`, token files and `team.json`) and the migration's marker and lock files (`MIGRATING-TO-2`, `MIGRATED-TO-2`,
+  `migrate.lock`). The board's `/info` fields (`solo`, `soloFeatures`) are internal like every other route outside `/api/v1`.
 
 ## Files on disk
 

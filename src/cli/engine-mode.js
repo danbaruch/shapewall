@@ -1,4 +1,4 @@
-// Commands in a project folder whose solo engine runs (1.5.0, experimental;
+// Commands in a project folder whose solo engine runs (1.5.0; the default from 2.0;
 // gap G15): `comments`, `watch` and `mcp` go to the engine over its token
 // API, with the token it made for this command line at its start
 // (src/engine-target.js), instead of the 1.x JSON files in .shapewall/. The

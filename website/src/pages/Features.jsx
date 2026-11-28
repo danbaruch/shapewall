@@ -334,9 +334,10 @@ const SECTIONS = [
     ],
     nav: 'Teams',
     badge: 'Beta',
-    title: 'Workspaces, roles and share links',
-    text: 'Host the team server and everyone steers from one shared wall. People sign in with a passkey, or, on your tailnet, with just their tailnet login. Each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links, issue API tokens for agents and read an audit log of who changed what. A Usage page charts every agent turn with the tokens and cost each agent reported, and Activity shows who signed in, changed a setting or approved what. The live demo has the roles, the links and both pages, with made-up numbers: switch who you are with View as.',
+    title: 'Start alone, invite when ready',
+    text: 'Your board starts as yours alone, on your machine. shapewall serve --team (or Invite people) puts the same board on your tailnet for the people you invite, with nothing copied. For a wall that stays on, host the team server and everyone steers from it. People sign in with a passkey, or, on your tailnet, with just their tailnet login. Each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links, issue API tokens for agents and read an audit log of who changed what. A Usage page charts every agent turn with the tokens and cost each agent reported, and Activity shows who signed in, changed a setting or approved what. The live demo has the roles, the links and both pages, with made-up numbers: switch who you are with View as.',
     points: [
+      'One command from solo to a few people: the same data, you stay the owner, and shapewall serve --team off takes it back',
       'Four workspace roles (owner, admin, member, viewer), checked on every request',
       'Expiring invites, and read-only or guest-comment share links with an optional passcode',
       'Agent usage from the numbers each agent reported, never estimated',
@@ -601,8 +602,8 @@ export default function Features() {
           <div>
             <h2 className="text-[22px] font-bold tracking-tight text-ink">Small, local, and yours</h2>
             <p className="mt-2 max-w-xl text-[15.5px] leading-7 text-slate">
-              Built on Node.js, Playwright, Express and React Flow. Data is plain JSON and images in your project. The local tool is open
-              source under Apache 2.0.
+              Built on Node.js, Playwright, Express, SQLite and React Flow. Your data stays in your project. The CLI, capture and the MCP
+              server are Apache 2.0; the engine that runs the board is under the Functional Source License.
             </p>
           </div>
           <Link to="/open-source" className="inline-flex items-center gap-1.5 text-[15px] font-semibold text-wall hover:text-wall-deep">

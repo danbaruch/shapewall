@@ -30,6 +30,11 @@ npx shapewall capture                                 # every screen, desktop an
 npx shapewall serve --open                            # the wall, on this machine (port 4600)
 ```
 
+Start alone, invite when ready: `serve` runs the board for you on this machine, with no account to make, and
+`npx shapewall serve --team` puts the same board on your tailnet for the people you invite, with nothing copied
+([where to run](docs/where-to-run.md)). Coming from 1.x? The first `serve` of 2.0 moves the project's board into the new
+engine, with a backup and a rollback: read [upgrading from 1.x](docs/upgrading.md) first.
+
 Answer `y` when npx asks to download the package, and use your app's address instead of `http://localhost:3000`. `init` reads
 `sitemap.xml` if there is one, else follows the links from the home page. To pin the version for the project, run
 `npm install --save-dev shapewall` first; `npx shapewall` then runs that copy.
@@ -89,9 +94,11 @@ Comments are untrusted input to an agent: read [keeping an agent safe](docs/agen
   branch preview beside the original ([compare](https://shapewall.com/docs/compare)).
 - **Pull requests.** `shapewall init --ci` writes a GitHub Actions workflow that comments "4 of 23 pages changed" on each pull request
   ([pull requests](docs/pull-requests.md)).
-- **Teams.** `shapewall hosted` runs a self-hosted team server (beta): sign-in, workspaces with roles, share links and connected agents
+- **Teams.** `shapewall serve --team` invites people to your board on your tailnet; `shapewall hosted` runs a self-hosted team
+  server (beta) that stays on: sign-in, workspaces with roles, share links and connected agents
   ([where to run](docs/where-to-run.md), [hosted guide](docs/hosted.md)).
-- **Local and small.** Data is plain files (JSON, PNG, HTML) in `.shapewall/`. No account and no usage data collected; error reports are opt-in and off by default. The board works on a phone too.
+- **Local and small.** Everything stays in `.shapewall/` in the project: captures as files (PNG, HTML, JSON), comments and chat in a
+  SQLite file. No account to make and no usage data collected; error reports are opt-in and off by default. The board works on a phone too.
 
 | A comment on an element, in live HTML                                                                                                                                                                       | On a phone, staging beside production                                                                                                                                         |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -130,7 +137,7 @@ Shapewall has two licenses:
 - **Apache 2.0** ([LICENSE](LICENSE)) for everything except `src/hosted`: the CLI, capture, the board, local accounts, shared helpers,
   MCP, the agents and the clients of the team server (`push`, `share`, `--remote`, in `src/remote`). Open source.
 - **Functional Source License 1.1, Apache 2.0 future license** ([src/hosted/LICENSE.md](src/hosted/LICENSE.md)) for the self-hosted
-  team server in `src/hosted`, which also holds the solo engine (`shapewall serve --engine hosted`, experimental).
+  team server in `src/hosted`, which also holds the solo engine that `shapewall serve` runs from 2.0.
   Source-available: you can read, modify and run it for yourself or your company, but not offer it as a competing commercial
   service. Each release becomes Apache 2.0 two years later.
 

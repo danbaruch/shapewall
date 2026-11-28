@@ -179,8 +179,7 @@ function Footer() {
         <div className="col-span-2 max-w-xs lg:col-span-1">
           <Logo />
           <p className="mt-4 text-[14.5px] leading-6 text-slate">
-            See your whole app and steer your coding agents from it. Open source under Apache 2.0, with a source-available team server you
-            host yourself.
+            See your whole app and steer your coding agents from it. An Apache 2.0 core, with a source-available engine you run yourself.
           </p>
         </div>
         <FooterColumn
@@ -218,7 +217,9 @@ function Footer() {
       </Container>
       <Container>
         <div className="flex flex-col gap-2 border-t border-line py-6 text-[13.5px] text-faint sm:flex-row sm:justify-between">
-          <p>© 2026 Dan Baruch and Shapewall contributors. Apache 2.0; the team server is under the Functional Source License.</p>
+          <p>
+            © 2026 Dan Baruch and Shapewall contributors. Apache 2.0; the engine and team server are under the Functional Source License.
+          </p>
           <p>For solo builders and teams.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 pb-8 text-[13.5px] text-faint">

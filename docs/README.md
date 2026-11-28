@@ -8,12 +8,13 @@ A few pages are written for the site and live only there; they are linked below 
 
 ## 1. Getting started
 
-| Guide                                                         | What it covers                                                                             |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| [Getting started](https://shapewall.com/docs/getting-started) | Install, write a config, capture every screen, open the wall. (On the site.)               |
-| [where-to-run.md](where-to-run.md)                            | Local board or a team server: who can reach each, and where the work happens.              |
-| [deployment.md](deployment.md#linux-system-libraries)         | Linux system libraries for Chromium, and capturing inside the Playwright image.            |
-| [FAQ](https://shapewall.com/docs/faq)                         | Single-page apps, signed-in screens, where the data lives, teams, licenses. (On the site.) |
+| Guide                                                         | What it covers                                                                                      |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| [Getting started](https://shapewall.com/docs/getting-started) | Install, write a config, capture every screen, open the wall. (On the site.)                        |
+| [where-to-run.md](where-to-run.md)                            | Local board or a team server: who can reach each, and where the work happens.                       |
+| [upgrading.md](upgrading.md)                                  | Upgrading a 1.x project to 2.0: what moves, the backup, rollback, staying on 1.x, what was removed. |
+| [deployment.md](deployment.md#linux-system-libraries)         | Linux system libraries for Chromium, and capturing inside the Playwright image.                     |
+| [FAQ](https://shapewall.com/docs/faq)                         | Single-page apps, signed-in screens, where the data lives, teams, licenses. (On the site.)          |
 
 ## 2. Capture your app
 
@@ -58,15 +59,15 @@ A few pages are written for the site and live only there; they are linked below 
 
 ## 6. Reference
 
-| Guide                                                 | What it covers                                                                                    |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| [CLI reference](https://shapewall.com/docs/cli)       | Every command and flag. `shapewall --help all` prints the list, `shapewall <command> --help` one. |
-| [config.md](config.md)                                | The config reference, including the environment variables.                                        |
-| [Security model](https://shapewall.com/docs/security) | Why captured HTML can never run code. (On the site.)                                              |
-| [stability.md](stability.md)                          | Stability and versioning: what 1.x keeps stable, what is experimental, which files are internal.  |
-| [page-checks.md](page-checks.md)                      | `shapewall checks`: reliability, SEO and social images against the original pages, and the panel. |
-| [performance.md](performance.md)                      | `shapewall checks lighthouse`: local Lighthouse runs, profiles, budgets and report history.       |
-| [interaction-audits.md](interaction-audits.md)        | `shapewall checks flow` and `checks accessibility`: the flow file, actions, axe snapshots.        |
+| Guide                                                 | What it covers                                                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [CLI reference](https://shapewall.com/docs/cli)       | Every command and flag. `shapewall --help all` prints the list, `shapewall <command> --help` one.            |
+| [config.md](config.md)                                | The config reference, including the environment variables.                                                   |
+| [Security model](https://shapewall.com/docs/security) | Why captured HTML can never run code. (On the site.)                                                         |
+| [stability.md](stability.md)                          | Stability and versioning: what a major version keeps stable, what is experimental, which files are internal. |
+| [page-checks.md](page-checks.md)                      | `shapewall checks`: reliability, SEO and social images against the original pages, and the panel.            |
+| [performance.md](performance.md)                      | `shapewall checks lighthouse`: local Lighthouse runs, profiles, budgets and report history.                  |
+| [interaction-audits.md](interaction-audits.md)        | `shapewall checks flow` and `checks accessibility`: the flow file, actions, axe snapshots.                   |
 
 ## 7. Integrations
 
