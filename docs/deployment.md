@@ -151,7 +151,7 @@ docker run --rm --ipc=host --network host --user "$(id -u):$(id -g)" -e HOME=/tm
 ## In Docker
 
 No Shapewall image is published to a registry. The Dockerfiles in the repository (`Dockerfile`, `Dockerfile.hosted`,
-`Dockerfile.agent`) and `docker-compose.example.yml` are examples you build yourself, and they are not covered by the 1.x
+`Dockerfile.agent`) and `docker-compose.example.yml` are examples you build yourself, and they are not covered by the 2.x
 [stability promise](stability.md): what is in them can change in a minor release.
 
 The repository has a `Dockerfile` based on the official Playwright image (Chromium and its system libraries included), pinned to the
@@ -334,7 +334,7 @@ closes with Ctrl-C. Remote settings remain read-only; the account and device gat
 ### LAN pairing
 
 **Deprecated in 2.0.** `serve --lan` and the `shapewall devices` command still work through 2.x, each with a one-line warning,
-and go in 3.0. Reach the board from your other devices through the tailnet instead (`shapewall serve --tailscale`).
+and go in 3.0. Reach the board from your other devices through the tailnet instead (`shapewall serve --team`).
 
 ```sh
 shapewall serve --lan

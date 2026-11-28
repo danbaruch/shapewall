@@ -705,7 +705,7 @@ existing project's `.shapewall/` moves into it with [`shapewall migrate`](#movin
   it only from this machine, on Linux only from your own OS user (it checks who owns the connecting socket, and refuses when
   it cannot tell), only on the engine's own name and port, and never with a proxy header (`X-Forwarded-For`, `Forwarded`,
   ...). A plain `http://127.0.0.1:<port>` request never gets a cookie. In a terminal, the start prints the file's address;
-  `--print-owner-link` prints one anywhere. While the engine runs, `shapewall serve --engine hosted --open` (or
+  `--print-owner-link` prints one anywhere. While the engine runs, `shapewall serve --open` (or
   `--print-owner-link`) in the same folder asks the running engine for a new page. The session cookie is `SameSite=Strict`:
   a link from another site opens the board signed out (open the board's address yourself). A sign-in lasts 24 hours from
   the last use and 7 days at most, and is checked the same way (this machine, your OS user, the engine's name) on every
@@ -739,7 +739,7 @@ existing project's `.shapewall/` moves into it with [`shapewall migrate`](#movin
   mark is a guard against accidents, not against an agent set on getting a token: it is an environment variable the
   agent's command can drop. Where the agent's commands run in the OS sandbox (a connected agent, the board's own agent)
   the sandbox is what holds: `.shapewall` is unreadable there and the engine's port unreachable. Where they do not (a
-  `watch --exec` command, a local agent session set to `"own"`, the unsandboxed shell a solo owner can turn on), they run
+  `watch --exec` command, the unsandboxed shell a solo owner can turn on), they run
   as you, can read `.shapewall/.engine/` themselves, and the mark is only advisory.
   Agents never read `.shapewall/.engine/`: Shapewall's own file reads refuse it, and a Claude Code agent gets a deny rule for
   it in its session settings. `comments delete` is not on the engine yet; `comments add` takes `--page`, `--body`,
@@ -792,9 +792,10 @@ existing project's `.shapewall/` moves into it with [`shapewall migrate`](#movin
   is committed. `shapewall hosted claim`, `setup-link`, `move-origin` and `admin` refuse a solo engine's folder.
 - **What it refuses.** Anything that reaches beyond this machine other than [team mode](#inviting-people-team-mode): `--host`, `--lan`, `--tailscale`, `--tls-cert`, `--tls-key`,
   `--allowed-host`, `--no-identity`, `--trust-proxy`, `--accounts`, `--accounts-origin`, `--buzz-bridge`, `--agent-acp`,
-  `--allow-remote-agent`, `--no-remote-chat`, `--approve-on-host`. Connect agents with `shapewall agent connect --remote`
-  instead of `--agent-acp`. A data folder that holds a team server's accounts is refused, and a solo data folder is refused
-  as a team server's.
+  `--allow-remote-agent`, `--no-remote-chat`, `--approve-on-host`. Passing any of those without `--engine hosted` falls back to
+  the deprecated 1.x board server with a warning (passing `--engine hosted` with one refuses it outright). Connect agents with
+  `shapewall agent connect --remote` instead of `--agent-acp`. A data folder that holds a team server's accounts is refused,
+  and a solo data folder is refused as a team server's.
 - **Flags it takes.** `--port`, `--open`, `--print-owner-link`, `--team [on|off]` and `--team-port N`
   ([team mode](#inviting-people-team-mode)), `--skip-git-check`, `--read-only` (the board in the browser makes no changes; the
   command line still pushes and replies, as on a local board), `--no-chat` (the board chat is off; connected agents still take
@@ -919,15 +920,16 @@ The exit code is 0 when it is done or there is nothing to do, 1 when it refused 
   `serve --accounts` owner becomes the engine's owner with their passkeys and recovery codes. On a plain local board (no
   `serve --accounts`) every comment that is not an agent's or a share guest's becomes the owner's. With `serve --accounts`,
   only comments the board stamped as the owner's become the owner's; others signed with the owner's name come in as
-  imported text, and other names stay labels. None is vouched for (B-20): 1.x never recorded who wrote a comment (a LAN
+  imported text, and other names stay labels. None is vouched for: 1.x never recorded who wrote a comment (a LAN
   visitor on 1.1.0, an agent, a comments.json from a cloned repository), so every migrated comment is marked as brought in
   (`imported_at`), has no dispatch hash and is not approved to run. `serve` prints how many wait, the board shows a banner
   for admins, and **Send to agents** there (or `shapewall comments approve --imported`, which the engine takes only from
   this machine's `cli.token`, never an agent's token) vouches for each with the dispatch hash of the text shown. On the
   token API such a comment has `byOwner: false` until it is sent.
 - **What does not.** Agent settings and keys stay on the machine (the engine reads Settings > Agent as before). Sign-in
-  sessions and paired devices do not move: sign in and pair again. `events.jsonl` stays where it is, and the engine keeps
-  writing it. The dry run lists every item that would not come along.
+  sessions and paired devices do not move (there is no device pairing on the solo engine: sign in again with `serve --open`,
+  and reach the board from other devices or invite teammates with `shapewall serve --team`). `events.jsonl` stays where it is,
+  and the engine keeps writing it. The dry run lists every item that would not come along.
 - **Safety.** A hard-link backup goes to `.shapewall/backup-1x-<time>/` first. The run holds each board's comment and chat
   locks throughout, and a run that fails after the backup puts the folder back as it was. `MIGRATING-TO-2` marks a run in
   progress; after one that was stopped midway, `migrate`, `serve`, `watch` and the engine refuse to start and point at

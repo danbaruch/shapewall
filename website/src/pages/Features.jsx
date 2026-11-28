@@ -140,7 +140,7 @@ const SECTIONS = [
     points: [
       'Named commands from shapewall.config.json: test, build, dev and lint, each run without a shell',
       'Commands in a bubblewrap sandbox on Linux: the fix copy only, no home folder, package registries only',
-      'Commands run in a copy, never your checkout: a local board gets them with Work on a branch; on macOS, editing sessions get none in 1.4.0',
+      'Commands run in a copy, never your checkout: a local board gets them with Work on a branch; on macOS, editing sessions get none in this release',
       'Approvals are asked again when the agent changes a manifest, a lockfile or a test the command reads',
       'The machine that runs the agent sets the ceiling; a project\u2019s setting can only lower it',
       'A connected agent on a team server starts read and answer only; each line is switched on on its own machine',

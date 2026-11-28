@@ -142,10 +142,12 @@ For signed-in pages, run `shapewall auth record`: sign in by hand in the fresh b
 ## Open the board
 
 ```sh
-shapewall serve
+shapewall serve --open
 ```
 
-Open [http://127.0.0.1:4600/](http://127.0.0.1:4600/) (or add `--open` and Shapewall opens it for you). Scroll or drag to pan (Shift+scroll goes sideways, Space+drag and middle-drag work anywhere, and so does the **Hand** tool, H), Ctrl+scroll (Cmd+scroll on a Mac) or a pinch to zoom at the cursor; + and - (with or without Ctrl/Cmd) zoom too, Ctrl/Cmd+0 or Shift+0 goes to 100% and Shift+1 fits the board. Zoom in on a page and it switches
+`serve --open` starts the solo engine on `127.0.0.1` at your project's own address (`http://<project>-<random>.shapewall.localhost:4600`) and opens a one-time terminal sign-in page in your browser as the board's owner. With no browser on the machine (or with `--print-owner-link`), it prints that one-time link instead so you can open it within 5 minutes; run `shapewall serve --open` again while the engine is running to get a fresh sign-in.
+
+Scroll or drag to pan (Shift+scroll goes sideways, Space+drag and middle-drag work anywhere, and so does the **Hand** tool, H), Ctrl+scroll (Cmd+scroll on a Mac) or a pinch to zoom at the cursor; + and - (with or without Ctrl/Cmd) zoom too, Ctrl/Cmd+0 or Shift+0 goes to 100% and Shift+1 fits the board. Zoom in on a page and it switches
 from a screenshot to live HTML. Click a page and press **Comment** on the bar that appears above it, or pick **Comment** in the tools at the bottom of the board (or press C). Then click an element on the page and write what should change.
 
 ### Images and drawings
@@ -208,10 +210,10 @@ several repositories, serve one project per checkout and switch between them in 
 3. Open the board as its owner: the tab `serve --open` opened (`shapewall serve --open` again, while it runs, opens a fresh
    one-time sign-in; `--print-owner-link` prints it instead).
 4. Connect your agent: click **Connect** next to the agent CLI the board found, or set up an endpoint in Settings.
-5. Press **Fix with agent** and read the diff. The board recaptures the pages it changed. The agent runs under its own permission
-   settings: in a mode that asks (Claude Code's `default`), its requests show in the panel for you to answer; in one that acts
-   without asking (Claude Code's `auto`, which `claude-agent-acp` 0.106.0 starts in when no mode is set), it edits and runs commands
-   straight away. The panel names the mode in effect.
+5. Press **Fix with** on the comment and review each edit card. On the solo engine, the board's own agent runs as a restricted
+   connected agent (`shapewall agent connect --as local`): read and answer by default, and with Work on a branch on, each file edit
+   is proposed on a new branch and shown as a diff card with **Allow** and **Deny** before Shapewall applies it (its own shell stays
+   off; named commands and the sandboxed shell run through Shapewall). The board recaptures the pages it changed.
 6. Check before and after in the comment's thread, then resolve it. If the agent's sign-in or model fails, the turn says so and waits.
 
 More in [chat with an agent](/docs/chat#source-folder-and-agent-sign-in). From the terminal instead, `shapewall comments --open --json`

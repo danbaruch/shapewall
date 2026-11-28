@@ -5,7 +5,7 @@
 
 import { deprecated } from '../deprecation.js'
 
-const TAILNET = 'reach the board from your other devices through the tailnet instead: shapewall serve --tailscale'
+const TAILNET = 'reach the board from your other devices through the tailnet instead: shapewall serve --team'
 
 export function warnServeDeprecations(flags = {}, env = process.env) {
   if (flags.lan !== undefined && flags.lan !== false) deprecated('serve --lan', TAILNET)
@@ -13,10 +13,13 @@ export function warnServeDeprecations(flags = {}, env = process.env) {
   if (accounts)
     deprecated(
       flags.accounts === undefined ? 'SHAPEWALL_ACCOUNTS=1' : 'serve --accounts',
-      'leave it out: the solo engine signs its owner in on this machine by itself, and shapewall serve --tailscale signs in people on your tailnet',
+      'leave it out: the solo engine signs its owner in on this machine by itself, and shapewall serve --team signs in people on your tailnet',
     )
 }
 
 export function warnDevicesDeprecated() {
-  deprecated('the devices command', `pair through the tailnet instead (shapewall serve --tailscale signs in your own devices)`)
+  deprecated(
+    'the devices command',
+    'reach the board over your tailnet instead (shapewall serve --team signs in people you invite on your tailnet)',
+  )
 }

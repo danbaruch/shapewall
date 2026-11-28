@@ -4,7 +4,7 @@ import { Container } from '../components/ui.jsx'
 import { GITHUB_URL } from '../routes.js'
 import { LAUNCHED } from '../launch.js'
 
-export const TERMS_UPDATED = '2026-11-14'
+export const TERMS_UPDATED = '2026-11-28'
 
 // Two things on this page are Dan's to decide, and the page is written so that it is complete and accurate without
 // them (see the PR description):
@@ -60,9 +60,10 @@ export default function Terms() {
 
           <h2 id="licenses">The software and its licenses</h2>
           <p>
-            The Shapewall local tool is open source under the Apache License, Version 2.0. The hosted team server (the{' '}
-            <code>src/hosted</code> directory) is source-available under the Functional Source License, Version 1.1, with an Apache 2.0
-            future license: each release becomes Apache 2.0 two years after it is published. The{' '}
+            The Shapewall core (the CLI, capture, the board&apos;s client, MCP and the agents: everything outside <code>src/hosted</code>)
+            is open source under the Apache License, Version 2.0. The engine in <code>src/hosted</code> (both the solo engine that{' '}
+            <code>shapewall serve</code> runs and the self-hosted team server) is source-available under the Functional Source License,
+            Version 1.1, with an Apache 2.0 future license: each release becomes Apache 2.0 two years after it is published. The{' '}
             <Link to="/open-source">licenses page</Link> explains what each one lets you do, and the{' '}
             <a href={`${GITHUB_URL}/blob/main/LICENSE`}>license files</a> are authoritative.
           </p>
@@ -164,8 +165,8 @@ export default function Terms() {
 
           <h2 id="who">Who these terms are with, and how to reach us</h2>
           <p>
-            Shapewall is a personal open-source project maintained by Dan Baruch with its contributors. &quot;We&quot; on this page means
-            that project. It is not a company, and this site does not create a business relationship between us.
+            Shapewall is a personal software project maintained by Dan Baruch with its contributors. &quot;We&quot; on this page means that
+            project. It is not a company, and this site does not create a business relationship between us.
           </p>
           <p>
             For a question about these terms: <a href="mailto:hello@shapewall.com">hello@shapewall.com</a>. For a bug or a feature idea, the{' '}

@@ -101,7 +101,7 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
   `--trust-proxy` and the device flags) also runs it, with the same warning, so `serve --host 0.0.0.0` in a container keeps
   working. With `SHAPEWALL_ENGINE=legacy`, `capture` writes the 1.x board folders again.
 - Kept through 2.x with a one-line warning on stderr, removed in 3.0: `serve --lan` and `serve --accounts` (also
-  `SHAPEWALL_ACCOUNTS=1`), the `devices` command (pair through the tailnet with `serve --tailscale`), and
+  `SHAPEWALL_ACCOUNTS=1`), the `devices` command (reach the board over your tailnet with `serve --team`), and
   `starterAgent.testCommand` (set `commands.test`). The warning now reads "will be removed in Shapewall 3.0".
 
 ### Removed

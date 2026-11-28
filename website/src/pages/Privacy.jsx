@@ -4,7 +4,7 @@ import { Container } from '../components/ui.jsx'
 import { GITHUB_URL } from '../routes.js'
 import { LAUNCHED } from '../launch.js'
 
-export const PRIVACY_UPDATED = '2026-11-18'
+export const PRIVACY_UPDATED = '2026-11-28'
 
 export default function Privacy() {
   return (
@@ -61,9 +61,9 @@ export default function Privacy() {
           <h2 id="the-shapewall-tool">The Shapewall tool</h2>
           <p>
             The tool sends no telemetry. Captures and page checks load your configured pages and their resources. Sitemap and link checks
-            also make network requests. Optional features can download browser or voice assets. Captures, comments and journeys are files in
-            your configured output folder, normally <code>.shapewall/</code>. Optional local passkey accounts also use a SQLite database on
-            that installation.
+            also make network requests. Optional features can download browser or voice assets. In your configured output folder (normally{' '}
+            <code>.shapewall/</code>), the board&apos;s engine keeps comments, chat and your local owner account in a SQLite database inside{' '}
+            <code>.shapewall/.engine/</code>, and stores captures, diffs, journeys and checks as files alongside it.
           </p>
           <p>
             Coding agents, notifications, GitHub integration and remote sharing that you set up send the relevant data to the destinations

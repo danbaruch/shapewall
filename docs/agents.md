@@ -788,8 +788,8 @@ ACP lets the editor (here, Shapewall) offer the agent file and terminal access. 
   `shapewall_capabilities`), with no terminal of its own. Commands run in the OS sandbox where the machine has one
   ([commands through Shapewall](agent-hardening.md#commands-through-shapewall)).
 
-Outside Claude Code's restricted session the agent is still a program running as you: its own built-in tools (Codex's sandbox,
-goose's extensions, Claude Code's Bash with `localSession: "own"`) work as they do in your terminal, under the agent's own
+Outside Claude Code's restricted session (other ACP agents), the agent is still a program running as you: its own built-in tools
+(Codex's sandbox, goose's extensions) work as they do in your terminal, under the agent's own
 permission settings. Shapewall cannot sandbox those; see the threat model below.
 
 ### What the agent is told
@@ -808,10 +808,6 @@ Outside Claude Code's restricted session, the agent works with its own tools und
 them. Run it the way you would run it on a repo
 full of other people's text:
 
-- **Claude Code** (`claude-agent-acp`) with `agent.localSession: "own"` follows your Claude Code settings. Set `permissions.defaultMode` to `default` (asks before
-  edits and commands your allow rules do not cover) or `plan` (read-only), never `auto`, `acceptEdits` or `bypassPermissions`. Set
-  it explicitly: with none set, `claude-agent-acp` 0.106.0 starts in `auto`, which acts without asking. A separate config folder for Shapewall works too:
-  `CLAUDE_CONFIG_DIR` is passed to the agent.
 - **Codex** (`codex-acp`) follows `~/.codex/config.toml` (or `CODEX_HOME`). Use `sandbox_mode = "workspace-write"` (or
   `"read-only"`) with `approval_policy = "on-request"`, never `danger-full-access`.
 - **goose** asks only in `GOOSE_MODE=approve` (or `smart_approve`); its default, `auto`, acts without asking. It also loads every extension enabled in its profile (browser control, say). Give it a profile of its own with only the developer

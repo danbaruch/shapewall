@@ -141,13 +141,11 @@ command to run, and cannot send your key to a host you did not confirm; a config
 ### The ACP bridge keeps the agent on a short leash
 
 > **Warning: an ACP agent other than Claude Code brings its own tools and extensions, and Shapewall does not sandbox them.**
-> Claude Code on a local board gets the restricted session (read and edit tools plus Shapewall's own tools, no shell of its own,
-> no settings files, no MCP servers of its own) unless the config sets `agent.localSession: "own"`. Codex, goose and Gemini CLI
+> Claude Code on a local board always gets the restricted session (read and edit tools plus Shapewall's own tools, no shell of its own,
+> no settings files, no MCP servers of its own; `agent.localSession: "own"` was removed in 2.0). Codex, goose and Gemini CLI
 > come with a shell, file edits and whatever their own config loads: MCP servers, goose extensions such as browser control. The
 > approval cards below cover only what the agent asks Shapewall to do. Use restricted profiles:
 >
-> - **Claude Code with `agent.localSession: "own"`:** permission mode `default` or `plan` (`permissions.defaultMode` in your Claude settings), never
->   `auto`, `acceptEdits` or `bypassPermissions`; set it explicitly, since `claude-agent-acp` 0.106.0 starts in `auto` when none is set. `claude-agent-acp` follows your Claude Code settings; `CLAUDE_CONFIG_DIR` gives Shapewall a profile of its own.
 > - **Codex:** `sandbox_mode = "workspace-write"` or `"read-only"` with `approval_policy = "on-request"` in `~/.codex/config.toml`
 >   (or `CODEX_HOME`), never `danger-full-access`.
 > - **goose:** `goose acp --with-builtin developer` (the preset in Settings > Agent), with `GOOSE_PATH_ROOT` pointing at a profile of its
@@ -176,7 +174,7 @@ When the chat panel drives an agent CLI over ACP:
   in between the check and the open cannot point it outside. Missing folders are made one at a time, each inside the open folder
   before it. A file with a second name (a hard link) is never read. Elsewhere (macOS) the opened file's device and inode are
   compared with the path's, which is weaker: a process a command left behind could still swap a folder between two steps. So
-  **on macOS, an agent that edits files cannot run commands in 1.4.0**: a session that can edit gets no named commands, no shell
+  **on macOS, an agent that edits files cannot run commands in this release**: a session that can edit gets no named commands, no shell
   and no ACP terminal, on every tier (`edits_without_fd_checks`). The one exception is the full shell a solo owner turns on
   without a sandbox (`agent set shell-unsandboxed on`), which already runs outside every check and says so. A read-only session (a Q&A turn) keeps its read-only commands in
   the OS sandbox; while one of those (or a dev server) runs in the project, Shapewall's reads there wait. Every process a command
@@ -331,10 +329,6 @@ asked for Bash, then Read.
   Claude Code's auto memory section and the memory file in the system prompt of a connected agent's read-only and fix sessions,
   so notes Claude Code had kept for that project could shape an answer that leaves your machine. This release turns it off; see
   the changelog's Security entry.
-- **Not changed in this release: chat on a local board.** A local board's chat runs your own Claude Code with your own settings,
-  as it always has, and the same check showed it loads your user `CLAUDE.md`, `CLAUDE.local.md` and auto memory and runs the
-  project's `SessionStart` hook. That is the agent you run in that folder yourself, not the
-  restricted session a connected agent gets.
 
 The limits, plainly:
 
@@ -648,8 +642,8 @@ person's comments, a comment's own thread; read again every time the prompt is b
 tool whose result is other people's comments (`list_comments`, `get_comment`). Taking that text away again never makes the thread
 clean. The last one can happen mid-turn: every extension tool is refused from that moment and the session ends with the turn.
 Threads from before 1.4.0, and threads an older build wrote in, count as tainted. The rules are one transition table,
-`src/agent/thread-trust.js`. Only Claude Code's restricted session takes extensions: another agent, or `agent.localSession: "own"`,
-shows them off on the card, in `agent status` and in the prompt alike.
+`src/agent/thread-trust.js`. Only Claude Code's restricted session takes extensions: other agents
+show them off on the card, in `agent status` and in the prompt alike.
 
 Once loaded, a skill's text is readable by the model for the rest of the session: Claude Code's Skill tool asks no permission, so
 it cannot be refused after a taint the way an MCP tool is. So a turn that had extensions and then was tainted may not write to the
@@ -741,10 +735,10 @@ there could leave files that run later on their own (Git hooks, `.npmrc`, `node_
 config names, lint-staged and husky configs), and no check after the run can tell them all apart from ordinary work or undo what
 already ran. Turn on Work on a branch to give the agent commands: they then run in the branch copy, never in your checkout. A
 read-only turn (edits off) keeps its read-only commands, inside the OS sandbox. The same goes for an ACP agent's own terminal
-(`terminal/create`): a session working in your checkout is offered none, whatever the agent or `agent.localSession`, and a
+(`terminal/create`): a session working in your checkout is offered none, whatever the agent, and a
 request for one is refused without a card.
 
-Where a terminal is offered (Work on a branch, with an agent other than Claude Code or with `agent.localSession: "own"`), each
+Where a terminal is offered (Work on a branch, with an agent other than Claude Code), each
 command still waits for a **Run** card, but it runs in the branch copy **without the OS sandbox**: with the person's
 environment scrubbed, not with its file and network limits. Claude Code's restricted session has no terminal at all; its
 commands come from Shapewall's own tools, in the sandbox.

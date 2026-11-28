@@ -112,10 +112,10 @@ test('kept through 2.x with a warning: serve --lan, serve --accounts (and SHAPEW
   warnServeDeprecations({}, { SHAPEWALL_ACCOUNTS: '1' })
   warnDevicesDeprecated()
   assert.equal(lines.length, 4, lines.join('\n'))
-  assert.match(lines[0], /^Warning: serve --lan is deprecated and will be removed in Shapewall 3\.0; .*shapewall serve --tailscale\.$/)
+  assert.match(lines[0], /^Warning: serve --lan is deprecated and will be removed in Shapewall 3\.0; .*shapewall serve --team\.$/)
   assert.match(lines[1], /^Warning: serve --accounts is deprecated and will be removed in Shapewall 3\.0; leave it out/)
   assert.match(lines[2], /^Warning: SHAPEWALL_ACCOUNTS=1 is deprecated/)
-  assert.match(lines[3], /^Warning: the devices command is deprecated.*serve --tailscale/)
+  assert.match(lines[3], /^Warning: the devices command is deprecated.*serve --team/)
   setDeprecationSink(() => {})
 })
 
