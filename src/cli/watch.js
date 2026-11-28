@@ -3,6 +3,7 @@
 import fs from 'node:fs'
 import { findConfigFile, loadConfig } from '../config.js'
 import { assertMigrationAllows } from '../engine-folder.js'
+import { ENGINE_TARGET } from '../engine-target.js'
 import { mentionFlag, startNotifier } from './notify.js'
 import { durationFlag } from './duration.js'
 
@@ -28,7 +29,10 @@ export async function watch(flags, out, err) {
   try {
     if (flags.remote !== undefined) {
       if (flags.recapture) throw new Error('--recapture works with local --exec only')
-      if (flags['no-claim']) throw new Error('--no-claim works on a local board only (not with --remote)')
+      // This project's solo engine (engine-mode.js set the remote): --no-claim looks there as on a 1.x board.
+      const engine = Boolean(flags[ENGINE_TARGET])
+      if (flags['no-claim'] && !engine)
+        throw new Error("--no-claim works on this project's board only (its solo engine or a 1.x board), not with --remote")
       const { createRemote, remoteSettings } = await import('../remote/remote.js')
       const { remoteBoard } = await import('../remote/cli.js')
       const { watchRemote } = await import('../remote/remote-watch.js')
@@ -48,6 +52,7 @@ export async function watch(flags, out, err) {
         newOnly: Boolean(flags['new-only']),
         once: Boolean(flags.once),
         mention: mentionFlag(flags.mention),
+        claim: !(engine && flags['no-claim']),
         timeoutMs,
         signal: controller.signal,
         out,

@@ -45,3 +45,21 @@ test('a restart with the recorded move keeps its window; a different one replace
     db.close()
   }
 })
+
+test('the solo engine starts on a new --port without the passkeys and move-origin warning (IC4 B8)', async () => {
+  const db = await openDatabase(path.join(tempDir('rebind-solo'), 'shapewall.db'))
+  try {
+    const first = 'http://notes-abc.shapewall.localhost:25698'
+    const second = 'http://notes-abc.shapewall.localhost:22814'
+    prepareOrigins({ db, origin: first, rpId: 'notes-abc.shapewall.localhost', solo: true })
+    const lines = []
+    prepareOrigins({ db, origin: second, rpId: 'notes-abc.shapewall.localhost', solo: true, log: (line) => lines.push(line) })
+    assert.deepEqual(lines, [])
+    assert.equal(getState(db, 'origin').origin, second, 'the new origin is still recorded')
+    // A team server keeps the warning.
+    prepareOrigins({ db, origin: first, rpId: 'notes-abc.shapewall.localhost', log: (line) => lines.push(line) })
+    assert.match(lines.join('\n'), /without a move/)
+  } finally {
+    db.close()
+  }
+})

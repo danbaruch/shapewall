@@ -80,6 +80,11 @@ const START_LEFT = 40
 // While the first-run tip sits at the top of the canvas (CanvasNotes.jsx), the first view leaves this much more room
 // above the board, so the tip never covers the first section's name.
 export const TIP_ROOM = 48
+// While the Follow bar (FollowBar.jsx, top-14 at the left, under the tip) and the presence chips share the row under
+// the tip, the first view leaves this much room instead, so the bar never covers the first section's name (IC4).
+export const FOLLOW_ROOM = 56
+// A group's label sits above its frame (nodes.jsx GroupFrameNode): a centred fit keeps this much above the frames.
+const LABEL_ROOM = 28
 
 // Fit options for the whole board with `top` extra screen pixels above it (the tip's room), for a canvas `height` high.
 // React Flow's number padding is a share of the canvas; the top becomes that share in pixels plus the room.
@@ -112,17 +117,19 @@ export function startViewport(nodes, box, padding = FIT_OPTIONS.padding, { top: 
 // `padding`, at most `maxZoom`), centred across, and from the top when the
 // fit leaves room above and below: a wide, short wall (a few pages in a row)
 // sits under the toolbar, not in the middle of an empty canvas. `top`: screen
-// pixels kept clear above it (the first-run tip). Null when nothing is laid out.
+// pixels kept clear above it (the first-run tip, the Follow bar), plus the
+// first group's label, which sits above the frames. Null when nothing is laid out.
 export function fitWholeViewport(nodes, box, { padding = FIT_OPTIONS.padding, top = 0, maxZoom = MAX_ZOOM } = {}) {
   if (!box?.width || !box?.height || !nodes?.length) return null
   const bounds = boundsOf(nodes)
   if (!bounds?.width || !bounds?.height) return null
+  const above = top + LABEL_ROOM
   const zoom = Math.max(
     MIN_ZOOM,
-    Math.min(maxZoom, box.width / (bounds.width * (1 + 2 * padding)), (box.height - top) / (bounds.height * (1 + 2 * padding))),
+    Math.min(maxZoom, box.width / (bounds.width * (1 + 2 * padding)), (box.height - above) / (bounds.height * (1 + 2 * padding))),
   )
   const x = (box.width - bounds.width * zoom) / 2 - bounds.x * zoom
-  const centred = top + (box.height - top - bounds.height * zoom) / 2 - bounds.y * zoom
+  const centred = above + (box.height - above - bounds.height * zoom) / 2 - bounds.y * zoom
   const fromTop = START_TOP_BASE + top - bounds.y * zoom
   return { x, y: Math.min(centred, fromTop), zoom }
 }

@@ -52,8 +52,9 @@ export async function autoMigrate(config, out, { env = process.env, version = 'd
   return { migrated: true, boards: ids }
 }
 
-// startEngine: src/cli.js hands in the engine's start (src/hosted/ops-cli.js serveEngine), the one place core loads it.
-export async function serveCommand(flags, out, { env = process.env, version = 'dev', startEngine } = {}) {
+// startEngine: src/cli.js hands in the engine's start (src/hosted/ops-cli.js serveEngine), the one place core loads it;
+// preflight its cheap checks (the flags, the port free now: preflightEngine), run before anything is migrated.
+export async function serveCommand(flags, out, { env = process.env, version = 'dev', startEngine, preflight = null } = {}) {
   const choice = chooseEngine(flags, env)
   if (choice.engine === 'legacy') {
     // Team mode is the engine's (src/hosted/solo/team.js); the 1.x server shares through --tailscale and --lan.
@@ -68,6 +69,8 @@ export async function serveCommand(flags, out, { env = process.env, version = 'd
   if (!engineRunning(config)) {
     // A migration running or stopped midway: no auto migration on top of it.
     assertMigrationAllows(config)
+    // A start that cannot listen (the port taken, a refused flag) stops here, before the 1.x data moves (IC4 B7).
+    if (preflight) await preflight(flags)
     await autoMigrate(config, out, { env, version })
   }
   return startEngine({ ...flags, engine: 'hosted' }, out, { env })
