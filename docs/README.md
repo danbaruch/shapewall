@@ -59,15 +59,15 @@ A few pages are written for the site and live only there; they are linked below 
 
 ## 6. Reference
 
-| Guide                                                 | What it covers                                                                                    |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| [CLI reference](https://shapewall.com/docs/cli)       | Every command and flag. `shapewall --help all` prints the list, `shapewall <command> --help` one. |
-| [config.md](config.md)                                | The config reference, including the environment variables.                                        |
-| [Security model](https://shapewall.com/docs/security) | Why captured HTML can never run code. (On the site.)                                              |
-| [stability.md](stability.md)                          | Stability and versioning: what 1.x keeps stable, what is experimental, which files are internal.  |
-| [page-checks.md](page-checks.md)                      | `shapewall checks`: reliability, SEO and social images against the original pages, and the panel. |
-| [performance.md](performance.md)                      | `shapewall checks lighthouse`: local Lighthouse runs, profiles, budgets and report history.       |
-| [interaction-audits.md](interaction-audits.md)        | `shapewall checks flow` and `checks accessibility`: the flow file, actions, axe snapshots.        |
+| Guide                                                 | What it covers                                                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [CLI reference](https://shapewall.com/docs/cli)       | Every command and flag. `shapewall --help all` prints the list, `shapewall <command> --help` one.            |
+| [config.md](config.md)                                | The config reference, including the environment variables.                                                   |
+| [Security model](https://shapewall.com/docs/security) | Why captured HTML can never run code. (On the site.)                                                         |
+| [stability.md](stability.md)                          | Stability and versioning: what a major version keeps stable, what is experimental, which files are internal. |
+| [page-checks.md](page-checks.md)                      | `shapewall checks`: reliability, SEO and social images against the original pages, and the panel.            |
+| [performance.md](performance.md)                      | `shapewall checks lighthouse`: local Lighthouse runs, profiles, budgets and report history.                  |
+| [interaction-audits.md](interaction-audits.md)        | `shapewall checks flow` and `checks accessibility`: the flow file, actions, axe snapshots.                   |
 
 ## 7. Integrations
 

@@ -48,6 +48,8 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
 
 ### Changed
 
+- The solo engine (`serve`, with its flags) and `shapewall migrate` are stable from 2.0, under the
+  [stability promise](docs/stability.md); they were experimental in 1.5.0. The promise now reads per major version (2.x).
 - Once the solo engine holds the project and no `shapewall serve` runs, `comments`, `watch`, `mcp` and `export` start the
   engine for themselves (headless: a free loopback port, no project agent) and stop it when they end, instead of reading the
   1.x comment files, which are not the board. An agent's `shapewall mcp` works with or without `serve`. A running engine is

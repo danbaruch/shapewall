@@ -356,9 +356,9 @@ export const DOC_GROUPS = [
         file: 'stability',
         repo: 'stability',
         nav: 'Stability and versioning',
-        title: 'Stability and versioning: what 1.x keeps | Shapewall',
+        title: 'Stability and versioning: what a major keeps | Shapewall',
         description:
-          'What Shapewall 1.x keeps stable under semantic versioning: commands, config, JSON, the token API and files on disk, and what is experimental.',
+          'What Shapewall keeps stable within a major version under semantic versioning: commands, config, JSON, the token API and files on disk, and what is experimental.',
         og: 'docs-config',
       },
       {

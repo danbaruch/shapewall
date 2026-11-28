@@ -665,9 +665,9 @@ The rules of those commands:
 - **The admin commands** are these and no more: `admin projects list|create NAME`, `admin invites create --login LOGIN | --link
 [--role ROLE] [--days N]`, `admin members list`, `admin agents list` (`--json` for scripts).
 
-## The solo engine (experimental)
+## The solo engine <a id="the-solo-engine-experimental"></a>
 
-**Experimental.** Outside the [stability promise](stability.md): it can change, or go, in a minor release.
+Stable since 2.0, covered by the [stability promise](stability.md) (experimental in 1.5.0).
 
 `shapewall serve` runs this server for one project, on your own machine, for you alone: the solo profile of the same code. It
 is the default since 2.0 (`serve --engine hosted` names it explicitly; it was opt-in in 1.5.0), and the first start in a 1.x
@@ -888,8 +888,6 @@ there, with this start's key from the data folder, from this machine and your ow
   [own domain deployment](#own-domain-deployment-mode-2) and its [checklist](#before-public-hosting).
 
 ### Moving a local project into the engine: `shapewall migrate`
-
-**Experimental.** Outside the [stability promise](stability.md): it can change, or go, in a minor release.
 
 ```sh
 shapewall migrate --dry-run     # what would move, and every item that would not, with the reason; writes nothing
@@ -3200,8 +3198,8 @@ wrote in, moved or started no longer matches its `trust_v`, so it reads as taint
 
 ### Migration 24 and rollback
 
-Migration 24 (1.5.0) prepares the database for the solo engine (`shapewall serve --engine hosted`, experimental: this server run
-for one project on your own machine). On a team server nothing it does changes what anyone sees or can do. Three parts:
+Migration 24 (1.5.0) prepares the database for the solo engine (`shapewall serve --engine hosted`, opt-in in 1.5.0 and the default
+from 2.0: this server run for one project on your own machine). On a team server nothing it does changes what anyone sees or can do. Three parts:
 
 - column `comments.environment`: the id of the board environment a comment was made on. A push keeps one environment,
   `default`, so every existing comment and every new one on a team board is `default`. A solo board keeps the project's own

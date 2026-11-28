@@ -82,9 +82,7 @@ text, which stays marked as an agent's), and the lines of `.shapewall/events.jso
 Working on several projects? Each one has its own board on its own port, and the board switcher switches between the ones that are
 running. See [Several local projects](deployment.md#several-local-projects).
 
-## The solo engine (experimental)
-
-**Experimental.** Outside the [stability promise](stability.md): it can change, or go, in a minor release.
+## The solo engine <a id="the-solo-engine-experimental"></a>
 
 ```sh
 npx shapewall migrate --dry-run         # optional: what an existing 1.x .shapewall/ would bring along
@@ -99,7 +97,7 @@ updates. The project's agent runs as a connected agent (`shapewall agent connect
 agents use, so the chat, Fix with and Send to agent go through one protocol whether the board is on your machine or a server. While
 it runs, `shapewall comments`, `watch` and `mcp` in the project folder go to it. It has been the default since 2.0 (opt-in in 1.5.0).
 
-`shapewall migrate` (experimental) moves an existing project's `.shapewall/` (captures, versions, environments, journeys,
+`shapewall migrate` moves an existing project's `.shapewall/` (captures, versions, environments, journeys,
 comments, chat threads, a `serve --accounts` owner) into the engine, after a hard-link backup; `shapewall migrate --rollback` puts
 it back. The first `serve` runs it for you. After a migration the 1.x server and the 1.x writers refuse the boards that moved. A
 project with no `.shapewall/` yet needs no migration: start the engine and capture.

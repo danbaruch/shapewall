@@ -37,7 +37,7 @@ Events come from whatever changes the comment: the board (`shapewall serve`), th
 - **The gap left:** a server killed with SIGKILL (or one that crashes) cannot read the log a last time or give the lease back. Changes
   other processes make after its last read, and until its heartbeat is a minute old, are sent by nobody.
 
-**The solo engine (experimental)** writes the same `events.jsonl` lines and is the notifier for its project folder in the same way,
+**The solo engine** writes the same `events.jsonl` lines and is the notifier for its project folder in the same way,
 for changes made on the board, through the token API and over MCP. Two differences: `actor` is `null` for resolve, reopen, edits and
 agent status changes (the engine does not record who made them yet), and a share link guest's text never makes a `comment.mentioned`
 event, as on a hosted board.

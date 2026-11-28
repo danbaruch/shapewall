@@ -198,8 +198,6 @@ host-only agent settings on this computer ([local accounts](/docs/local-accounts
 
 ### shapewall serve --engine hosted
 
-**Experimental.** Outside the [stability promise](/docs/stability): it can change, or go, in a minor release.
-
 From 2.0 this is what `shapewall serve` runs by default; the first start in a project with 1.x board data runs
 `shapewall migrate` first, with a backup ([upgrading a 1.x project](/docs/where-to-run#upgrading-a-1x-project)).
 `shapewall serve --engine legacy` (or `SHAPEWALL_ENGINE=legacy`) runs the 1.x board server, deprecated and removed in 3.0, and
@@ -573,8 +571,6 @@ to it, use `serve --team`). `--dry-run` reports counts without sending; `--no-co
 Private diagnostic reports are excluded unless `--include-checks` is explicitly selected. See [the operator guide](/docs/hosted).
 
 ## shapewall migrate
-
-**Experimental.** Outside the [stability promise](/docs/stability): it can change, or go, in a minor release.
 
 ```text
 shapewall migrate [--dry-run] [--board ID] [--json]
@@ -1040,7 +1036,7 @@ Commands
       --board ID            move only this board (default all)
       --dry-run             show counts; sends nothing
       --no-comments         captures, history and journeys only
-  migrate                   move this project's .shapewall/ into the solo engine (.shapewall/.engine/) (experimental)
+  migrate                   move this project's .shapewall/ into the solo engine (.shapewall/.engine/)
                             captures, comments, chat and the local account; a backup goes to
                             .shapewall/backup-1x-<time>/ first; the solo engine serves it after (the first
                             serve of 2.x runs it; https://shapewall.com/docs/upgrading). Refuses while

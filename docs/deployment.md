@@ -51,13 +51,13 @@ other projects for you.
 `127.0.0.1` always means the device opening the link. On a phone it means the phone, even with Tailscale connected. Use the computer's
 Tailscale HTTPS link for phone access; the desktop project list is intentionally hidden there. See the team access guidance below.
 
-### The solo engine (experimental)
+### The solo engine <a id="the-solo-engine-experimental"></a>
 
 ```sh
 shapewall serve --open     # the same as shapewall serve --engine hosted --open
 ```
 
-**Experimental** (outside the [stability promise](stability.md)). The default board server from 2.0 (opt-in in 1.5.0): the
+The default board server from 2.0 (opt-in and experimental in 1.5.0): the
 hosted server's engine for this project, on 127.0.0.1 only, at `http://<project>-<random>.shapewall.localhost:<port>` (the port defaults to 4600, as for
 `serve`), one owner signed in by a one-time page from the terminal, data in `.shapewall/.engine/`. It refuses to start when git
 tracks that folder, and refuses every flag that reaches beyond this machine (`--host`, `--lan`, `--tailscale`, `--tls-cert`,
@@ -67,8 +67,8 @@ tracks that folder, and refuses every flag that reaches beyond this machine (`--
 hosted server's license (Functional Source License, Apache 2.0 two years after each release), not the core's.
 
 `shapewall comments`, `watch` and `mcp` in the project folder go to the engine, not to the 1.x board files, and start it for
-themselves when it is not running. The first `serve` moves a 1.x board in with `shapewall migrate` (experimental, with
-`--dry-run` and `--rollback`).
+themselves when it is not running. The first `serve` moves a 1.x board in with `shapewall migrate` (with `--dry-run`
+and `--rollback`).
 Everything else: [the solo engine](hosted.md#the-solo-engine-experimental).
 
 ## For a team
