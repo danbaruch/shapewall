@@ -155,6 +155,6 @@ test('share --remote stops on a board the engine holds instead of sending a stal
   markMigrated(config)
   await assert.rejects(
     share({ remote: 'https://board.example.test', 'dry-run': true }, () => {}, { config, env: ENV }),
-    /lives in the solo engine now .*migrate --rollback/,
+    /lives in the solo engine now .*shapewall serve --team .*migrate --rollback/,
   )
 })
