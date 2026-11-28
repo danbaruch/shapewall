@@ -308,7 +308,8 @@ export async function planMigration(config, { board: only = null, env = process.
       problems.push(
         `board ${board.id}: ${links.slice(0, 3).join(', ')}${links.length > 3 ? ` and ${links.length - 3} more` : ''} ${links.length === 1 ? 'is a symbolic link' : 'are symbolic links'}; replace them with the real files or folders first (the migration never follows a link)`,
       )
-    const comments = planComments(config, board, { owner })
+    // IC4 B2: no 1.x accounts store, so only the owner could comment.
+    const comments = planComments(config, board, { owner, localOnly: !accounts })
     const chat = planChat(config, board)
     const drops = [
       ...files.ephemeral.map(({ name, reason }) => ({ item: name, reason: `not carried: ${reason}` })),
@@ -449,6 +450,8 @@ export function printPlan(plan, out, { dryRun }) {
     out(
       `  comments: ${plural(c.comments, 'comment')}, ${plural(c.replies, 'reply', 'replies')}, ${plural(c.reactions, 'reaction')}, ${plural(c.images, 'image')}, ${plural(c.drawings, 'drawing')}`,
     )
+    if (c.ownerLocal)
+      out(`    the owner's: ${c.ownerLocal} typed on this local board (no accounts, so the owner's: agents get them as before)`)
     if (c.ownerStamped || c.ownerByName)
       out(
         `    the owner's: ${c.ownerStamped} stamped by the board (become the owner's); ${c.ownerByName} with the owner's name only (kept as imported text, not the owner's); ${c.labels} other name(s) stay labels`,
@@ -755,6 +758,95 @@ export function rollbackRuns(config, { all = false } = {}) {
   return { runs, ignored, resumed: false, only: null }
 }
 
+// The engine's project id as the engine folder has it now, or null.
+async function engineProjectId(outputDir) {
+  let db
+  try {
+    const E = await loadEngine()
+    db = await E.readEngineDb(outputDir)
+    return db ? E.readEngine(db).projectId || null : null
+  } catch {
+    return null
+  } finally {
+    db?.close()
+  }
+}
+
+// IC4 B4: `shapewall watch` on the engine makes
+// .shapewall/remote/<engine project>/<board>/agent/ for its state. After a
+// rollback that set the engine aside, the empty ones go (and their parents
+// once empty); a folder with anything in it stays.
+function pruneEngineRemote(outputDir, projectId) {
+  if (!projectId || !/^pr_[A-Za-z0-9]{1,64}$/.test(projectId)) return
+  const root = path.join(outputDir, 'remote', projectId)
+  const rmEmpty = (dir) => {
+    try {
+      if (!fs.lstatSync(dir).isDirectory()) return false
+      fs.rmdirSync(dir)
+      return true
+    } catch {
+      return false
+    }
+  }
+  let boards = []
+  try {
+    if (!fs.lstatSync(root).isDirectory()) return
+    boards = fs.readdirSync(root)
+  } catch {
+    return
+  }
+  for (const board of boards) {
+    const dir = path.join(root, board)
+    rmEmpty(path.join(dir, 'agent'))
+    rmEmpty(dir)
+  }
+  if (rmEmpty(root)) rmEmpty(path.join(outputDir, 'remote'))
+}
+
+// What a rollback does with the journal of a run stopped midway, once the
+// backups in `restoring` are put back (IC4 B6: the dry run says the same).
+// It goes once there is nothing left to put back for it: its backup was
+// restored now or before, or the run stopped while writing the backup (rows
+// and files come after the backup, so nothing was changed).
+// { clear, cleared: message or null, stuck: message or null }.
+async function journalOutcome(config, restoring, { dryRun = false } = {}) {
+  const outputDir = config.outputDir
+  const journal = readJournal(outputDir)
+  if (!journal) return { clear: false, cleared: null, stuck: null }
+  const removed = dryRun ? 'would be removed' : 'was removed'
+  if (dryRun && finishedJournal(outputDir, journal))
+    return {
+      clear: true,
+      cleared: `The run ${journal.backup} had finished (${MARKER} lists it) but was stopped before it removed ${JOURNAL}; ${JOURNAL} ${removed}.`,
+      stuck: null,
+    }
+  const item = listBackups(outputDir).find((backup) => backup.name === journal.backup)
+  const noBackup = !item || !item.record
+  // No finished backup is the run stopped while writing it, before it
+  // changed anything, unless the engine shows otherwise (R2-2: a backup
+  // folder deleted by hand after the run got further).
+  const boards = Array.isArray(journal.boards) ? journal.boards : config.boards.map((board) => board.id)
+  const unchanged = noBackup && !(await engineHasBoards(outputDir, boards))
+  const now = restoring.includes(journal.backup)
+  if (now || item?.restored || unchanged)
+    return {
+      clear: true,
+      cleared: now
+        ? null
+        : unchanged
+          ? `The run that was stopped midway (${journal.backup}) stopped while writing its backup, before it changed anything; nothing needs restoring and ${JOURNAL} ${removed}.`
+          : `The run that was stopped midway (${journal.backup}) was already put back; ${JOURNAL} ${removed}.`,
+      stuck: null,
+    }
+  if (noBackup)
+    return {
+      clear: false,
+      cleared: null,
+      stuck: `The run that was stopped midway (${journal.backup}) cannot be put back: its backup is ${item ? 'incomplete' : 'gone'}, and the engine already has comments, chat or files of ${boards.join(', ')} from it. ${JOURNAL} stays. Its board folders may be half moved: copy ${boards.map((id) => rel(config, boardDir(config, id))).join(', ')} aside first. Then, to keep what the engine has of that run and record it as done, run shapewall migrate --abandon.`,
+    }
+  return { clear: false, cleared: null, stuck: null }
+}
+
 // Undoes the runs rollbackRuns names, newest first, under its own journal
 // (B-4): ROLLING-BACK is written before the first backup is put back and
 // removed after the last, so a rollback stopped midway is known to every
@@ -771,6 +863,7 @@ export async function rollback(config, { all = false } = {}) {
     if (!readBackup(run.dir)) throw new Error(`${run.name} is not a finished migration backup`)
     assertBackupContained(outputDir, run.dir)
   }
+  const engineBefore = runs.length ? await engineProjectId(outputDir) : null
   if (runs.length)
     writeAtomic(
       journalFile,
@@ -778,8 +871,9 @@ export async function rollback(config, { all = false } = {}) {
       { mode: 0o600 },
     )
   for (const run of runs) {
+    let back
     try {
-      restoreBackup(outputDir, run.dir, { engineDir: engineDir(outputDir), marker: MARKER })
+      back = restoreBackup(outputDir, run.dir, { engineDir: engineDir(outputDir), marker: MARKER })
     } catch (error) {
       // B-16: the way out when a backup keeps failing, named where it happens.
       throw new MigrateError(
@@ -787,33 +881,17 @@ export async function rollback(config, { all = false } = {}) {
         { cause: error },
       )
     }
-    restored.push({ backup: run.name, boards: run.record.boards })
+    restored.push({ backup: run.name, boards: run.record.boards, eventLog: back.eventLog })
   }
   fs.rmSync(journalFile, { force: true })
-  // The journal of a run stopped midway goes once there is nothing left to
-  // put back for it: its backup was restored now or before, or the run
-  // stopped while writing the backup (rows and files come after the backup,
-  // so nothing was changed).
-  const journal = readJournal(outputDir)
-  let cleared = finished
-  let stuck = null
-  if (journal) {
-    const item = listBackups(outputDir).find((backup) => backup.name === journal.backup)
-    const noBackup = !item || !item.record
-    // No finished backup is the run stopped while writing it, before it
-    // changed anything, unless the engine shows otherwise (R2-2: a backup
-    // folder deleted by hand after the run got further).
-    const boards = Array.isArray(journal.boards) ? journal.boards : config.boards.map((board) => board.id)
-    const unchanged = noBackup && !(await engineHasBoards(outputDir, boards))
-    if (restored.some((run) => run.backup === journal.backup) || item?.restored || unchanged) {
-      clearJournal(outputDir)
-      if (!restored.some((run) => run.backup === journal.backup))
-        cleared = unchanged
-          ? `The run that was stopped midway (${journal.backup}) stopped while writing its backup, before it changed anything; nothing needs restoring and ${JOURNAL} was removed.`
-          : `The run that was stopped midway (${journal.backup}) was already put back; ${JOURNAL} was removed.`
-    } else if (noBackup)
-      stuck = `The run that was stopped midway (${journal.backup}) cannot be put back: its backup is ${item ? 'incomplete' : 'gone'}, and the engine already has comments, chat or files of ${boards.join(', ')} from it. ${JOURNAL} stays. Its board folders may be half moved: copy ${boards.map((id) => rel(config, boardDir(config, id))).join(', ')} aside first. Then, to keep what the engine has of that run and record it as done, run shapewall migrate --abandon.`
-  }
+  if (engineBefore && (await engineProjectId(outputDir)) !== engineBefore) pruneEngineRemote(outputDir, engineBefore)
+  const outcome = await journalOutcome(
+    config,
+    restored.map((run) => run.backup),
+  )
+  if (outcome.clear) clearJournal(outputDir)
+  const cleared = finished || outcome.cleared
+  const stuck = outcome.stuck
   const left = only ? rollbackPlan(config).runs.map((run) => run.name) : []
   return { restored, ignored, cleared, stuck, ...(left.length ? { kept: left } : {}) }
 }
@@ -979,17 +1057,26 @@ export async function migrateCommand(
       ignored.length ? [`Not used: ${ignored.join(', ')} (no migration of this project recorded it; it stays as it is)`] : []
     if (flags['dry-run']) {
       const { runs, ignored } = rollbackRuns(config, { all: flags.all === true })
+      const outcome = await journalOutcome(
+        config,
+        runs.map((item) => item.name),
+        { dryRun: true },
+      )
       if (json)
         out(
           JSON.stringify({
-            ok: true,
+            ok: !outcome.stuck,
             dryRun: true,
             wouldRestore: runs.map((item) => ({ backup: item.name, boards: item.record.boards })),
             ignored,
+            ...(outcome.cleared ? { wouldClear: outcome.cleared } : {}),
+            ...(outcome.stuck ? { problems: [outcome.stuck] } : {}),
           }),
         )
       else {
-        if (!runs.length) out('Nothing to roll back.')
+        if (outcome.cleared) out(outcome.cleared)
+        if (outcome.stuck) out(outcome.stuck)
+        else if (!runs.length && !outcome.cleared) out('Nothing to roll back.')
         for (const item of runs) out(`Would put back ${item.record.boards.join(', ') || 'the engine folder'} from ${item.name}`)
         ignoredLines(ignored).forEach((line) => out(line))
       }
@@ -1009,8 +1096,18 @@ export async function migrateCommand(
         if (cleared) out(cleared)
         if (stuck) out(stuck)
         else if (!restored.length && !cleared) out('Nothing to roll back.')
-        for (const item of restored)
+        for (const item of restored) {
           out(`Put back ${item.boards.join(', ') || 'the engine folder'} from ${item.backup} (checked byte for byte).`)
+          // IC4 B5: the engine's lines in the event log name comments 1.x does not have.
+          if (item.eventLog === 'moved')
+            out(
+              `  events.jsonl: the lines the engine added since moved into ${item.backup}/replaced-*/events.jsonl; the log is back as it was.`,
+            )
+          else if (item.eventLog === 'kept')
+            out(
+              `  events.jsonl changed in a way the rollback cannot split (rotated or edited), so it stays as it is: lines from the engine period may name comment ids 1.x hands out again.`,
+            )
+        }
         ignoredLines(ignored).forEach((line) => out(line))
         if (kept)
           out(

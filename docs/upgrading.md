@@ -55,9 +55,16 @@ finished runs stay on the engine); `--rollback --all` puts back every run. A rol
 `.shapewall/ROLLING-BACK`, and nothing starts until `shapewall migrate --rollback` runs again and finishes it. If a backup
 keeps failing, the message names it: fix what it says and run `--rollback` again, or run `shapewall migrate --rollback
 --give-up` to end the rollback and keep the folder as it is now. If a stopped run's backup is gone, `--rollback` says so,
-and `shapewall migrate --abandon` keeps what the engine has of that run and records it as done. A moved board's
-1.x folder keeps only a note, so an older Shapewall started there stops with an error instead of opening an empty board.
-Rollback is part of the Apache 2.0 core and never needs the engine.
+and `shapewall migrate --abandon` keeps what the engine has of that run and records it as done. Lines the engine added to
+`.shapewall/events.jsonl` after the backup name comments 1.x no longer has, so they move into the same
+`<backup>/replaced-<time>/events.jsonl` and the log is as it was; if the log was rotated or edited since, it stays as it is
+and the rollback says so. Empty `.shapewall/remote/<engine project>/<board>/agent/` folders that `watch` made on the engine
+go too. Rollback is part of the Apache 2.0 core and never needs the engine.
+
+A moved board's 1.x folder keeps only a note (`comments.json` and `status.json` are folders, `chat` is a file), so nothing a
+1.x build writes lands beside the moved board. An older Shapewall cannot be changed to know that note. Started on a migrated
+project, Shapewall 1.1.0 starts and says it is serving the board, but the board API answers 500 ("Something went wrong")
+and `shapewall comments` fails with "Not a regular capture file." Nothing is lost either way: roll back with 2.x first.
 
 ## Staying on 1.x
 
@@ -79,9 +86,12 @@ Rollback is part of the Apache 2.0 core and never needs the engine.
 - **Paired devices** do not move. Other people, and your other devices, reach the engine through team mode
   (`shapewall serve --team`, or **Invite people** on the console's Members page): the same board on your tailnet with
   tailnet sign-in. See [team mode](hosted.md#inviting-people-team-mode).
-- **Authorship.** On a 1.x board an author was a typed name. On the engine your comments are the owner account's. In the
-  move, only comments the 1.x board stamped as the owner's become the owner's; others signed with your name come in as
-  imported text, and every other name stays a label. The `author` of the MCP tools `reply_to_comment` and `add_comment`, and
+- **Authorship.** On a 1.x board an author was a typed name. On the engine your comments are the owner account's. A
+  plain local 1.x board (no `serve --accounts`) had one person behind it: you, at this machine or on a device you paired.
+  So in the move every comment there becomes the owner's, sent to agents as `watch` did on 1.x; only comments marked as an
+  agent's or a share guest's are not. With `serve --accounts`, other people could comment, so only comments the 1.x board
+  stamped as the owner's become the owner's; others signed with your name come in as imported text, and every other name
+  stays a label. Those are not sent to agents until you send them from the board. The dry run counts each kind. The `author` of the MCP tools `reply_to_comment` and `add_comment`, and
   `comments reply --author` and `comments add --author`, still label an agent's text, which stays marked as an agent's.
 - **The board's agent** runs as a connected agent of the engine (`shapewall agent connect --as local`), with the settings
   you had. It acts only when asked, as on a 1.x board.

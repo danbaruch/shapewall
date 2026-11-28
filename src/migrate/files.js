@@ -25,6 +25,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { ID_RE } from '../config.js'
 import { ENGINE_DIR, MIGRATED, MIGRATE_LOCK, MIGRATING, ROLLING_BACK, engineDir } from '../engine-folder.js'
 import { readLock } from '../lock.js'
+import { LOG_FILE as EVENT_LOG } from '../event-log.js'
 
 function isLink(file) {
   try {
@@ -302,8 +303,65 @@ export function writeBackup(outputDir, { stamp, boards, engineDir, marker, versi
   const hadMarker = fs.existsSync(markerFile)
   if (hadMarker) writeAtomic(path.join(dir, marker), fs.readFileSync(markerFile))
   const record = { version: 1, stamp, by: version, boards: present, engine, marker: hadMarker, digest: digestOf(outputDir, present) }
+  // IC4 B5: where the 1.x event log ended, so a rollback can take out the
+  // lines the engine added after it (they name comments 1.x does not have).
+  const events = eventLogMark(outputDir)
+  if (events) record.events = events
   writeAtomic(path.join(dir, 'backup.json'), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 })
   return { dir, record }
+}
+
+// The event log (events.jsonl) as it is: its size and the digest of its
+// bytes, or null when there is none (or it is not a plain file).
+function eventLogMark(outputDir) {
+  const file = path.join(outputDir, EVENT_LOG)
+  try {
+    const stat = fs.lstatSync(file)
+    if (!stat.isFile()) return null
+    const bytes = fs.readFileSync(file)
+    return { size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
+  } catch {
+    return null
+  }
+}
+
+// IC4 B5: after a rollback, the lines the engine added to the event log
+// after the backup move aside (into `aside`/events.jsonl) and the log is
+// back where the backup found it, so a 1.x consumer never reads an engine
+// comment under an id 1.x hands out again. Only when the log still starts
+// with exactly the bytes it had (no rotation, no edit); otherwise it stays
+// as it is, and the result says so. Returns 'moved', 'unchanged' or 'kept'.
+function restoreEventLog(outputDir, record, aside) {
+  const mark = record.events
+  if (!mark || !Number.isSafeInteger(mark.size) || typeof mark.sha256 !== 'string') return 'unchanged'
+  const file = path.join(outputDir, EVENT_LOG)
+  let stat
+  try {
+    stat = fs.lstatSync(file)
+  } catch {
+    return 'kept'
+  }
+  if (!stat.isFile()) return 'kept'
+  if (stat.size === mark.size) return 'unchanged'
+  if (stat.size < mark.size) return 'kept'
+  const fd = fs.openSync(file, fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW || 0))
+  try {
+    const bytes = Buffer.alloc(fs.fstatSync(fd).size)
+    let read = 0
+    while (read < bytes.length) {
+      const n = fs.readSync(fd, bytes, read, bytes.length - read, read)
+      if (!n) break
+      read += n
+    }
+    const head = bytes.subarray(0, mark.size)
+    if (createHash('sha256').update(head).digest('hex') !== mark.sha256) return 'kept'
+    fs.mkdirSync(aside, { recursive: true, mode: 0o700 })
+    writeAtomic(path.join(aside, EVENT_LOG), bytes.subarray(mark.size, read), { mode: 0o600 })
+    fs.ftruncateSync(fd, mark.size)
+    return 'moved'
+  } finally {
+    fs.closeSync(fd)
+  }
 }
 
 const digestOf = (outputDir, boards) => Object.fromEntries(boards.map((board) => [board, treeDigest(path.join(outputDir, board))]))
@@ -426,8 +484,9 @@ export function restoreBackup(outputDir, dir, { engineDir, marker }) {
   const now = digestOf(outputDir, record.boards)
   const changed = record.boards.filter((board) => JSON.stringify(now[board]) !== JSON.stringify(record.digest?.[board]))
   if (changed.length) throw new Error(`the restored ${changed.join(', ')} does not match the backup byte for byte`)
+  const events = restoreEventLog(outputDir, record, aside)
   writeAtomic(path.join(dir, 'RESTORED'), `${new Date().toISOString()}\n`)
-  return record
+  return { ...record, eventLog: events }
 }
 
 export function listBackups(outputDir) {

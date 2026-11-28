@@ -23,9 +23,10 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
   `serve --engine legacy` or `SHAPEWALL_ENGINE=legacy` (deprecated, removed in 3.0).
 - **What re-pairs or changes.** Sign-in sessions and paired devices do not move: `serve --open` signs the browser in from
   the terminal, and other devices and people come in through team mode. The board's address becomes
-  `http://<project>-<random>.shapewall.localhost:<port>`. Your comments are the owner account's: only comments the 1.x board
-  stamped as the owner's become the owner's, others signed with your name come in as imported text, and other names stay
-  labels. An agent's `--author` (and the MCP `author`) still labels its text.
+  `http://<project>-<random>.shapewall.localhost:<port>`. Your comments are the owner account's. On a plain local 1.x board
+  (no `serve --accounts`) every comment that is not an agent's or a share guest's becomes the owner's and goes to agents as
+  it did on 1.x; with `serve --accounts`, only comments the 1.x board stamped as the owner's become the owner's, others
+  signed with your name come in as imported text (not sent to agents until you send them), and other names stay labels. An agent's `--author` (and the MCP `author`) still labels its text.
 - **Refused on the engine.** `share --remote` refuses an engine board and points to `serve --team`; `comments delete` is
   not on the engine yet. The removed spellings are listed under Removed, each with its replacement.
 
@@ -126,6 +127,9 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
   stopped with its journal removed by hand is found from its backup and put back alone by `--rollback`; a rollback's
   pre-check no longer walks what earlier rollbacks set aside; a push holds a lock beside the board folder for the whole
   swap; a 1.x `github` value that is not an object shows as dropped in the plan; the tombstone also stops a 1.x capture.
+  Upgrade rehearsal: a plain local board's comments go to agents after the move; the real run no longer lists its own chat
+  locks as not carried; `--rollback --dry-run` says when it would clear a run stopped during its backup; a rollback moves
+  the engine's `events.jsonl` lines aside (1.x reuses those comment ids) and removes the empty `remote/.../agent` folders.
 - Team mode serves members from a second listener on 127.0.0.1 for the same database, and `tailscale serve` forwards the
   tailnet only to that port. The owner's terminal sign-in, the loopback and same-OS-user checks, this machine's tokens
   (`cli.token`, `watch.token`, `agent.token`) and the owner-only engine features (settings, captures, checks, journeys

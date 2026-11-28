@@ -23,6 +23,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { chatDir, THREAD_RE, CHAT_RE, FILE_RE } from '../agent/threads.js'
+import { ownLock } from './files.js'
 
 const VISITOR_PREFIX = 'From a visitor: '
 const TITLE_MAX = 120
@@ -61,6 +62,9 @@ export function planChat(config, board) {
   for (const name of fs.readdirSync(dir).sort()) {
     const full = path.join(dir, name)
     if (name === 'files' && fs.statSync(full).isDirectory()) continue
+    // IC4 B3: the lock this run holds on a thread (withBoardLocks) is not a
+    // file of the board, so the real run lists what the dry run listed.
+    if (ownLock(full)) continue
     if (name === 'ratings.json') {
       drop('chat ratings (ratings.json)', 'the engine chat has no answer ratings yet (1.5.0 gap G14b); kept in the backup')
       continue
