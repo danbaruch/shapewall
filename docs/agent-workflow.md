@@ -351,7 +351,8 @@ yourself), `--timeout DURATION` (default `60m`; `90s`, `2h`; a number alone is m
 A chat bot that relays comments to people, or a second tool beside the agent, must not claim anything. Two read-only ways:
 
 - `shapewall watch --no-claim` prints (or `--exec`s) every open comment once, and again if it is reopened, but never sets an agent
-  status, writes a reply or takes `watch.lock`, so it runs beside a claiming `watch` or the starter agent. `--mention`, `--new-only` and
+  status, writes a reply or takes `watch.lock`, so it runs beside a claiming `watch` or the starter agent. On the solo engine it hands out
+  only what a claiming `watch` would (sent to agents and approved to run): never a 1.x comment that waits for the owner's OK. `--mention`, `--new-only` and
   `--once` work as usual.
 - `shapewall events` reads the shared event log (`.shapewall/events.jsonl`): every comment event from every process (the board, the CLI,
   `watch`, MCP, the starter agent), with who did it. Without `--follow` it prints the last 20 (`--limit N`) and exits; `--follow` keeps

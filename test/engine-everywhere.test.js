@@ -198,19 +198,18 @@ test('an agent starts shapewall mcp with no serve running: the tools answer from
   }
 })
 
-test('watch --no-claim on the engine hands out every open comment once and claims nothing (IC4 B2b)', async () => {
+test('watch --no-claim on the engine hands out only dispatchable comments and claims nothing (IC4 B2b, B-20)', async () => {
   const { file } = await migratedProject('everywhere-noclaim')
+  // B-20: the migrated 1.x comment (stamped as not the owner's, so a label) is not dispatchable: --no-claim hands out
+  // nothing (before, it handed out every open comment, --exec included). It is not one of the owner's 1.x comments
+  // either, so approve --imported has none; the owner sends such a comment from the board.
   const looked = await cli(['watch', '--once', '--no-claim', '--config', file])
   assert.equal(looked.code, 0, looked.err)
   assert.doesNotMatch(looked.err, /not with --remote/)
-  const handed = looked.out
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-  assert.deepEqual(
-    handed.map((item) => item.comment.body),
-    ['Bigger logo'],
-  )
+  assert.equal(looked.out.trim(), '')
+  const approved = await cli(['comments', 'approve', '--imported', '--yes', '--config', file])
+  assert.equal(approved.code, 0, approved.err)
+  assert.match(approved.out, /No 1\.x comments wait for your OK/)
   const listed = await cli(['comments', 'list', '--config', file, '--json'])
   assert.equal(listed.code, 0, listed.err)
   assert.deepEqual(

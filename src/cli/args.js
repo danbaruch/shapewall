@@ -58,6 +58,7 @@ const BOOLEAN_FLAGS = new Set([
   'broken',
   'follow',
   'no-claim',
+  'imported',
   'tailscale',
   'funnel',
   'tailnet-sign-in',

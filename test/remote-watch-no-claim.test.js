@@ -12,6 +12,7 @@ const item = (id, extra = {}) => ({
   id,
   body: `Comment ${id}`,
   status: 'open',
+  dispatchable: true,
   agentStatus: null,
   reopenCount: 0,
   replies: [],
@@ -88,4 +89,28 @@ test('--no-claim with --exec runs each comment once, again after a reopen, and s
   assert.equal(finished.length, 2, logs.join('\n'))
   assert.deepEqual(remote.writes, [])
   assert.ok(fs.existsSync(path.join(cwd, '.shapewall', 'remote', 'pr_' + 'b'.repeat(24), 'main', 'agent', 'comment-1.json')))
+})
+
+test('--no-claim hands out only what agents may get: never a comment that is not dispatchable (B-20)', async () => {
+  const remote = fakeRemote([
+    [
+      item(1),
+      item(2, { dispatchable: false, needsRunApproval: true }),
+      item(3, { dispatchable: false }),
+      item(4, { dispatchable: undefined }),
+    ],
+  ])
+  const printed = []
+  await watchRemote({
+    remote,
+    boardId: 'main',
+    projectId: 'pr_' + 'c'.repeat(24),
+    once: true,
+    claim: false,
+    cwd: tempDir('remote-no-claim-dispatchable'),
+    out: (line) => printed.push(JSON.parse(line).comment.id),
+    log: () => {},
+  })
+  assert.deepEqual(printed, [1])
+  assert.deepEqual(remote.writes, [])
 })

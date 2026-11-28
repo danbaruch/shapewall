@@ -15,6 +15,7 @@ import { tenant } from '../src/hosted/tenancy.js'
 import { soloOrigin } from '../src/hosted/solo/signin.js'
 import { CLI_TOKEN_FILE, WATCH_TOKEN_FILE } from '../src/hosted/solo/machine-tokens.js'
 import { approveImported } from '../src/remote/cli.js'
+import { watchRemote } from '../src/remote/remote-watch.js'
 import { SAMPLE, request, tempDir } from './helpers.js'
 import { createBrowser } from './hosted-helpers.js'
 
@@ -138,6 +139,26 @@ test('B-20: only the command-line token sends them; an agent token cannot vouch,
     assert.equal(answer.json.error.code, 'owner_command_line')
   }
   assert.equal(stateOf(engine, numbers[0]).dispatchable, false)
+  // `watch --no-claim` reads with the command-line token: it hands out nothing that waits (PR #81 had it hand out
+  // every open comment, --exec included).
+  const watchOnce = async () => {
+    const printed = []
+    await watchRemote({
+      remote: {
+        origin: engine.origin,
+        comments: async (board, { status }) => (await api(CLI_TOKEN_FILE, 'GET', `/boards/${board}/comments?status=${status}`)).json,
+      },
+      boardId: 'sample',
+      projectId: engine.solo.owner.projectId,
+      once: true,
+      claim: false,
+      cwd: tempDir('b20-no-claim'),
+      out: (line) => printed.push(JSON.parse(line).comment.id),
+      log: () => {},
+    })
+    return printed
+  }
+  assert.deepEqual(await watchOnce(), [])
   // The command line: what `comments approve --imported --yes` sends.
   const lines = []
   const remote = {
@@ -149,6 +170,8 @@ test('B-20: only the command-line token sends them; an agent token cannot vouch,
   assert.match(lines.join('\n'), /evil\.example/, 'each comment is shown in full')
   assert.match(lines.join('\n'), /Sent 2 to agents/)
   assert.equal(stateOf(engine, numbers[0]).dispatchable, true)
+  // Once sent, --no-claim hands them out (never the agent's own).
+  assert.deepEqual(await watchOnce(), [numbers[0], numbers[1]])
   const after = await api(CLI_TOKEN_FILE, 'GET', `/boards/sample/comments/${numbers[0]}`)
   assert.equal(after.json.comment.byOwner, true)
 })

@@ -468,7 +468,8 @@ that tag `@agent`, so people can discuss a comment first and tag the agent when 
 comment an agent wrote is never handed out, so agents cannot set each other off. A command that exits `0` must leave a
 word: a reply (`shapewall comments reply`) makes the comment `done`, a status it sets itself is kept, and a silent exit `0` makes it
 `needs-human` with a note, since nothing says what the agent did. `--no-claim` hands out every open
-comment once without claiming it (no agent status, no lock), to run beside another watcher. `--recapture` recaptures the comment's
+comment once without claiming it (no agent status, no lock), to run beside another watcher; on the solo engine, only those agents
+may get. `--recapture` recaptures the comment's
 page after a successful `--exec` (local boards only). `--timeout` stops a command that runs longer (default `60m`; `90s`, `30m`, `2h`;
 a number alone is minutes). Details in [the agent workflow](/docs/agent-workflow#shapewall-watch-the-loop-closes-by-itself).
 
