@@ -103,7 +103,8 @@ export async function engineMode(command, flags, { env = process.env, err = () =
   // agent's process or while `serve` runs.
   if (command === 'export' && flags['no-comments']) {
     const held = (await boardHome(config, { env })).engine
-    if (!held) assertMigrationAllows(config, { local: true })
+    if (held) return { target: null, config, stop: null }
+    assertMigrationAllows(config, { local: true })
     return null
   }
   // watch --no-claim only looks (src/remote/remote-watch.js): the command line's read token, which sees every open
