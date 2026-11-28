@@ -11,6 +11,7 @@ import { workspaceSuspended } from './operator.js'
 import { cleanAgentName, isAgentTint, isBuiltInIcon } from '../agent/identity.js'
 import { AGENT_AUDIENCES, NEEDS } from './permissions.js'
 import { createProjectStore } from './projects.js'
+import { isSoloFolder } from './solo/binding.js'
 import { roleAtLeast, roleIn, tenant, workspacesForUser } from './tenancy.js'
 import { TOKEN_SCOPES } from './tokens.js'
 
@@ -107,8 +108,11 @@ export function mountDeviceApprovals(consoleApi, deps) {
       req.role = role
       const projectStore = createProjectStore(req.t, { db, dataDir, maxProjects: quotas.of(ws).projects })
       req.project = projectStore.get(req.body?.projectId)
-      if (!req.project && !(found.entry.purpose === 'import' && req.body?.newProjectName))
-        throw new HttpError(404, 'unknown_project', 'No such project.')
+      if (!req.project) {
+        if (!(found.entry.purpose === 'import' && req.body?.newProjectName)) throw new HttpError(404, 'unknown_project', 'No such project.')
+        if (isSoloFolder(db))
+          throw new HttpError(403, 'one_project', 'This board serves one project of its owner; it makes no new projects.')
+      }
       const workspace = req.t.get('SELECT name FROM workspaces WHERE workspace_id = :ws')
       // The token and the approval in one transaction: a login is approved
       // once, and a lost race leaves no token behind.
@@ -116,6 +120,8 @@ export function mountDeviceApprovals(consoleApi, deps) {
         if (Array.isArray(req.body?.scopes) && req.body.scopes.includes('import') && found.entry.purpose !== 'import')
           throw new HttpError(403, 'import_login_required', 'This login is not for moving a local project.')
         if (!req.project) {
+          if (isSoloFolder(db))
+            throw new HttpError(403, 'one_project', 'This board serves one project of its owner; it makes no new projects.')
           req.project = projectStore.create({ name: req.body.newProjectName, userId: req.user.id, now: now() })
           auditOf(req, 'project_created', req.project.id)
         }

@@ -261,3 +261,66 @@ test('C R1-3: glob characters in a project path are escaped in the Read deny rul
   assert.ok(deny.includes('Read(//home/me/code/app\\[2\\]/.shapewall/**)'), deny.join(', '))
   assert.ok(deny.includes('Read(//srv/\\{x\\}/a\\*b\\?/.shapewall-auth)'), deny.join(', '))
 })
+
+test('F3: GET /api/v1/boards/:bid/export/comments is gated by cliOnly (refuses watch, agent, and console tokens)', async () => {
+  const { AGENT_TOKEN_FILE, CLI_TOKEN_FILE, WATCH_TOKEN_FILE } = await import('../src/hosted/solo/machine-tokens.js')
+  const { createApiTokens } = await import('../src/hosted/tokens.js')
+  const { createAgentStore } = await import('../src/hosted/agents.js')
+  const { tenant } = await import('../src/hosted/tenancy.js')
+  const { request } = await import('./helpers.js')
+  const config = projectConfig('sec-f3-export-cli')
+  const fake = fakeTailscale()
+  const dataDir = tempDir('sec-f3-export-cli-data')
+  const handle = await startHosted({
+    dataDir,
+    port: 0,
+    out: () => {},
+    exitOnStop: false,
+    origin: (port) => `http://f3-test-abcdefghijklmn.shapewall.localhost:${port}`,
+    solo: {
+      signIn: 'local',
+      config,
+      configPath: config.file,
+      ownerName: 'Robin Tester',
+      localAgent: { name: 'Local', kind: 'claude', icon: 'sparkle', tint: 'coral', machine: null },
+      team: fakeTeam(fake),
+    },
+  })
+  stops.push(() => handle.stop())
+  const port = handle.server.address().port
+  const host = new URL(handle.origin).host
+  const { owner } = handle.app.locals.solo
+  const t = tenant(handle.db, owner.workspaceId)
+  const createToken = createApiTokens({
+    iso: () => new Date().toISOString(),
+    auditOf: () => {},
+    agentsFor: (th) => createAgentStore(th, { origin: handle.origin }),
+  })
+  const consoleAgentToken = createToken(
+    { t, project: { id: owner.projectId }, user: { id: owner.userId } },
+    { name: 'Console Agent', scopes: ['read', 'claim'] },
+  ).token
+  const call = (token, url) =>
+    request(port, 'GET', '/api/v1' + url, { headers: { Host: host, Authorization: 'Bearer ' + token } }).then((answer) => ({
+      ...answer,
+      json: JSON.parse(answer.text || 'null'),
+    }))
+  const cliToken = fs.readFileSync(path.join(dataDir, CLI_TOKEN_FILE), 'utf8').trim()
+  const watchToken = fs.readFileSync(path.join(dataDir, WATCH_TOKEN_FILE), 'utf8').trim()
+  const agentToken = fs.readFileSync(path.join(dataDir, AGENT_TOKEN_FILE), 'utf8').trim()
+
+  for (const [label, tok] of [
+    ['watch.token', watchToken],
+    ['agent.token', agentToken],
+    ['console agent token', consoleAgentToken],
+  ]) {
+    for (const url of ['/boards/sample/export/comments', '/boards/sample/export/comments?guests=1']) {
+      const answer = await call(tok, url)
+      assert.equal(answer.status, 403, `${label} ${url}: ${answer.text}`)
+      assert.equal(answer.json?.error?.code, 'owner_command_line')
+    }
+  }
+  const allowed = await call(cliToken, '/boards/sample/export/comments')
+  assert.equal(allowed.status, 200, allowed.text)
+  assert.ok(Array.isArray(allowed.json.comments))
+})

@@ -84,3 +84,108 @@ test('the solo engine prunes nothing on its first start, and to keepVersions on 
     await hosted.close()
   }
 })
+
+test('F12: headless engine commands never consume solo_retention or prune migrated 1.x versions before first serve', async () => {
+  const { loadConfig } = await import('../src/config.js')
+  const { autoMigrate } = await import('../src/cli/serve-command.js')
+  const { startEngineHeadless } = await import('../src/hosted/ops-cli.js')
+  const { startHosted } = await import('../src/hosted/server.js')
+  const { engineDir } = await import('../src/engine-folder.js')
+  const { openDatabase } = await import('../src/hosted/db.js')
+  const { getState } = await import('../src/hosted/rebind.js')
+  const { readSoloBinding } = await import('../src/hosted/solo/binding.js')
+  const { SAMPLE, isolatedEnv, tempDir } = await import('./helpers.js')
+
+  const dir = tempDir('f12-headless-retention')
+  const file = path.join(dir, 'shapewall.config.json')
+  fs.writeFileSync(file, JSON.stringify({ ...structuredClone(SAMPLE), keepVersions: 3 }, null, 2))
+  const config = loadConfig(file)
+  writeLocalCaptures(config, 'sample')
+  const vDir1x = path.join(config.outputDir, 'sample', 'versions')
+  fs.mkdirSync(vDir1x, { recursive: true })
+  for (let i = 1; i <= 8; i += 1)
+    for (const suffix of ['png', 'thumb.png', 'html'])
+      fs.writeFileSync(path.join(vDir1x, `home.desktop.2026110${i}T100000000Z-ab12.${suffix}`), 'x')
+
+  const env = isolatedEnv('f12-env', { SHAPEWALL_USER_NAME: 'Robin Tester' })
+  assert.equal((await autoMigrate(config, () => {}, { env })).migrated, true)
+  const data = engineDir(config.outputDir)
+
+  // Two headless engine starts (as comments/mcp would run): 0 versions pruned, solo_retention untouched.
+  for (let run = 0; run < 2; run += 1) {
+    const h = await startEngineHeadless(config, { env })
+    await h.stop()
+  }
+  const db = await openDatabase(path.join(data, 'shapewall.db'))
+  const bound = readSoloBinding(db)
+  assert.equal(getState(db, 'solo_retention'), null, 'headless starts did not consume first-start skip')
+  const engineVersionsDir = path.join(data, 'files', bound.workspaceId, bound.projectId, 'sample', 'versions')
+  const count = () => fs.readdirSync(engineVersionsDir).filter((name) => name.endsWith('.png') && !name.endsWith('.thumb.png')).length
+  assert.equal(count(), 8)
+  db.close()
+
+  // First real serve start: skips pruning once and records solo_retention.
+  const firstServe = await startHosted({
+    dataDir: data,
+    port: 0,
+    out: () => {},
+    exitOnStop: false,
+    origin: (p) => `http://f12-test-abcdefghijklmn.shapewall.localhost:${p}`,
+    solo: { signIn: 'local', config, configPath: config.file, ownerName: 'Robin Tester' },
+  })
+  assert.equal(count(), 8, 'first real serve preserves all migrated 1.x versions')
+  assert.ok(getState(firstServe.db, 'solo_retention'))
+  await firstServe.stop()
+
+  // Second real serve start: now trims to keepVersions (3).
+  const secondServe = await startHosted({
+    dataDir: data,
+    port: 0,
+    out: () => {},
+    exitOnStop: false,
+    origin: (p) => `http://f12-test-abcdefghijklmn.shapewall.localhost:${p}`,
+    solo: { signIn: 'local', config, configPath: config.file, ownerName: 'Robin Tester' },
+  })
+  assert.equal(count(), 3)
+  await secondServe.stop()
+})
+
+test('F12: pruneBoard skips boards with an active board-job lock, and startRetention passes now into runRetention', async () => {
+  const { acquireBoardJob } = await import('../src/board-job.js')
+  const { hosted, dir, setKeep, count } = await fixture('solo-retention-lock')
+  try {
+    setKeep(3)
+    const boardFolder = path.dirname(dir)
+    const projectOutputDir = path.dirname(boardFolder)
+    const lock = acquireBoardJob({ outputDir: projectOutputDir }, 'sample', 'capture')
+    assert.equal(lock.ok, true)
+    try {
+      const skipped = runRetention({ db: hosted.db, dataDir: hosted.dataDir, solo: true })
+      assert.equal(skipped.files, 0, 'active capture lock skips pruning')
+      assert.equal(count(), 8)
+    } finally {
+      lock.release()
+    }
+    // Verify startRetention passes injected `now` into runRetention (old usage row pruned relative to `now`).
+    const ws = hosted.db.prepare('SELECT id FROM workspaces LIMIT 1').get().id
+    const projectId = hosted.db.prepare('SELECT id FROM projects LIMIT 1').get().id
+    const oldAt = '2025-01-01T00:00:00.000Z'
+    hosted.db
+      .prepare(
+        `INSERT INTO agent_runs (workspace_id, project_id, id, kind, board_id, started_at, ended_at)
+         VALUES (?, ?, 'run_old', 'chat', 'sample', ?, ?)`,
+      )
+      .run(ws, projectId, oldAt, oldAt)
+    assert.equal(hosted.db.prepare('SELECT COUNT(*) AS n FROM agent_runs').get().n, 1)
+    startRetention({
+      db: hosted.db,
+      dataDir: hosted.dataDir,
+      solo: false,
+      now: () => new Date('2027-06-01T00:00:00.000Z'),
+    })()
+    assert.equal(hosted.db.prepare('SELECT COUNT(*) AS n FROM agent_runs').get().n, 0, 'now passed through to usage prune')
+    assert.equal(count(), 2)
+  } finally {
+    await hosted.close()
+  }
+})

@@ -58,7 +58,7 @@ const REFUSED = {
   'no-identity': 'there are no paired devices on the solo engine',
   'no-remote-chat': 'there are no paired devices on the solo engine',
   'approve-on-host': 'there are no paired devices on the solo engine',
-  accounts: 'the solo engine has one owner; shapewall migrate moves local passkey accounts (experimental)',
+  accounts: 'the solo engine has one owner; shapewall migrate moves local passkey accounts',
   'accounts-origin': 'the solo engine has one owner',
   'buzz-bridge': 'not on the solo engine yet',
   'agent-acp': 'agents connect to the solo engine with SHAPEWALL_REMOTE=<its address> shapewall agent connect',
@@ -316,58 +316,63 @@ export async function serveEngine(flags, out, options = {}) {
         /* gone already */
       }
     })())
-  handle.stop = async (code) => {
+  handle.stop = async (code, stopOptions) => {
     try {
       await holder.beforeStop()
-      return await stopEngine(code)
+      return await stopEngine(code, stopOptions)
     } finally {
       release()
       process.off('exit', release)
     }
   }
   holder.stop = handle.stop
-  const { boardUrl, tokenFiles = {}, waitingOk } = handle.app.locals.solo
-  // serve.json (0600): where the engine answers and which 0600 file holds the command line's token, so
-  // `comments`, `watch`, `mcp` and `export` in this folder read the engine and not the 1.x JSON files (G15,
-  // src/engine-target.js). The token itself is never in it.
-  fs.writeFileSync(
-    stateFile(dir),
-    `${JSON.stringify({
-      port: handle.server.address().port,
-      origin: handle.origin,
-      url: boardUrl,
-      pid: process.pid,
-      start: processStartTime(process.pid),
-      tokens: Object.fromEntries(Object.entries(tokenFiles).map(([which, file]) => [which, path.basename(file)])),
-      proof: proofKey,
-    })}\n`,
-    { mode: 0o600 },
-  )
-  out(`Shapewall is serving ${config.boards.length} board${config.boards.length === 1 ? '' : 's'} at ${boardUrl} (the solo engine)`)
-  out(`Data: ${dir} (never commit it)`)
-  const waiting = waitingOkLine(waitingOk?.() || 0)
-  if (waiting) out(waiting)
-  // The address goes in the environment, not on the agent's command line: any local user can read a process's
-  // arguments (ps), and the name's random part is one of the layers that keep the cookie in (rev54 N3).
-  out(`Agents: SHAPEWALL_REMOTE=${handle.origin} shapewall agent connect`)
-  if (agentPlan)
-    localAgent = startLocalAgent({
-      config,
-      origin: handle.origin,
-      tokenFile: tokenFiles.agent,
-      plan: agentPlan,
-      env,
-      out,
-      ...(agentSpawn ? { spawnImpl: agentSpawn } : {}),
-    })
-  handle.localAgent = localAgent
-  if (flags.open) {
-    const file = handle.app.locals.soloOpenFile()
-    signIn(file, out, { open: true, spawnImpl, keep: () => handle.app.locals.soloKeepOpenFile(file) })
-  } else if (showLink(flags, env)) {
-    signIn(handle.app.locals.soloOpenFile({ keep: true }), out, { open: false })
-  } else {
-    out('Sign in: run shapewall serve --open (a one-time sign-in page; this output is not a terminal, so none is made).')
+  try {
+    const { boardUrl, tokenFiles = {}, waitingOk } = handle.app.locals.solo
+    // serve.json (0600): where the engine answers and which 0600 file holds the command line's token, so
+    // `comments`, `watch`, `mcp` and `export` in this folder read the engine and not the 1.x JSON files (G15,
+    // src/engine-target.js). The token itself is never in it.
+    fs.writeFileSync(
+      stateFile(dir),
+      `${JSON.stringify({
+        port: handle.server.address().port,
+        origin: handle.origin,
+        url: boardUrl,
+        pid: process.pid,
+        start: processStartTime(process.pid),
+        tokens: Object.fromEntries(Object.entries(tokenFiles).map(([which, file]) => [which, path.basename(file)])),
+        proof: proofKey,
+      })}\n`,
+      { mode: 0o600 },
+    )
+    out(`Shapewall is serving ${config.boards.length} board${config.boards.length === 1 ? '' : 's'} at ${boardUrl} (the solo engine)`)
+    out(`Data: ${dir} (never commit it)`)
+    const waiting = waitingOkLine(waitingOk?.() || 0)
+    if (waiting) out(waiting)
+    // The address goes in the environment, not on the agent's command line: any local user can read a process's
+    // arguments (ps), and the name's random part is one of the layers that keep the cookie in (rev54 N3).
+    out(`Agents: SHAPEWALL_REMOTE=${handle.origin} shapewall agent connect`)
+    if (agentPlan)
+      localAgent = startLocalAgent({
+        config,
+        origin: handle.origin,
+        tokenFile: tokenFiles.agent,
+        plan: agentPlan,
+        env,
+        out,
+        ...(agentSpawn ? { spawnImpl: agentSpawn } : {}),
+      })
+    handle.localAgent = localAgent
+    if (flags.open) {
+      const file = handle.app.locals.soloOpenFile()
+      signIn(file, out, { open: true, spawnImpl, keep: () => handle.app.locals.soloKeepOpenFile(file) })
+    } else if (showLink(flags, env)) {
+      signIn(handle.app.locals.soloOpenFile({ keep: true }), out, { open: false })
+    } else {
+      out('Sign in: run shapewall serve --open (a one-time sign-in page; this output is not a terminal, so none is made).')
+    }
+    return handle
+  } catch (error) {
+    await handle.stop(0, { exit: false }).catch(() => {})
+    throw error
   }
-  return handle
 }

@@ -652,3 +652,34 @@ test('an automatic edit is recorded only while its card fits in the workspace', 
     await builder.link.stop()
   }
 })
+
+test('F6: demoting an admin to member stops their active fix turn and hides further diff cards even when they started the turn', async () => {
+  // Default policy: trustedRoles = ['admin', 'owner']. Bea starts as admin.
+  await setPolicy({ trustedRoles: ['admin', 'owner'], approveNonAdmin: true, dailyClaims: 500, maxOpenClaims: 50 })
+  const shared = await agentWith('DemoteTest', { approvals: 'admins' }, { audience: 'trusted' })
+  const made = await comment(bea, `Demote fix ${fixScript([['edit', 'index.html', 'Hello', 'SECRET-AFTER-DEMOTE']])}`)
+  const beaStream = pressFix(bea, made.id, { agentId: shared.agentId })
+  const pending = await card(made.id, ada)
+  assert.match(pending.diff.preview, /SECRET-AFTER-DEMOTE/)
+
+  // Demote Bea from admin -> member while the turn is running.
+  const beaId = bea.user?.id || hosted.db.prepare("SELECT id FROM users WHERE handle = 'bea'").get().id
+  await fresh(ada)
+  const demoted = await ada.browser.call('PATCH', `/api/workspaces/${ws}/members/${beaId}`, { body: { role: 'member' } })
+  assert.equal(demoted.status, 200, demoted.text)
+  const finished = await beaStream.done
+  assert.equal(finished.final?.state || 'stopped', 'stopped')
+
+  // Stored thread view for Bea must hide the diff even though Bea started the turn.
+  const thread = await bea.browser.get(threadUrl(made.id))
+  assert.equal(thread.status, 200, thread.text)
+  assert.doesNotMatch(thread.text, /SECRET-AFTER-DEMOTE/, 'demoted starter must not see stored diff')
+  const storedCard = thread.json.messages.at(-1)?.cards?.find((item) => item.id === pending.id)
+  if (storedCard) assert.deepEqual([storedCard.diff, storedCard.diffHidden], [null, true])
+
+  // Restore Bea to admin and policy to OPEN_POLICY so teardown/order stays clean.
+  await fresh(ada)
+  assert.equal((await ada.browser.call('PATCH', `/api/workspaces/${ws}/members/${beaId}`, { body: { role: 'admin' } })).status, 200)
+  await setPolicy(OPEN_POLICY)
+  await shared.link.stop()
+})

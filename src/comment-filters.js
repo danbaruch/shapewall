@@ -202,6 +202,7 @@ export function authorFilter(author, { me = null } = {}) {
       match: (item) =>
         !item.authorAgent &&
         !item.authorGuest &&
+        item.byOwner !== false &&
         (item.authorHandle
           ? handles.has(clean(item.authorHandle)) || (!handles.size && names.has(clean(item.author)))
           : names.has(clean(item.author))),

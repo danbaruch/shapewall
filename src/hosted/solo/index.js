@@ -171,7 +171,14 @@ export function mountSolo(app, deps) {
   }
   return {
     async close() {
-      for (const close of closers.reverse()) await close()
+      const steps = closers.splice(0).reverse()
+      for (const close of steps) {
+        try {
+          await close()
+        } catch (error) {
+          deps.log?.(`solo shutdown cleanup failed: ${error?.message || error}`)
+        }
+      }
     },
   }
 }

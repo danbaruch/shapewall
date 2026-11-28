@@ -200,3 +200,62 @@ test('B-20: comments approve --imported asks first, and refuses a command an age
   })
   assert.equal(lines.at(-1), 'Nothing sent.')
 })
+
+test('F4: unapproved 1.x comments strip authorHandle and do not match list_comments({ author: "me" }) until approved', async () => {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+  const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js')
+  const { createRemoteMcpServer } = await import('../src/remote/remote-mcp.js')
+  const { createRemote } = await import('../src/remote/remote.js')
+  const { pinSoloLoopback } = await import('../src/remote/loopback-pin.js')
+  const engine = await startEngine('b20-f4-me')
+  const owner = await ownerBrowser(engine)
+  const { numbers } = await seed(engine, owner)
+  const number = numbers[0]
+  const cliToken = fs.readFileSync(path.join(engine.dataDir, CLI_TOKEN_FILE), 'utf8').trim()
+  const host = new URL(engine.origin).host
+  const api = (method, url, body) =>
+    request(engine.port, method, '/api/v1' + url, { headers: { Host: host, Authorization: 'Bearer ' + cliToken }, body }).then(
+      (answer) => ({ ...answer, json: JSON.parse(answer.text || 'null') }),
+    )
+
+  // Before approval: authorHandle is stripped and byOwner is false.
+  const beforeList = await api('GET', '/boards/sample/comments')
+  assert.equal(beforeList.status, 200, beforeList.text)
+  const beforeItem = beforeList.json.comments.find((item) => item.id === number)
+  assert.equal(beforeItem.byOwner, false)
+  assert.equal(beforeItem.authorHandle, undefined)
+
+  // MCP list_comments({ author: "me" }) returns 0 imported comments before approval.
+  pinSoloLoopback()
+  const remote = createRemote({ origin: engine.origin, token: cliToken })
+  const server = await createRemoteMcpServer({ remote, localAuthor: true })
+  const [a, b] = InMemoryTransport.createLinkedPair()
+  const client = new Client({ name: 'f4-me', version: '1.0.0' })
+  await server.connect(a)
+  await client.connect(b)
+  try {
+    const beforeMcp = JSON.parse((await client.callTool({ name: 'list_comments', arguments: { author: 'me' } })).content[0].text)
+    assert.equal(beforeMcp.count, 0, 'unapproved 1.x comment must not match author: "me"')
+
+    // Approve the 1.x comment via waiting-ok/send.
+    const waiting = await api('GET', '/boards/sample/waiting-ok')
+    assert.equal(waiting.status, 200)
+    const sent = await api('POST', '/boards/sample/waiting-ok/send', {
+      comments: waiting.json.comments.map((item) => ({ number: item.id, dispatchHash: item.dispatchHash })),
+    })
+    assert.equal(sent.status, 200, sent.text)
+
+    // After approval: authorHandle and byOwner are present, and list_comments({ author: "me" }) returns it.
+    const afterList = await api('GET', '/boards/sample/comments/' + number)
+    assert.equal(afterList.json.comment.byOwner, true)
+    assert.ok(afterList.json.comment.authorHandle)
+    const afterMcp = JSON.parse((await client.callTool({ name: 'list_comments', arguments: { author: 'me' } })).content[0].text)
+    assert.equal(afterMcp.count, 2)
+    assert.deepEqual(
+      afterMcp.comments.map((item) => item.id),
+      [numbers[0], numbers[1]],
+    )
+  } finally {
+    await client.close()
+  }
+})

@@ -77,6 +77,8 @@ export function mountTokenApi({
   chat = null,
   // The solo engine (src/hosted/solo): its tokens are its one owner's, on this machine.
   solo = false,
+  // Live config sync shared from the owner's solo app to its team listener (F19).
+  syncBoards = null,
 }) {
   // ---- Token API ----
   const pushOptions = (t) => {
@@ -145,9 +147,17 @@ export function mountTokenApi({
     req.token.scopes.includes(name) ? next() : fail(res, 403, 'missing_scope', `This token does not have the "${name}" scope.`)
   const v1Board = (fn) =>
     handle(async (req, res) => {
+      syncBoards?.(req.project?.id)
       req.ctx = boardContext(req.t, req.project, req.params.bid)
       await fn(req, res, req.ctx)
     })
+  const soloOnly = (req, res, next) => (solo ? next() : fail(res, 404, 'not_found', 'Not on this server.'))
+  // The solo engine only, and only this machine's command-line token (cli.token): never an agent's
+  // (watch.token, agent.token, a connected agent) or a console token, and never on the team listener.
+  const cliOnly = (req, res, next) =>
+    solo && req.token.id === machineTokenId(dataDir, 'cli') && !req.token.scopes.includes('claim')
+      ? next()
+      : fail(res, 403, 'owner_command_line', "Only the owner's own command line on this machine may use this route.")
   // An imported comment's image comes in its own request: 5 MB as base64
   // and its envelope. Batches of comments keep 2 MB.
   v1.use('/boards/:bid/import/images', express.json({ limit: '7mb' }))
@@ -249,7 +259,13 @@ export function mountTokenApi({
         }
       : {}
     const item = {
-      ...feedbackItem(context, { ...comment, ...byOwner, replies: tokenReplies(req, ctx, comment.replies, comment.id) }),
+      ...feedbackItem(context, {
+        ...comment,
+        ...byOwner,
+        // B-20: strip attested authorHandle while an imported comment waits for the owner's OK.
+        ...(comment.waitsForOk ? { authorHandle: null } : {}),
+        replies: tokenReplies(req, ctx, comment.replies, comment.id),
+      }),
       dispatchable: Boolean(comment.dispatchable),
       needsRunApproval: Boolean(comment.needsRunApproval),
       // The agent it was sent to, for a token that may take work: its own
@@ -670,10 +686,10 @@ export function mountTokenApi({
   // /comment-files/<name>?guests=1.
   v1.get(
     '/boards/:bid/export/comments',
+    soloOnly,
+    cliOnly,
     scope('read'),
     v1Board((req, res, ctx) => {
-      // The solo engine only: a team server's guests stay behind ?guests=1 on /comments.
-      if (!solo) return fail(res, 404, 'not_found', 'Not on this server.')
       // Share link guests' text (untrusted, from outside) only with ?guests=1, as on /comments.
       const guests = req.query.guests === '1'
       const comments = ctx.comments
@@ -971,7 +987,6 @@ export function mountTokenApi({
   // note on it (reply scope); a pull request link resolves the comment when
   // it has merged, so it needs the resolve scope, and that merge ends any
   // agent's claim on the comment as a resolve does.
-  const soloOnly = (req, res, next) => (solo ? next() : fail(res, 404, 'not_found', 'Not on this server.'))
   v1.post(
     '/boards/:bid/comments/:cid/github/issue',
     soloOnly,
@@ -1020,10 +1035,6 @@ export function mountTokenApi({
   // text, and never the team listener (team.js keeps machine tokens off it).
   // Each comment is sent with the dispatch hash of the text the command
   // showed the owner; one edited since is left waiting.
-  const cliOnly = (req, res, next) =>
-    solo && req.token.id === machineTokenId(dataDir, 'cli') && !req.token.scopes.includes('claim')
-      ? next()
-      : fail(res, 403, 'owner_command_line', "Only the owner's own command line on this machine sends 1.x comments to agents.")
   v1.get(
     '/boards/:bid/waiting-ok',
     soloOnly,

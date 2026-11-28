@@ -155,6 +155,7 @@ export function teamGuard({ db, dataDir }) {
   guard.put(agentPaths, refuseMachineAgent)
   guard.delete(agentPaths, refuseMachineAgent)
   guard.put(ws + `/projects/:pid/default-agent`, refuseWith('owner_agents', ONLY_OWNER_AGENTS))
+  guard.put(ws + `/projects/:pid/agent`, refuseWith('owner_agents', ONLY_OWNER_AGENTS))
   // This machine's own token rows (cli, watch, agent): not renamed, revoked or narrowed from the tailnet either
   // (2.0 re-check R1-1; revoking the agent's token is the same as removing the agent).
   const refuseMachineToken = (req, res, next) =>
@@ -366,20 +367,45 @@ export function createSoloTeam({
   async function bringUp(httpsPort) {
     const proofModule = await import('../../tailnet-proof.js')
     const ts = await import('../tailscale.js')
+    let active = true
+    let timer = null
     const holder = { handler: null, gate: null }
     const entry = (req, res) => {
-      const pass = () => (holder.handler ? holder.handler(req, res) : res.writeHead(503).end())
-      if (!holder.gate) return res.writeHead(503).end()
+      const pass = () => (active && holder.handler ? holder.handler(req, res) : res.writeHead(503).end())
+      if (!active || !holder.gate || !holder.handler) return res.writeHead(503).end()
       holder.gate.admit(req, res).then(
         (ok) => ok && pass(),
         () => res.writeHead(500).end(),
       )
     }
     const server = await listen(entry)
-    const undo = [() => new Promise((resolve) => server.close(() => resolve()))]
+    const localPort = server.address().port
+    const dropOwnServeRecord = () => {
+      if (readServeRecord(dataDir)?.localPort === localPort) dropServeRecord(dataDir)
+    }
+    let closedServer = null
+    const closeServer = () =>
+      (closedServer ||= new Promise((resolve) => {
+        server.close(() => resolve())
+        server.closeAllConnections?.()
+      }))
+    // Stop admitting new requests/upgrades before cutting sessions, stopping turns, closing the app,
+    // or removing the tailscale serve entry (F17).
+    const stopAccepting = async () => {
+      active = false
+      if (timer) {
+        clearInterval(timer)
+        timer = null
+      }
+      if (holder.gate && !holder.gate.suspended()) holder.gate.suspend('stopping')
+      holder.handler = null
+      await closeServer()
+    }
+    const undo = []
     const unwind = async () => {
-      server.closeAllConnections?.()
-      for (const step of undo.reverse()) await step().catch(() => {})
+      await stopAccepting()
+      const steps = undo.splice(0).reverse()
+      for (const step of steps) await step().catch(() => {})
     }
     try {
       // Before anything is put on the tailnet: this machine must be able to tell tailscaled's connections apart.
@@ -388,10 +414,10 @@ export function createSoloTeam({
       if (refused) throw new SoloTeamError(`Team mode stays off: ${refused}`)
       const secret = proofModule.newServeSecret()
       // Recorded before the entry exists, so a crash at any point after leaves a record the next start acts on.
-      writeServeRecord(dataDir, { httpsPort, localPort: server.address().port })
+      writeServeRecord(dataDir, { httpsPort, localPort })
       const served = await ts
         .startTailscale({
-          localPort: server.address().port,
+          localPort,
           httpsPort,
           secret,
           ...(tailscale.run ? { run: tailscale.run } : {}),
@@ -399,12 +425,12 @@ export function createSoloTeam({
         })
         .catch((error) => {
           // Nothing was left on the tailnet (startTailscale removes what it added when it fails).
-          dropServeRecord(dataDir)
+          dropOwnServeRecord()
           throw new SoloTeamError(`Team mode stays off: ${error.message}`, { cause: error })
         })
       undo.push(async () => {
         const ok = await served.stop()
-        if (ok) dropServeRecord(dataDir)
+        if (ok) dropOwnServeRecord()
         else out('Could not remove the tailscale serve entry team mode added; check tailscale serve status.')
       })
       const first = await served.verify()
@@ -422,14 +448,20 @@ export function createSoloTeam({
           links: ownerApp.locals.chat.links,
           chat: ownerApp.locals.chat.service,
           agentPresence: ownerApp.locals.agentPresence,
+          syncBoards: ownerApp.locals.solo?.boards
+            ? (projectId) => {
+                if (!projectId || projectId === ownerApp.locals.solo.owner.projectId) ownerApp.locals.solo.boards.sync()
+              }
+            : null,
         },
       })
       undo.push(() => app.locals.close())
       const upgrades = new EventEmitter()
       app.locals.presence.attach(upgrades)
       server.on('upgrade', (req, socket, head) => {
+        if (!active || !holder.handler) return socket.destroy()
         gate.admit(req).then(
-          (ok) => (ok ? upgrades.emit('upgrade', req, socket, head) : socket.destroy()),
+          (ok) => (ok && active && holder.handler ? upgrades.emit('upgrade', req, socket, head) : socket.destroy()),
           () => socket.destroy(),
         )
       })
@@ -437,7 +469,9 @@ export function createSoloTeam({
       // The serve entry must stay the only way in, and tailscaled one whose connections can be believed: checked
       // again every half minute, and nobody is believed while it is not so.
       const watch = async () => {
+        if (!active) return
         const issue = await served.verify().catch(() => 'tailscale serve status could not be read')
+        if (!active || state?.gate !== gate) return
         if (issue && !gate.suspended()) {
           out(`Team sign-in is suspended: ${issue}. Nobody is signed in by tailnet identity until this is fixed.`)
           gate.suspend(issue)
@@ -450,10 +484,9 @@ export function createSoloTeam({
         }
       }
       const every = tailscale.watchMs ?? 30_000
-      const timer = every ? setInterval(watch, every) : null
+      timer = every ? setInterval(watch, every) : null
       timer?.unref()
-      undo.push(async () => timer && clearInterval(timer))
-      return { server, served, gate, app, httpsPort, origin: served.origin, unwind, watch }
+      return { server, localPort, served, gate, app, httpsPort, origin: served.origin, stopAccepting, unwind, watch }
     } catch (error) {
       await unwind()
       throw error
@@ -486,35 +519,52 @@ export function createSoloTeam({
     }
   }
 
-  // Turns team mode on; `save` keeps it for the next start. -> status().
-  function start({ httpsPort = readTeamSetting(dataDir).httpsPort, save = true } = {}) {
+  // Turns team mode on (or switches its HTTPS port while already on); `save` keeps it for the next start. -> status().
+  function start({ httpsPort: rawPort = readTeamSetting(dataDir).httpsPort, save = true } = {}) {
     return serial(async () => {
-      if (state) return status()
       if (headless)
         throw new SoloTeamError(
           'Team mode stays off: this engine was started for one command (comments, watch or mcp). Start the board with shapewall serve to share it.',
         )
-      const portProblem = teamPortProblem(httpsPort)
+      const portProblem = teamPortProblem(rawPort)
       if (portProblem) throw new SoloTeamError(portProblem)
+      const httpsPort = Number(rawPort)
+      if (state && state.httpsPort === httpsPort) return status()
+      const previous = state
+      let next
       try {
-        state = await bringUp(httpsPort)
-        problem = null
+        next = await bringUp(httpsPort)
       } catch (error) {
-        problem = error.message
+        if (previous) writeServeRecord(dataDir, { httpsPort: previous.httpsPort, localPort: previous.localPort })
+        else problem = error.message
         throw error
       }
       if (save) {
         try {
           writeTeamSetting(dataDir, { on: true, httpsPort, now })
         } catch (error) {
-          // Not kept, so not on either: the exposure goes again (A-5).
-          const was = state
-          state = null
-          await was.unwind()
+          // Not kept, so not switched either: take down the new listener and restore any prior record (A-5).
+          await next.unwind()
+          if (previous) {
+            writeServeRecord(dataDir, { httpsPort: previous.httpsPort, localPort: previous.localPort })
+            throw new SoloTeamError(
+              'Team mode stayed on port ' + previous.httpsPort + ': its setting could not be saved (' + error.message + ').',
+              {
+                cause: error,
+              },
+            )
+          }
           problem = 'Team mode stays off: its setting could not be saved (' + error.message + ').'
           throw new SoloTeamError(problem, { cause: error })
         }
         saved = true
+      }
+      state = next
+      problem = null
+      if (previous) {
+        await previous.stopAccepting()
+        previous.app.locals.cutTailnetSessions?.()
+        await previous.unwind()
       }
       return status()
     })
@@ -527,6 +577,9 @@ export function createSoloTeam({
       state = null
       problem = null
       if (was) {
+        // Stop accepting requests and suspend the gate before cutting sessions, stopping member turns,
+        // closing the app, and removing the tailscale serve entry (F17).
+        await was.stopAccepting()
         // What a member still has open (live streams) ends now, and so do the turns they started (C-5).
         was.app.locals.cutTailnetSessions?.()
         stopMemberTurns()

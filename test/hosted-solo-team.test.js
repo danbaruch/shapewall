@@ -368,6 +368,8 @@ test('teamGuard refuses what the engine keeps for its owner, whatever the letter
     assert.equal(await answer('PATCH', '/api/workspaces/ws_1/settings', { shareLinks: true }), 403)
     assert.equal(await answer('PATCH', '/API/workspaces/ws_1/Settings', { shareLinks: true }), 403)
     assert.equal(await answer('PUT', '/API/workspaces/ws_1/projects/pr_1/default-agent', { agentId: null }), 403)
+    assert.equal(await answer('PUT', '/api/workspaces/ws_1/projects/pr_1/agent', { trustedRoles: ['member'] }), 403)
+    assert.equal(await answer('PUT', '/API/workspaces/ws_1/projects/pr_1/agent', { trustedRoles: ['member'] }), 403)
     await answer('DELETE', '/api/workspaces/ws_1/invites/iv_1')
     await answer('GET', '/api/workspaces/ws_1')
     await answer('POST', '/api/workspaces/ws_1/projects/pr_1/tokens')
@@ -837,4 +839,238 @@ test('C R1-4: a member made a viewer, or an account deleted, has its running tur
   const gone = await cydBrowser.call('DELETE', '/auth/me', { body: { confirm: handle }, headers: { 'X-Shapewall-Confirm': handle } })
   assert.equal(gone.status, 200, gone.text)
   assert.equal(cyd.cancel, true)
+})
+
+// ---- 2.0 independent review fixes (F1, F2, F6, F16, F17, F19) ----
+
+test('F1/F6: team listener blocks PUT .../projects/:pid/agent and exposes ownerOnlyInvites; owner still updates policy', async () => {
+  const engine = await startEngine('rev-f1-agent-policy', { want: true })
+  const owner = await ownerBrowser(engine)
+  const ws = engine.solo.owner.workspaceId
+  const project = engine.solo.owner.projectId
+  const { browser: ben } = await joinedAs(engine, owner, BEN, 'admin')
+  const confirm = confirmFor(engine)
+
+  assert.equal((await owner.get('/api/workspaces/' + ws)).json.features.ownerOnlyInvites, false)
+  assert.equal((await ben.get('/api/workspaces/' + ws)).json.features.ownerOnlyInvites, true)
+
+  for (const prefix of ['/api', '/API']) {
+    const blocked = await ben.call('PUT', prefix + '/workspaces/' + ws + '/projects/' + project + '/agent', {
+      body: { trustedRoles: ['member', 'admin', 'owner'] },
+      ...confirm,
+    })
+    assert.equal(blocked.status, 403, blocked.text)
+    assert.equal(blocked.json.error.code, 'owner_agents')
+  }
+  const stored = JSON.parse(engine.db.prepare('SELECT agent_policy FROM projects WHERE id = ?').get(project).agent_policy || '{}')
+  assert.equal(stored.trustedRoles, undefined, 'policy was not weakened')
+
+  const ok = await owner.call('PUT', '/api/workspaces/' + ws + '/projects/' + project + '/agent', {
+    body: { trustedRoles: ['member', 'admin', 'owner'] },
+    ...confirm,
+  })
+  assert.equal(ok.status, 200, ok.text)
+  assert.deepEqual(ok.json.policy.trustedRoles, ['member', 'admin', 'owner'])
+})
+
+test('F2: POST /api/device/approve refuses newProjectName on a solo folder even for invited admins', async () => {
+  const engine = await startEngine('rev-f2-device-approve', { want: true })
+  const owner = await ownerBrowser(engine)
+  const ws = engine.solo.owner.workspaceId
+  const { device, browser: ben } = await joinedAs(engine, owner, BEN, 'admin')
+
+  const started = await request(device.port, 'POST', '/api/v1/device/start', {
+    headers: { Host: TAILNET_HOST },
+    body: { name: 'Ben laptop', purpose: 'import' },
+  })
+  assert.equal(started.status, 201, started.text)
+  const userCode = JSON.parse(started.text).userCode
+
+  const approved = await ben.post(
+    '/api/device/approve',
+    { code: userCode, workspaceId: ws, newProjectName: 'Sneaky Project', scopes: ['read', 'import'] },
+    confirmFor(engine),
+  )
+  assert.equal(approved.status, 403, approved.text)
+  assert.equal(approved.json.error.code, 'one_project')
+  assert.equal(engine.db.prepare('SELECT COUNT(*) AS n FROM projects').get().n, 1, 'no new project created')
+})
+
+test('F6: demoting admin -> member stops active turns when agent policy trusts admins/owners only', async () => {
+  const engine = await startEngine('rev-f6-demote', { want: true })
+  const owner = await ownerBrowser(engine)
+  const ws = engine.solo.owner.workspaceId
+  const project = engine.solo.owner.projectId
+  await joinedAs(engine, owner, BEN, 'admin')
+  await joinedAs(engine, owner, CYD, 'admin')
+  const hub = engine.app.locals.chat.hub
+  const benId = userIdOf(engine, BEN.login)
+  const cydId = userIdOf(engine, CYD.login)
+  const benTurn = hub.open({
+    id: 'tu_f6_ben',
+    workspaceId: ws,
+    projectId: project,
+    boardId: 'sample',
+    threadId: 'chat-f6b',
+    agentId: 'ag_none',
+    startedBy: benId,
+  })
+  const cydTurn = hub.open({
+    id: 'tu_f6_cyd',
+    workspaceId: ws,
+    projectId: project,
+    boardId: 'sample',
+    threadId: 'chat-f6c',
+    agentId: 'ag_none',
+    startedBy: cydId,
+  })
+
+  // Default policy trusts ['admin', 'owner']: demoting Ben to member stops Ben's turn immediately.
+  const demoted = await owner.call('PATCH', '/api/workspaces/' + ws + '/members/' + benId, {
+    body: { role: 'member' },
+    ...confirmFor(engine),
+  })
+  assert.equal(demoted.status, 200, demoted.text)
+  assert.equal(benTurn.cancel, true)
+  assert.equal(cydTurn.cancel, false)
+
+  // If the project policy explicitly trusts members, demoting Cyd admin -> member keeps Cyd's turn running.
+  const widen = await owner.call('PUT', '/api/workspaces/' + ws + '/projects/' + project + '/agent', {
+    body: { trustedRoles: ['member', 'admin', 'owner'] },
+    ...confirmFor(engine),
+  })
+  assert.equal(widen.status, 200, widen.text)
+  const demotedCyd = await owner.call('PATCH', '/api/workspaces/' + ws + '/members/' + cydId, {
+    body: { role: 'member' },
+    ...confirmFor(engine),
+  })
+  assert.equal(demotedCyd.status, 200, demotedCyd.text)
+  assert.equal(cydTurn.cancel, false)
+})
+
+test('F16: an in-flight watch() timer resolving after stop/restart never poisons problem on the new instance', async () => {
+  const fake = fakeTailscale()
+  const inner = fake.run
+  let stallWatch = false
+  let releaseWatch = null
+  let stalled = null
+  const stallReached = new Promise((resolve) => {
+    stalled = resolve
+  })
+  fake.run = async (command, args) => {
+    if (stallWatch && args[0] === 'serve' && args[1] === 'status') {
+      stallWatch = false
+      stalled()
+      await new Promise((resolve) => {
+        releaseWatch = resolve
+      })
+      return { code: 1, stdout: '', stderr: 'tailscaled down' }
+    }
+    return inner(command, args)
+  }
+  const engine = await startEngine('rev-f16-watch', { want: true, fake })
+  stallWatch = true
+  const watching = engine.team.watch()
+  await stallReached
+  await engine.team.stop()
+  await engine.team.start()
+  assert.equal(engine.team.status().on, true)
+  assert.equal(engine.team.status().problem, null)
+  releaseWatch()
+  await watching
+  assert.equal(engine.team.status().problem, null, 'stale watch did not poison restarted team mode')
+})
+
+test('F17: stop() suspends the gate and stops accepting requests before served.stop() finishes', async () => {
+  const fake = fakeTailscale()
+  const inner = fake.run
+  let stallOff = false
+  let releaseOff = null
+  let offReachedResolve = null
+  const offReached = new Promise((resolve) => {
+    offReachedResolve = resolve
+  })
+  fake.run = async (command, args) => {
+    if (stallOff && args[0] === 'serve' && args.at(-1) === 'off') {
+      stallOff = false
+      offReachedResolve()
+      await new Promise((resolve) => {
+        releaseOff = resolve
+      })
+    }
+    return inner(command, args)
+  }
+  const engine = await startEngine('rev-f17-stop', { want: true, fake })
+  const teamPort = engine.team.localPort()
+  stallOff = true
+  const stopping = engine.team.stop()
+  await offReached
+  // During served.stop(), the local team listener is already closed / rejecting connections.
+  let gotStatus = null
+  let refused = false
+  try {
+    const answer = await request(teamPort, 'GET', '/api/health')
+    gotStatus = answer.status
+  } catch (error) {
+    refused = error?.code === 'ECONNREFUSED' || error?.code === 'ECONNRESET'
+  }
+  assert.ok(refused || gotStatus === 503, `expected ECONNREFUSED or 503 during served.stop(), got ${gotStatus}`)
+  releaseOff()
+  await stopping
+  assert.equal(engine.team.status().on, false)
+})
+
+test('F19: team.start() coerces string ports, switches ports cleanly while ON, rolls back failed switches, avoids duplicate audits, and syncs live config on the team listener', async () => {
+  const fake = fakeTailscale()
+  const engine = await startEngine('rev-f19-port-sync', { want: true, fake })
+  const owner = await ownerBrowser(engine)
+  const ws = engine.solo.owner.workspaceId
+  const project = engine.solo.owner.projectId
+
+  // String port coercion + seamless port switch 443 -> 8443 while ON.
+  const switched = await engine.team.start({ httpsPort: '8443' })
+  assert.equal(switched.on, true)
+  assert.equal(switched.httpsPort, 8443)
+  assert.equal(switched.origin, `${TAILNET_ORIGIN}:8443`)
+  assert.equal(fake.state.config.Web?.[`${TAILNET_HOST}:443`], undefined, 'old serve entry removed')
+  assert.ok(fake.state.config.Web?.[`${TAILNET_HOST}:8443`], 'new serve entry added')
+  assert.deepEqual(readTeamSetting(engine.dataDir), { on: true, httpsPort: 8443 })
+  assert.deepEqual(readServeRecord(engine.dataDir), { httpsPort: 8443, localPort: engine.team.localPort() })
+
+  // Switching to an occupied port fails cleanly and preserves the existing 8443 listener + serve record.
+  fake.state.config.TCP['9443'] = { HTTPS: true }
+  fake.state.config.Web[`${TAILNET_HOST}:9443`] = { Handlers: { '/': { Proxy: 'http://127.0.0.1:3000' } } }
+  const portBefore = engine.team.localPort()
+  await assert.rejects(engine.team.start({ httpsPort: 9443 }), /already serves port 9443/)
+  assert.equal(engine.team.status().on, true)
+  assert.equal(engine.team.status().httpsPort, 8443)
+  assert.equal(engine.team.status().problem, null)
+  assert.equal(engine.team.localPort(), portBefore)
+  assert.deepEqual(readServeRecord(engine.dataDir), { httpsPort: 8443, localPort: portBefore })
+
+  // Same-port POST /solo/team-switch while already ON does not add a duplicate audit entry.
+  const key = fs.readFileSync(path.join(engine.dataDir, OPEN_KEY_FILE), 'utf8').trim()
+  const host = new URL(engine.ownerOrigin).host
+  const auditsBefore = engine.db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'team_mode_on'").get().n
+  const samePort = await request(engine.port, 'POST', '/solo/team-switch', {
+    body: { on: true, httpsPort: '8443' },
+    headers: { Host: host, 'X-Shapewall-Solo-Key': key },
+  })
+  assert.equal(samePort.status, 200, samePort.text)
+  assert.equal(samePort.json.httpsPort, 8443)
+  assert.equal(engine.db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'team_mode_on'").get().n, auditsBefore)
+
+  // Live config sync on the team listener: switch back to 443 (so engine.device proxy finds :443), invite Ben,
+  // edit shapewall.config.json, and verify Ben sees the updated title on the team listener without owner visiting.
+  await engine.team.start({ httpsPort: 443 })
+  const { browser: ben } = await joinedAs(engine, owner, BEN, 'member')
+  const raw = JSON.parse(fs.readFileSync(engine.config.file, 'utf8'))
+  raw.title = 'Renamed Live Board'
+  // Ensure mtime/size changes cleanly on filesystems with coarse mtime granularity.
+  fs.writeFileSync(engine.config.file, JSON.stringify(raw, null, 2) + '\n')
+  const future = new Date(Date.now() + 2000)
+  fs.utimesSync(engine.config.file, future, future)
+  const boardsRes = await ben.get('/w/' + ws + '/p/' + project + '/api/boards')
+  assert.equal(boardsRes.status, 200, boardsRes.text)
+  assert.equal(boardsRes.json.boards[0].title, 'Renamed Live Board')
 })

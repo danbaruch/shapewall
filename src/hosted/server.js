@@ -176,8 +176,14 @@ export async function startHosted({
   }
   const cleanup = []
   const stopAll = async () => {
-    for (const step of cleanup.reverse()) await step()
-    cleanup.length = 0
+    const steps = cleanup.splice(0).reverse()
+    for (const step of steps) {
+      try {
+        await step()
+      } catch (error) {
+        out(`shutdown cleanup failed: ${error?.message || error}`)
+      }
+    }
   }
   try {
     const { createHostedApp } = await import('./app.js')
@@ -476,7 +482,7 @@ export async function startHosted({
     // (app.locals.appUpdate, the solo engine's self-update) is never cut short:
     // a half-applied install is worse than a slow stop, so no new one starts,
     // a check stops, and the force exit is armed only once the apply settled.
-    const stop = (code = 0) => {
+    const stop = (code = 0, { exit: shouldExit = exitOnStop } = {}) => {
       let exitCode = Number.isInteger(code) ? code : 0
       stopping ||= (async () => {
         try {
@@ -493,7 +499,7 @@ export async function startHosted({
         // An apply finished that needs a restart, and the installer opted in to one (onRestart): exit so the
         // service manager starts the new version, even when the stop came from a signal.
         if (exitCode === 0 && update?.restartPending?.()) exitCode = UPDATE_RESTART_EXIT
-        const force = setTimeout(() => exitOnStop && exit(exitCode), forceExitMs)
+        const force = setTimeout(() => shouldExit && exit(exitCode), forceExitMs)
         force.unref()
         server.closeAllConnections?.()
         shareServer?.closeAllConnections?.()
@@ -502,7 +508,7 @@ export async function startHosted({
         process.off('SIGTERM', onSignal)
         db.close()
         clearTimeout(force)
-        if (exitOnStop) exit(exitCode)
+        if (shouldExit) exit(exitCode)
       })()
       return stopping
     }
