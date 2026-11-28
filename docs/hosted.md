@@ -926,7 +926,8 @@ The exit code is 0 when it is done or there is nothing to do, 1 when it refused 
   progress; after one that was stopped midway, `migrate`, `serve`, `watch` and the engine refuse to start and point at
   `--rollback`. `MIGRATED-TO-2` records each finished run, so a second run does nothing, and the plain `shapewall serve` and
   `watch` refuse the boards that moved (the engine serves them). A migrated board's 1.x folder keeps only a note (a folder
-  named `comments.json` and a file named `chat`), so an older Shapewall started there fails instead of opening an empty board.
+  named `comments.json`, a file named `chat` and a folder named `status.json`), so an older Shapewall started there fails, for
+  comments, chat and captures alike, instead of opening an empty board.
   The comment and chat files it converted move into the backup (`<backup>/converted-<time>/`), not deleted. The engine
   folder gets its `.gitignore` and mode 0700 before the database is made, and the migration refuses an engine folder git
   tracks.
@@ -934,7 +935,14 @@ The exit code is 0 when it is done or there is nothing to do, 1 when it refused 
   and the engine folder as it was before the run (none, if there was none). After a run that was stopped midway it puts back
   only that run, so earlier finished runs and what was made on the engine since stay; `--rollback --all` puts back every run.
   A rollback keeps its own note, `ROLLING-BACK`, while it works: if it is stopped midway, `migrate`, `serve`, `watch`, capture
-  and the engine refuse to start until `shapewall migrate --rollback` runs again and finishes it. Nothing is deleted on the way: what is there now,
+  and the engine refuse to start until `shapewall migrate --rollback` runs again and finishes it. If a backup keeps failing,
+  the message names it; fix what it says and run `--rollback` again, or run `shapewall migrate --rollback --give-up` to end
+  the rollback and keep the folder as it is now (some boards may be back, others not).
+- **A stopped run without its backup.** When the backup of a run that was stopped midway is gone, `--rollback` cannot put it
+  back and says so. `shapewall migrate --abandon` then keeps what the engine has of that run and records it in
+  `MIGRATED-TO-2`; what was left of its boards' 1.x comment and chat files moves to `.shapewall/abandoned-<time>/`. Never
+  delete `MIGRATING-TO-2` by hand: a run whose journal is gone is found again from its backup, and `--rollback` puts back
+  that run only. Nothing is deleted on the way: what is there now,
   with anything made on the engine since, moves aside into `<backup>/replaced-<time>/`. The backups stay until you delete them. To go back to an older Shapewall, roll back
   every run with this version first, then run the older one pinned (`npx shapewall@1 serve`). The whole upgrade: [upgrading from 1.x](upgrading.md).
 - **License.** The planner, the backup and the rollback are part of the Apache 2.0 core (`src/migrate`); only the writer of the

@@ -114,6 +114,11 @@ function githubOf(comment, where, drop) {
   if (comment.github == null) return null
   const raw = comment.github
   const github = cleanGithub(raw)
+  // B-18: a value that is not an object (a string, a list) keeps nothing; said so.
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    drop(`${where}, GitHub links`, 'not the GitHub links Shapewall writes; it stays in the backup')
+    return null
+  }
   if (raw?.issue && !github.issue) drop(`${where}, GitHub issue`, 'not an issue link Shapewall writes; it stays in the backup')
   const pulls = Array.isArray(raw?.pulls) ? raw.pulls.length : 0
   if (pulls > github.pulls.length)

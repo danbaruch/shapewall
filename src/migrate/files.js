@@ -146,10 +146,21 @@ const inodeAt = (file) => inodeOf(fs.lstatSync(file, { bigint: true }))
 // files that were already inside the project. Returns the (dev, ino) of
 // every entry it checked: the restore reads only those (linkTree `known`),
 // so a folder swapped in after this walk (a link in a path, R2-1) is refused.
+//
+// Only what a restore reads is walked (B-16): the backup folder itself,
+// backup.json, the marker copy, boards/ and engine/. What earlier rollbacks
+// and runs set aside in it (replaced-*, converted-*) is never read by a
+// restore, so a link there neither stops this one nor is followed.
+const RESTORE_READS = (name) => name === 'boards' || name === 'engine' || name === 'backup.json' || name === MIGRATED
 export function assertBackupContained(outputDir, dir) {
   const root = fs.realpathSync(outputDir)
-  const links = linksIn(dir)
-  if (links.length) throw new Error(`${path.basename(dir)} holds a symbolic link (${links[0]}); it is not used`)
+  if (isLink(dir)) throw new Error(`${path.basename(dir)} is a symbolic link; it is not used`)
+  const tops = fs.readdirSync(dir).filter(RESTORE_READS)
+  for (const name of tops) {
+    const full = path.join(dir, name)
+    const links = isLink(full) ? [name] : fs.lstatSync(full).isDirectory() ? linksIn(full).map((rel) => `${name}/${rel}`) : []
+    if (links.length) throw new Error(`${path.basename(dir)} holds a symbolic link (${links[0]}); it is not used`)
+  }
   const known = new Set()
   const walk = (full) => {
     const real = fs.realpathSync(full)
@@ -159,7 +170,8 @@ export function assertBackupContained(outputDir, dir) {
     known.add(inodeOf(stat))
     if (stat.isDirectory()) for (const name of fs.readdirSync(full)) walk(path.join(full, name))
   }
-  walk(dir)
+  known.add(inodeOf(fs.lstatSync(dir, { bigint: true })))
+  for (const name of tops) walk(path.join(dir, name))
   return known
 }
 

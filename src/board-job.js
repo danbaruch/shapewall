@@ -20,6 +20,14 @@ export function boardJobFile(config, boardId) {
 
 const kindOf = (lock) => (BOARD_JOB_KINDS.includes(lock?.kind) ? lock.kind : 'capture')
 
+// The lock a push commit holds beside the board folder while it swaps that
+// folder (B-17): the board's own capture.lock moves away with the old folder,
+// so the swap is held from outside it. <outputDir>/<board>.swap.lock.
+export function boardSwapFile(config, boardId) {
+  if (!ID_RE.test(boardId)) throw new Error(`invalid board id ${boardId}`)
+  return path.join(config.outputDir, `${boardId}.swap.lock`)
+}
+
 // The live job on the board, { kind, pid, startedAt }, or null.
 export function readBoardJob(config, boardId) {
   const lock = readLock(boardJobFile(config, boardId))
@@ -42,8 +50,22 @@ export function boardJobBusyMessage(kind, boardId = null) {
 export function acquireBoardJob(config, boardId, kind) {
   if (!BOARD_JOB_KINDS.includes(kind)) throw new Error(`unknown board job ${kind}`)
   const file = boardJobFile(config, boardId)
+  const made = !fs.existsSync(path.dirname(file))
   fs.mkdirSync(path.dirname(file), { recursive: true })
   if (acquireLock(file, { kind })) {
+    // B-17: a push swapping the folder holds the lock beside it. Checked with
+    // our lock held: a swap that started first wins, and the folder this
+    // call made (in the moment between the swap's two renames) goes again.
+    if (isLockLive(readLock(boardSwapFile(config, boardId)))) {
+      releaseLock(file)
+      if (made)
+        try {
+          fs.rmdirSync(path.dirname(file))
+        } catch {
+          /* not empty: someone else's */
+        }
+      return { ok: false, holder: 'push' }
+    }
     // B-1: on the engine's board folders, checked again with the lock held.
     // A migration that started before the lock was taken is refused here; one
     // that starts after sees the lock (migrate's holders() scans the engine).

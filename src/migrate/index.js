@@ -5,6 +5,8 @@
 //   shapewall migrate             backup, rows, files, marker
 //   shapewall migrate --rollback  puts every run back from its backup (after a
 //                                 run stopped midway: that run only; --all for every run)
+//   shapewall migrate --abandon   keeps what a run stopped midway left on the engine (when its
+//                                 backup cannot put it back), and records it as done
 //
 // Order of a run: refuse while anything holds the project (a serve, a
 // capture, a watcher, an agent run, another migration); take each board's
@@ -56,6 +58,7 @@ import {
   restoreBackup,
   stampOf,
   treeDigest,
+  validBoardName,
   writeAtomic,
   writeBackup,
 } from './files.js'
@@ -234,7 +237,7 @@ export async function planMigration(config, { board: only = null, env = process.
     notes.push(`The run ${journal.backup} finished (${MARKER} lists it); its leftover ${JOURNAL} is removed by the next run.`)
   else if (journal)
     problems.push(
-      `An earlier shapewall migrate was stopped midway (${journal.backup}). Run shapewall migrate --rollback to put the folder back as it was, then migrate again. To give up on that run instead, delete ${rel(config, path.join(outputDir, JOURNAL))}.`,
+      `An earlier shapewall migrate was stopped midway (${journal.backup}). Run shapewall migrate --rollback to put that run back (only that run), then migrate again.`,
     )
   if (readRollingBack(outputDir))
     problems.push(
@@ -289,8 +292,13 @@ export async function planMigration(config, { board: only = null, env = process.
       continue
     }
     if (isTombstone(dir)) {
+      // B-15: a run that was stopped with its journal removed by hand. Its
+      // backup still lists the board: --rollback puts back that run only.
+      const from = orphanRuns(config).find((run) => run.record.boards.includes(board.id))
       problems.push(
-        `board ${board.id}: ${rel(config, dir)} holds only the note a migration leaves (the board lives on the solo engine), but ${MARKER} does not list it; run shapewall migrate --rollback to bring it back`,
+        from
+          ? `board ${board.id}: ${rel(config, dir)} holds only the note a migration leaves, but ${MARKER} does not list it (the run in ${from.name} was stopped and its ${JOURNAL} removed). Run shapewall migrate --rollback to put back that run (only that run), then migrate again.`
+          : `board ${board.id}: ${rel(config, dir)} holds only the note a migration leaves, but ${MARKER} does not list it and no backup does. If the board should start again from nothing, move ${rel(config, dir)} aside, then migrate again.`,
       )
       continue
     }
@@ -617,7 +625,7 @@ export async function runMigration(config, plan, { now = new Date(), version = '
     } catch (restoreError) {
       // The journal stays: the next migrate points at --rollback.
       throw new MigrateError(
-        `The migration failed (${error.message}) and putting the folder back failed too (${restoreError.message}). The folder as it was before the run is in ${rel(config, backup)}; run shapewall migrate --rollback to try again. Until then ${rel(config, path.join(outputDir, JOURNAL))} stays; delete it only to give up on that run.`,
+        `The migration failed (${error.message}) and putting the folder back failed too (${restoreError.message}). The folder as it was before the run is in ${rel(config, backup)}; run shapewall migrate --rollback to try again. Until then ${rel(config, path.join(outputDir, JOURNAL))} stays.`,
       )
     }
     clearJournal(outputDir)
@@ -629,11 +637,11 @@ export async function runMigration(config, plan, { now = new Date(), version = '
 
 // What a migrated board's 1.x folder keeps (B-2): its comment file and its
 // chat folder, each replaced by the other kind (a folder named comments.json,
-// a file named chat), with a note. A 1.x Shapewall then fails reading or
+// a file named chat), and a folder named status.json (B-19), with a note. A 1.x Shapewall then fails reading or
 // writing them (EISDIR, ENOTDIR) instead of starting an empty board there.
 // A rollback moves the folder aside like any other. Exported for the tests.
 export const TOMBSTONE_NOTE =
-  'This board moved to the Shapewall solo engine (.shapewall/.engine/). Run shapewall serve with Shapewall 2, or shapewall migrate --rollback to bring the 1.x board back.\n'
+  'This board moved to the Shapewall solo engine (.shapewall/.engine/). Run shapewall serve with Shapewall 2. To bring the 1.x board back, run shapewall migrate --rollback --dry-run with Shapewall 2 first: it shows what a rollback would put back.\n'
 export function isTombstone(dir) {
   try {
     return fs.lstatSync(path.join(dir, 'comments.json')).isDirectory()
@@ -647,6 +655,13 @@ export function writeTombstone(dir) {
   if (!fs.existsSync(note)) fs.writeFileSync(note, TOMBSTONE_NOTE)
   const chat = path.join(dir, 'chat')
   if (!fs.existsSync(chat)) fs.writeFileSync(chat, TOMBSTONE_NOTE)
+  // B-19: a 1.x capture writes status.json (atomically, over a rename) before
+  // anything else, so a folder of that name stops it before any capture lands.
+  const status = path.join(dir, 'status.json')
+  // One the run left in place stays as it is (never deleted).
+  if (!fs.existsSync(status) && !isLink(status)) fs.mkdirSync(status)
+  const statusNote = path.join(status, 'README.txt')
+  if (fs.statSync(status).isDirectory() && !fs.existsSync(statusNote)) fs.writeFileSync(statusNote, TOMBSTONE_NOTE)
 }
 
 // The backups a rollback may use: only those a run of this project recorded
@@ -657,14 +672,35 @@ export function rollbackPlan(config) {
   const named = new Set((readMarker(outputDir)?.runs || []).map((run) => run.backup))
   const journal = readJournal(outputDir)
   if (journal) named.add(journal.backup)
+  const orphans = new Set(orphanRuns(config).map((run) => run.name))
   const runs = []
   const ignored = []
   for (const item of listBackups(outputDir)) {
     if (item.restored) continue
-    if (item.record && named.has(item.name)) runs.push(item)
+    if (item.record && (named.has(item.name) || orphans.has(item.name))) runs.push(item)
     else ignored.push(item.name)
   }
   return { runs: runs.reverse(), ignored }
+}
+
+// The unrestored backups of runs that were stopped and whose journal is gone
+// (removed by hand, as an older message advised): no marker entry, but the
+// backup lists a board whose folder holds a migration's tombstone that the
+// marker does not account for (B-15). Their backup is the board's 1.x copy.
+export function orphanRuns(config) {
+  const outputDir = config.outputDir
+  const marker = readMarker(outputDir)
+  const named = new Set((marker?.runs || []).map((run) => run.backup))
+  const journal = readJournal(outputDir)
+  if (journal) named.add(journal.backup)
+  const done = migratedBoards(marker)
+  return listBackups(outputDir).filter(
+    (item) =>
+      item.record &&
+      !item.restored &&
+      !named.has(item.name) &&
+      item.record.boards.some((id) => !done.has(id) && validBoardName(id) && isTombstone(path.join(outputDir, id))),
+  )
 }
 
 // Whether the engine holds anything of these boards (comments, chat or
@@ -699,10 +735,24 @@ export function rollbackRuns(config, { all = false } = {}) {
   const outputDir = config.outputDir
   const { runs, ignored } = rollbackPlan(config)
   const resumed = readRollingBack(outputDir)
-  if (resumed) return { runs: runs.filter((run) => resumed.backups.includes(run.name)), ignored, resumed: true, only: null }
+  // Resumed from the journal's own list, not the marker: a restore that got as
+  // far as putting the marker back and failed after must still be finished.
+  if (resumed)
+    return {
+      runs: listBackups(outputDir)
+        .filter((item) => item.record && !item.restored && resumed.backups.includes(item.name))
+        .reverse(),
+      ignored,
+      resumed: true,
+      only: null,
+    }
   const journal = readJournal(outputDir)
-  if (all || !journal || finishedJournal(outputDir, journal)) return { runs, ignored, resumed: false, only: null }
-  return { runs: runs.filter((run) => run.name === journal.backup), ignored, resumed: false, only: journal.backup }
+  if (!all && journal && !finishedJournal(outputDir, journal))
+    return { runs: runs.filter((run) => run.name === journal.backup), ignored, resumed: false, only: journal.backup }
+  // A stopped run whose journal is gone (B-15): that run only, too.
+  const orphans = all ? [] : orphanRuns(config).map((run) => run.name)
+  if (orphans.length) return { runs: runs.filter((run) => orphans.includes(run.name)), ignored, resumed: false, only: orphans[0] }
+  return { runs, ignored, resumed: false, only: null }
 }
 
 // Undoes the runs rollbackRuns names, newest first, under its own journal
@@ -728,7 +778,15 @@ export async function rollback(config, { all = false } = {}) {
       { mode: 0o600 },
     )
   for (const run of runs) {
-    restoreBackup(outputDir, run.dir, { engineDir: engineDir(outputDir), marker: MARKER })
+    try {
+      restoreBackup(outputDir, run.dir, { engineDir: engineDir(outputDir), marker: MARKER })
+    } catch (error) {
+      // B-16: the way out when a backup keeps failing, named where it happens.
+      throw new MigrateError(
+        `Putting back ${run.name} failed (${error.message}). ${ROLLING_BACK} stays, so nothing starts on a half-restored folder. Fix what the message names and run shapewall migrate --rollback again; or, to give up the rollback and keep the folder as it is now (some boards may be back, others not), run shapewall migrate --rollback --give-up.`,
+        { cause: error },
+      )
+    }
     restored.push({ backup: run.name, boards: run.record.boards })
   }
   fs.rmSync(journalFile, { force: true })
@@ -754,10 +812,80 @@ export async function rollback(config, { all = false } = {}) {
           ? `The run that was stopped midway (${journal.backup}) stopped while writing its backup, before it changed anything; nothing needs restoring and ${JOURNAL} was removed.`
           : `The run that was stopped midway (${journal.backup}) was already put back; ${JOURNAL} was removed.`
     } else if (noBackup)
-      stuck = `The run that was stopped midway (${journal.backup}) cannot be put back: its backup is ${item ? 'incomplete' : 'gone'}, and the engine already has comments, chat or files of ${boards.join(', ')} from it. ${JOURNAL} stays. Its board folders may be half moved: copy ${boards.map((id) => rel(config, boardDir(config, id))).join(', ')} aside first. Then, to give up on that run and keep what the engine has, delete ${JOURNAL}.`
+      stuck = `The run that was stopped midway (${journal.backup}) cannot be put back: its backup is ${item ? 'incomplete' : 'gone'}, and the engine already has comments, chat or files of ${boards.join(', ')} from it. ${JOURNAL} stays. Its board folders may be half moved: copy ${boards.map((id) => rel(config, boardDir(config, id))).join(', ')} aside first. Then, to keep what the engine has of that run and record it as done, run shapewall migrate --abandon.`
   }
   const left = only ? rollbackPlan(config).runs.map((run) => run.name) : []
   return { restored, ignored, cleared, stuck, ...(left.length ? { kept: left } : {}) }
+}
+
+// --abandon (B-15): a run that was stopped midway and cannot be put back
+// (its backup is gone or incomplete) is kept as the engine has it, and
+// recorded in MIGRATED-TO-2 as done, so the tombstones and the marker agree.
+// What is left of its boards' 1.x comment and chat files moves aside into
+// .shapewall/abandoned-<stamp>/<board>/ (never deleted), and each board
+// folder gets its tombstone. Refused while the backup can still put the run
+// back (then --rollback is the way), and when nothing of it reached the engine.
+export async function abandon(config, { now = new Date(), version = 'dev' } = {}) {
+  const outputDir = config.outputDir
+  const journal = readJournal(outputDir)
+  if (!journal || finishedJournal(outputDir, journal)) throw new MigrateError('Nothing to abandon: no run was stopped midway.')
+  if (readRollingBack(outputDir))
+    throw new MigrateError(`A rollback was stopped midway (${ROLLING_BACK}); finish it first (shapewall migrate --rollback).`)
+  const item = listBackups(outputDir).find((backup) => backup.name === journal.backup)
+  if (item?.record && !item.restored)
+    throw new MigrateError(
+      `The run ${journal.backup} can still be put back from its backup: run shapewall migrate --rollback (it puts back that run only).`,
+    )
+  const boards = (Array.isArray(journal.boards) ? journal.boards : []).filter((id) => validBoardName(id))
+  if (!boards.length) throw new MigrateError(`${JOURNAL} names no board; run shapewall migrate --rollback.`)
+  if (!(await engineHasBoards(outputDir, boards)))
+    throw new MigrateError(
+      `Nothing of the run ${journal.backup} reached the engine; run shapewall migrate --rollback, which removes ${JOURNAL}.`,
+    )
+  const ids = await engineProject(outputDir)
+  const stamp = stampOf(now)
+  const aside = path.join(outputDir, `abandoned-${stamp}`)
+  const moved = []
+  for (const id of boards) {
+    const dir = path.join(outputDir, id)
+    if (isLink(dir)) throw new MigrateError(`${rel(config, dir)} is a symbolic link; move it back in place first`)
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    for (const name of ['comments.json', 'chat']) {
+      const file = path.join(dir, name)
+      if (!fs.existsSync(file) && !isLink(file)) continue
+      if (name === 'comments.json' && isTombstone(dir)) continue
+      if (name === 'chat' && fs.lstatSync(file).isFile() && isTombstone(dir)) continue
+      fs.mkdirSync(path.join(aside, id), { recursive: true, mode: 0o700 })
+      fs.renameSync(file, path.join(aside, id, name))
+      moved.push(`${id}/${name}`)
+    }
+    writeTombstone(dir)
+  }
+  const marker = readMarker(outputDir) || { version: 1, runs: [] }
+  marker.runs.push({
+    stamp: typeof journal.stamp === 'string' ? journal.stamp : stamp,
+    at: now.toISOString(),
+    by: version,
+    backup: journal.backup,
+    engine: ENGINE_DIR,
+    workspace: ids?.workspaceId || null,
+    project: ids?.projectId || null,
+    abandoned: true,
+    boards: Object.fromEntries(boards.map((id) => [id, { abandoned: true }])),
+  })
+  writeAtomic(path.join(outputDir, MARKER), `${JSON.stringify(marker, null, 2)}\n`)
+  clearJournal(outputDir)
+  return { backup: journal.backup, boards, moved, aside: moved.length ? path.basename(aside) : null }
+}
+
+// --rollback --give-up (B-16): ends a rollback that keeps failing, leaving
+// the folder as it is now. Only ROLLING-BACK goes; nothing else is touched.
+export function giveUpRollback(config) {
+  const journal = readRollingBack(config.outputDir)
+  if (!journal && !fs.existsSync(path.join(config.outputDir, ROLLING_BACK)))
+    throw new MigrateError('No rollback was stopped midway; nothing to give up.')
+  fs.rmSync(path.join(config.outputDir, ROLLING_BACK), { force: true })
+  return { backups: journal?.backups || [] }
 }
 
 function withMigrateLock(config, work) {
@@ -817,7 +945,35 @@ export async function migrateCommand(
   }
   if (flags.rollback) {
     if (flags.board) throw new MigrateError('--rollback puts whole runs back; leave out --board.')
+    if (flags.abandon) throw new MigrateError('--abandon and --rollback are two different ways out; pick one.')
   } else if (flags.all) throw new MigrateError('--all goes with --rollback.')
+  else if (flags['give-up']) throw new MigrateError('--give-up goes with --rollback.')
+  if (flags.abandon) {
+    if (flags.board || flags['dry-run']) throw new MigrateError('--abandon takes no --board or --dry-run.')
+    return withMigrateLock(config, async () => {
+      const busy = holders(config)
+      if (busy.length) throw new MigrateError(busy[0])
+      const result = await abandon(config, { now: now(), version })
+      if (json) out(JSON.stringify({ ok: true, abandoned: result }))
+      else {
+        out(`Kept what the engine has of ${result.boards.join(', ')} from the stopped run ${result.backup}; ${MARKER} records it as done.`)
+        if (result.aside)
+          out(`What was left of the 1.x comment and chat files is in ${rel(config, path.join(config.outputDir, result.aside))}.`)
+      }
+      return 0
+    })
+  }
+  if (flags.rollback && flags['give-up']) {
+    return withMigrateLock(config, async () => {
+      const { backups } = giveUpRollback(config)
+      if (json) out(JSON.stringify({ ok: true, gaveUp: backups }))
+      else
+        out(
+          `Gave up the rollback${backups.length ? ` of ${backups.join(', ')}` : ''}; ${ROLLING_BACK} was removed and the folder stays as it is now. shapewall migrate --dry-run shows where it stands.`,
+        )
+      return 0
+    })
+  }
   if (flags.rollback) {
     const ignoredLines = (ignored) =>
       ignored.length ? [`Not used: ${ignored.join(', ')} (no migration of this project recorded it; it stays as it is)`] : []

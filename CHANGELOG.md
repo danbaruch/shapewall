@@ -49,6 +49,10 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
   [Migration 25 and rollback](docs/hosted.md#migration-25-and-rollback). The webhook stays the 1.x server's.
 - `shapewall migrate --rollback --all`: after a run that was stopped midway, `--rollback` puts back only that run; `--all`
   puts back every run, as `--rollback` did before.
+- `shapewall migrate --abandon`: when a run was stopped midway and its backup is gone, keeps what the engine has of it and
+  records it as done (what was left of its 1.x comment and chat files moves to `.shapewall/abandoned-<time>/`).
+  `shapewall migrate --rollback --give-up` ends a rollback that keeps failing and keeps the folder as it is. No message
+  advises deleting `MIGRATING-TO-2` any more.
 - The `create_github_issue` and `link_pull_request` tools of `shapewall mcp` on the solo engine, as on a 1.x board: they ask
   GitHub with this machine's token and record the links on the engine.
 - On the solo engine, the `author` of the MCP tools `reply_to_comment` and `add_comment`, and `comments reply --author` and
@@ -118,7 +122,10 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
   being deleted, so a write that slipped in is kept. Deleting a board in the console is refused (`board_busy`) while a job
   from the terminal holds it; a server backup holds each board's job lock while it pins it, and a push commit holds it
   through the swap. Command-line reads of the engine database no longer leave a copy in the temporary folder when the copy
-  fails, and an engine with no project never falls back to the 1.x folders once boards were migrated.
+  fails, and an engine with no project never falls back to the 1.x folders once boards were migrated. Re-check: a run
+  stopped with its journal removed by hand is found from its backup and put back alone by `--rollback`; a rollback's
+  pre-check no longer walks what earlier rollbacks set aside; a push holds a lock beside the board folder for the whole
+  swap; a 1.x `github` value that is not an object shows as dropped in the plan; the tombstone also stops a 1.x capture.
 - Team mode serves members from a second listener on 127.0.0.1 for the same database, and `tailscale serve` forwards the
   tailnet only to that port. The owner's terminal sign-in, the loopback and same-OS-user checks, this machine's tokens
   (`cli.token`, `watch.token`, `agent.token`) and the owner-only engine features (settings, captures, checks, journeys
