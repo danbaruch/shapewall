@@ -139,8 +139,11 @@ screen size (`--comment`, which wins over `--page`), at one screen size (`--view
 (`--compare staging_prod`). `--follow` opens it following an agent: the board flies to each comment the agent takes and shows the
 before and after of that comment's screen when the agent recaptures it (`--follow` alone: any agent; on a hosted board `--follow ID`
 follows one agent; see [Follow an agent](/docs/agent-workflow#follow-an-agent)). `--print` only prints the link; `--json` prints
-`{ url, board, page, comment, viewport, compare, follow, running }` and opens nothing, for agents. A local board uses the running `shapewall serve` (or `SHAPEWALL_BOARD_URL`); when nothing is
-serving it, the link is printed with a reminder to run `shapewall serve`. With `--remote URL` it links to the hosted project the
+`{ url, board, page, comment, viewport, compare, follow, running }` and opens nothing, for agents. On a 2.0 solo-engine project, it
+uses the running `shapewall serve` address (`http://<project>-<random>.shapewall.localhost:<port>`) and resolves `--comment` through
+the engine (starting it headless for the lookup when no `serve` is running, with `running: false` and a reminder to run
+`shapewall serve`). With `SHAPEWALL_ENGINE=legacy` (or `SHAPEWALL_BOARD_URL`), it uses the 1.x server address. With `--remote URL` it
+links to the hosted project the
 token belongs to. Links carry ids only, never a token. The link format is described in
 [the agent workflow](/docs/agent-workflow#links-to-the-board).
 
@@ -528,13 +531,14 @@ the board's `baseUrl`; `--url` can point anywhere. The variant's id is `--id`, o
 ## shapewall export
 
 ```text
-shapewall export [--out shapewall-export] [--no-comments] [--browser-comments] [--no-index] [--include-checks]
+shapewall export [--out shapewall-export] [--no-comments] [--include-guests] [--browser-comments] [--no-index] [--include-checks]
 ```
 
 Writes a static, read-only copy of the boards that any static host can serve, with compare data for every pair of captured
 environments. Serve the folder to look at it (`npx serve shapewall-export`, or any static web server): opened from disk (`file://`)
 the browser refuses its scripts, and the page says so. The comments are included by default, with their authors and replies, and the
-summary says how many; `--no-comments` leaves them out. `--browser-comments` lets visitors add, resolve and reply to comments that
+summary says how many; `--no-comments` leaves them out. On the solo engine, share-link guest comments and their images are excluded by
+default; pass `--include-guests` to include them. `--browser-comments` lets visitors add, resolve and reply to comments that
 stay in their own browser (IndexedDB). `--no-index` adds a robots `noindex` tag if the client does not have one. An export leaves the
 private diagnostic reports out unless `--include-checks` explicitly asks for them, and the chat's read-aloud voice files out unless
 `--browser-comments` is given.
@@ -658,6 +662,8 @@ Both of those are in [the hosted operator guide](/docs/hosted), and `shapewall <
 | `SHAPEWALL_ACCOUNTS`, `SHAPEWALL_ACCOUNTS_ORIGIN`              | Optional local passkey account gate and fixed origin; [guide](/docs/local-accounts).                                        |
 | `SHAPEWALL_UPDATE_HELPER`, `SHAPEWALL_UPDATE_RESTART`          | Operator-managed manual update helper and explicit restart support; [guide](/docs/updates).                                 |
 | `SHAPEWALL_CONFIG`                                             | Config file to use when `--config` is not given.                                                                            |
+| `SHAPEWALL_ENGINE`                                             | Engine for `serve` and local commands: `hosted` (default) or `legacy` (deprecated 1.x server and files).                    |
+| `SHAPEWALL_PRINT_OWNER_LINK`                                   | `1` prints the solo engine's private owner sign-in link in full, as `serve --print-owner-link`.                             |
 | `SHAPEWALL_ALLOWED_HOSTS`                                      | Extra Host names for `serve`, comma-separated.                                                                              |
 | `SHAPEWALL_BROWSER_CHANNEL`                                    | Browser channel, e.g. `chrome`. Overrides the config.                                                                       |
 | `SHAPEWALL_BROWSER_PATH`                                       | Path to a Chromium-based browser. Overrides the config.                                                                     |
@@ -697,9 +703,10 @@ Every command exits with one of these. A command that has its own meaning for on
 
 ## Deprecated spellings
 
-These still work through 2.x, each with a one-line warning on stderr, and go away in 3.0: `serve --lan` and `serve --accounts`
-(also `SHAPEWALL_ACCOUNTS=1`), the `devices` command (pair through the tailnet with `serve --tailscale`), and
-`starterAgent.testCommand` in the config (set `commands.test`).
+These still work through 2.x, each with a one-line warning on stderr, and go away in 3.0: the 1.x board server
+(`serve --engine legacy` or `SHAPEWALL_ENGINE=legacy`, and any 1.x-only flag such as `--host`, `--tailscale`, `--lan`,
+`--accounts` or `--agent-acp`), `serve --lan` and `serve --accounts` (also `SHAPEWALL_ACCOUNTS=1`), the `devices` command
+(reach the board over your tailnet with `serve --team`), and `starterAgent.testCommand` in the config (set `commands.test`).
 
 ## Removed in 2.0
 
@@ -789,7 +796,7 @@ Commands
       --host ADDR           default 127.0.0.1 (see https://shapewall.com/docs/self-hosting before changing)
       --tailscale[=print]    private HTTPS over Tailscale; =print changes nothing
       --no-identity         pair even devices signed in as the Tailscale owner
-      --lan[=IP|INTERFACE]   pair devices on your network (HTTP cookies can be sniffed; deprecated: use --tailscale)
+      --lan[=IP|INTERFACE]   pair devices on your network (HTTP cookies can be sniffed; deprecated: use --team)
       --tls-cert FILE       with --lan: HTTPS certificate (also --tls-key FILE)
       --no-remote-chat      paired devices cannot use the agent
       --approve-on-host     paired devices cannot approve agent commands
@@ -822,7 +829,7 @@ Commands
       --engine legacy       the 1.x board server (deprecated, removed in 3.0; also $SHAPEWALL_ENGINE=legacy);
                             --host, --lan, --tailscale, --accounts, --agent-acp and the other 1.x-only flags pick it too
   devices list              paired devices and pending requests for this project [--json]
-                            (deprecated: use the tailnet instead, see shapewall serve --help)
+                            (deprecated: use shapewall serve --team instead, see shapewall serve --help)
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request
   devices revoke ID|--all   revoke a device or all devices immediately
@@ -1039,6 +1046,7 @@ Commands
   export                    static read-only copy of the boards, for any static web server
                             (view it with "npx serve shapewall-export"; opening index.html from disk does not work)
       --include-checks      explicitly include private diagnostic reports
+      --include-guests      also include share link guests' comments and images (untrusted; off by default)
       --out DIR             default shapewall-export
       --no-comments         leave comments (their text, authors and replies) out
       --browser-comments    visitors may comment; their comments stay in their own browser

@@ -133,7 +133,7 @@ line run without a shell. The agent runs one with `run_named_command { name }` (
   input, or the line changes, the next run asks again. A command with more inputs than Shapewall checks asks every time.
 - **A local board in place** (edits land in your checkout itself) gets no commands, no shell and no ACP terminal: turn on Work
   on a branch, and commands run in the branch copy.
-- **On macOS, an agent that edits cannot run commands in 1.4.0:** no commands, no shell and no ACP terminal on any tier, since
+- **On macOS, an agent that edits cannot run commands in this release:** no commands, no shell and no ACP terminal on any tier, since
   Shapewall cannot check there where a file write lands once a command has run. The one exception is a solo owner's
   `agent set shell-unsandboxed on` shell, an opt-in that already runs outside every check, with its warning. Read-only turns
   keep their read-only commands in the OS sandbox.

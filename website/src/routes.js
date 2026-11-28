@@ -51,9 +51,9 @@ export const PAGES = [
     path: '/open-source',
     title: 'Licenses and self-hosting: Apache 2.0 and FSL | Shapewall',
     description:
-      'The Shapewall local tool is open source under Apache 2.0. The team server you host yourself is source-available under the Functional Source License.',
+      'The Shapewall CLI, capture and MCP server are open source under Apache 2.0. The board engine and team server are under the Functional Source License.',
     og: 'open-source',
-    alt: 'Shapewall licenses and self-hosting: Apache 2.0 local tool, Functional Source License team server',
+    alt: 'Shapewall licenses and self-hosting: Apache 2.0 CLI, capture and MCP; Functional Source License board engine and team server',
   },
   {
     path: '/changelog',

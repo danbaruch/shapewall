@@ -14,36 +14,36 @@ shapewall.config.json ──► capture (Playwright) ──► .shapewall/<board
                      React Flow client (dist/client)
 ```
 
-| Path                        | Role                                                                                            |
-| --------------------------- | ----------------------------------------------------------------------------------------------- |
-| `src/config.js`             | Loads and validates the config, collecting every problem with its JSON path.                    |
-| `src/capture/capture.js`    | Runs captures: browser contexts per viewport, waits, actions, screenshots, live HTML.           |
-| `src/capture/actions.js`    | Runs page and setup actions (captures and page checks); step-named failures.                    |
-| `src/capture/requests.js`   | The private-host guard, the `block` list and `localStorage` seeds of a capture context.         |
-| `src/capture/live.js`       | The in-page DOM snapshot and the Node-side build of one self-contained HTML document.           |
-| `src/capture/sanitize.js`   | The allowlist HTML and CSS sanitizer every snapshot goes through.                               |
-| `src/lock.js`               | The board-job lock (pid + process start time) and a short file lock for JSON writes.            |
-| `src/store.js`              | File layout, atomic JSON writes, comments, variants, capture versions, capture state.           |
-| `src/links.js`              | Matches the links read from a captured page to configured pages.                                |
-| `src/journeys.js`           | Journeys from the config and the board (journeys.json).                                         |
-| `src/journey-paths.js`      | Branching journeys: fork validation, the step graph, paths. Shared with the client.             |
-| `src/diff.js`               | Pixel diffs between environments (pixelmatch), cached per pair.                                 |
-| `src/server/app.js`         | The Express app: API, capture and live files with their headers, the built client.              |
-| `src/feedback.js`           | Comments as a work list (`shapewall comments`), for people and agents.                          |
-| `src/watch.js`              | `shapewall watch`: claims new comments and hands them to an agent command.                      |
-| `src/mcp.js`                | `shapewall mcp`: the stdio MCP server (comments, replies, status, recapture).                   |
-| `src/png.js`                | A minimal PNG decoder/encoder, to crop a capture around a pin for the MCP server.               |
-| `src/agent/`                | The board chat: config, `/api/agent/*` routes, threads, prompt and quoted data, backends.       |
-| `client/src/chat/`          | The chat panel: threads, streaming Markdown, attachments and crops, voice in, read aloud.       |
-| `src/accounts/`             | Local account storage, shared WebAuthn, recovery, sessions and account activity.                |
-| `src/shared/`               | Shared role and reporting helpers, SQLite utilities and account token primitives.               |
-| `src/hosted/`               | The hosted server (FSL): accounts, workspaces, tenancy, tokens, push, share links, audit.       |
-| `client/src/console/`       | Console (second Vite entry, `dist/console`): hosted accounts, or local Projects and Settings.   |
-| `src/doctor.js`             | `shapewall doctor`: environment checks and the matching browser download.                       |
-| `src/export.js`             | Static, read-only export.                                                                       |
-| `client/src/board/`         | Canvas, layout, nodes, arrows, journeys, compare, before/after, the comments panel.             |
-| `client/src/components/ui/` | The UI kit (Radix + Tailwind): buttons, selects, menus, dialogs, ... (`docs/design-system.md`). |
-| `client/sw.js`              | The board's service worker (app shell only), built into `dist/client/sw.js`.                    |
+| Path                        | Role                                                                                                           |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `src/config.js`             | Loads and validates the config, collecting every problem with its JSON path.                                   |
+| `src/capture/capture.js`    | Runs captures: browser contexts per viewport, waits, actions, screenshots, live HTML.                          |
+| `src/capture/actions.js`    | Runs page and setup actions (captures and page checks); step-named failures.                                   |
+| `src/capture/requests.js`   | The private-host guard, the `block` list and `localStorage` seeds of a capture context.                        |
+| `src/capture/live.js`       | The in-page DOM snapshot and the Node-side build of one self-contained HTML document.                          |
+| `src/capture/sanitize.js`   | The allowlist HTML and CSS sanitizer every snapshot goes through.                                              |
+| `src/lock.js`               | The board-job lock (pid + process start time) and a short file lock for JSON writes.                           |
+| `src/store.js`              | File layout, atomic JSON writes, comments, variants, capture versions, capture state.                          |
+| `src/links.js`              | Matches the links read from a captured page to configured pages.                                               |
+| `src/journeys.js`           | Journeys from the config and the board (journeys.json).                                                        |
+| `src/journey-paths.js`      | Branching journeys: fork validation, the step graph, paths. Shared with the client.                            |
+| `src/diff.js`               | Pixel diffs between environments (pixelmatch), cached per pair.                                                |
+| `src/server/app.js`         | The Express app: API, capture and live files with their headers, the built client.                             |
+| `src/feedback.js`           | Comments as a work list (`shapewall comments`), for people and agents.                                         |
+| `src/watch.js`              | `shapewall watch`: claims new comments and hands them to an agent command.                                     |
+| `src/mcp.js`                | `shapewall mcp`: the stdio MCP server (comments, replies, status, recapture).                                  |
+| `src/png.js`                | A minimal PNG decoder/encoder, to crop a capture around a pin for the MCP server.                              |
+| `src/agent/`                | The board chat: config, `/api/agent/*` routes, threads, prompt and quoted data, backends.                      |
+| `client/src/chat/`          | The chat panel: threads, streaming Markdown, attachments and crops, voice in, read aloud.                      |
+| `src/accounts/`             | Local account storage, shared WebAuthn, recovery, sessions and account activity.                               |
+| `src/shared/`               | Shared role and reporting helpers, SQLite utilities and account token primitives.                              |
+| `src/hosted/`               | The solo engine and hosted team server (FSL): accounts, workspaces, tenancy, tokens, push, share links, audit. |
+| `client/src/console/`       | Console (second Vite entry, `dist/console`): hosted accounts, or local Projects and Settings.                  |
+| `src/doctor.js`             | `shapewall doctor`: environment checks and the matching browser download.                                      |
+| `src/export.js`             | Static, read-only export.                                                                                      |
+| `client/src/board/`         | Canvas, layout, nodes, arrows, journeys, compare, before/after, the comments panel.                            |
+| `client/src/components/ui/` | The UI kit (Radix + Tailwind): buttons, selects, menus, dialogs, ... (`docs/design-system.md`).                |
+| `client/sw.js`              | The board's service worker (app shell only), built into `dist/client/sw.js`.                                   |
 
 ## Capture
 

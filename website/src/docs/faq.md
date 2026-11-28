@@ -63,18 +63,21 @@ message. Text an agent wrote never starts an agent turn. See [when an agent answ
 
 ## Can my team use it together?
 
-Yes, on a server you run. The team server (beta), started with `shapewall hosted`, gives your team accounts (a passkey each, or on your tailnet your tailnet login), workspaces with
-roles, share links and shared boards. Teammates can also chat on the board with Claude Code, connected from the machine that
-has the code (`shapewall agent connect`): by default it reads the project and answers, and does not change files or run commands
-from the board. Other agents are not offered for chat in this release; they take comments through `shapewall watch --remote`. [The hosted guide](/docs/hosted) covers setup.
+Yes. Start alone with `shapewall serve`, then run `shapewall serve --team` to invite teammates over your tailnet to the same board
+(tailnet sign-in, roles, and nothing copied). For an always-on server on your tailnet or your own domain, run the team server (beta)
+with `shapewall hosted`, which adds passkey or tailnet accounts, workspaces with roles, share links and shared boards. Teammates can
+also chat on the board with Claude Code, connected from the machine that has the code (`shapewall agent connect`): by default it
+reads the project and answers, and does not change files or run commands from the board. Other agents are not offered for chat in
+this release; they take comments through `shapewall watch --remote`. [The hosted guide](/docs/hosted) covers setup.
 
 ## Can an agent change my code from a hosted board?
 
 Only when the machine that has the code says so. A connected agent reads and answers by default. Edits are switched on there,
 with `shapewall agent connect --approvals owner` (the person who connected it allows each edit) or `--approvals admins`. Then
 **Fix with** on a comment starts a fix, and each edit the agent asks for is shown on the board as a card with the path and the
-full diff, with Allow and Deny. The server cannot switch this on, and chat messages never edit. A connected Claude Code runs no
-commands from the board in this release. See [the hosted guide](/docs/hosted#edits-from-the-board-the-trust-decision).
+full diff, with Allow and Deny. The server cannot switch this on, and chat messages never edit. A connected Claude Code has no
+shell of its own; when enabled on its machine, it runs only the project's named commands or a sandboxed shell through Shapewall.
+See [what an agent can do](/docs/agent-capabilities) and [the hosted guide](/docs/hosted#edits-from-the-board-the-trust-decision).
 
 ## Where does a fix end up?
 

@@ -71,7 +71,7 @@ function Hero() {
       <Container className="relative flex flex-col pt-10 pb-8 sm:pt-12 lg:pt-14">
         <div className="order-1 mx-auto max-w-4xl text-center">
           <p className="inline-flex items-center gap-2 rounded-full border border-line bg-card py-1 pr-3 pl-1 text-[13px] font-medium text-slate shadow-sm shadow-black/[0.03]">
-            <Badge>{LAUNCHED ? 'Open source' : 'Private early access'}</Badge>
+            <Badge>{LAUNCHED ? 'Free & local-first' : 'Private early access'}</Badge>
             For building with coding agents
           </p>
           <h1 className="mt-6 text-[40px] leading-[1.04] font-extrabold tracking-[-0.035em] text-balance text-ink sm:text-6xl lg:text-[68px]">

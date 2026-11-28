@@ -14,6 +14,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const USER_GUIDES = [
   // The index of the guides below, so a reader of the package can find them.
   'docs/README.md',
+  'docs/agent-capabilities.md',
   'docs/agent-hardening.md',
   'docs/agent-recipes.md',
   'docs/agent-workflow.md',

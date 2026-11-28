@@ -54,6 +54,7 @@ docs cover installing it, configuring your screens, steering your agents and run
 - [Local accounts and profile photos](/docs/local-accounts) and [manual updates](/docs/updates).
 - [Where to run Shapewall](/docs/where-to-run) and [deployment and self-hosting](/docs/self-hosting): a local board or a team
   server, Docker and static exports.
+- [Upgrading from 1.x](/docs/upgrading): what the first 2.0 start moves into the solo engine, backups, rollback and what changed.
 - [Hosted operator guide](/docs/hosted) (beta): run a team server with passkey accounts, workspaces, roles and share links.
 - [Monitoring your server](/docs/monitoring): the health check, logs, opt-in error reports and what to check when something breaks.
 

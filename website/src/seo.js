@@ -13,7 +13,7 @@ const videosFor = (route) => (PAGE_VIDEOS[route.path] || []).map((id) => videoOb
 
 // The version people install: the root package.json, so a release bump reaches the structured data by itself.
 const VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version
-// Two licenses: the local tool (Apache 2.0) and the self-hosted team server in src/hosted (FSL 1.1, Apache 2.0 future).
+// Two licenses: the core (Apache 2.0) and the engine/team server in src/hosted (FSL 1.1, Apache 2.0 future).
 const LICENSES = ['https://www.apache.org/licenses/LICENSE-2.0', 'https://fsl.software/']
 const DEFAULT_ALT = 'The Shapewall logo beside a wall of captured pages'
 export const ogImageAlt = (route) => route.alt || (route.kind === 'doc' ? `Shapewall docs: ${route.nav}` : DEFAULT_ALT)

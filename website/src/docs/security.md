@@ -38,15 +38,26 @@ hosted boards and static exports always use an opaque frame. Hosted live HTML ca
 
 ## The board server
 
-`shapewall serve` has no login, so it protects itself in other ways:
+From 2.0, `shapewall serve` runs the [solo engine](/docs/hosted#the-solo-engine) on `127.0.0.1` for one owner, with no passkey to set up:
 
-- **Loopback only by default.** It binds to 127.0.0.1. Binding elsewhere without a proxy prints a warning.
-- **Host check.** Requests whose `Host` header is not `127.0.0.1`, `localhost` or `[::1]` (or an `--allowed-host` you named) get a 421.
-  This stops DNS rebinding, where a web page points its own domain at your machine to reach local servers.
-- **JSON-only writes.** `POST` and `PATCH` must be `Content-Type: application/json`, which a cross-site form or a no-cors request cannot
-  send. `DELETE` needs a CORS preflight that Shapewall never grants.
+- **Per-project host isolation.** The engine listens on `127.0.0.1` at a random `http://<project>-<random>.shapewall.localhost:<port>`
+  name (live HTML on `uc.<that name>`), so cookies stay isolated per project and web pages cannot guess the host. Requests on any
+  other `Host` (including plain `127.0.0.1`) never get a session cookie, stopping DNS rebinding.
+- **One-owner terminal sign-in.** `serve --open` writes a private (`0600`) one-time sign-in file in `.shapewall/.engine/` that posts a
+  one-time code to the engine, so the code never appears on a command line. The session cookie is `SameSite=Strict`, and every
+  request must arrive directly on loopback with no proxy headers.
+- **OS user check on Linux.** On Linux, the engine checks the peer uid of the connecting loopback socket and refuses connections from
+  other OS users on the same machine, for browser sign-in and machine tokens alike.
+- **Team mode stays separate.** Turning on `shapewall serve --team` ([team mode](/docs/hosted#inviting-people-team-mode)) adds a
+  second listener reached through `tailscale serve` with tailnet sign-in only; owner-only controls and machine tokens stay on your
+  loopback listener.
 - **Narrow inputs.** Stored selectors must match a small grammar (ids, test ids, ARIA labels, nth-of-type steps), so a comment can never
   hold an arbitrary CSS expression. Files are served only by allowlisted names.
+
+The deprecated 1.x board server (`shapewall serve --engine legacy`, removed in 3.0) has no login by default and relies on binding to
+`127.0.0.1`, a `Host` header check (`127.0.0.1`, `localhost`, `[::1]` or `--allowed-host`, else 421), JSON-only writes (`POST` and
+`PATCH` require `Content-Type: application/json`, and `DELETE` requires a CORS preflight Shapewall never grants), and the same narrow
+input rules.
 
 ## Agents
 
@@ -195,8 +206,9 @@ What these protections do not cover:
 - **Starter agent approvals cover manifests and configs.** Changing test files or installed dependencies changes what the tests run
   without a new approval. An allowed host behind a shared CDN may accept domain fronting, and hosts added with `--allow-host` or
   `--registry` may resolve to private addresses. The image base is pinned by tag, not digest.
-- **`shapewall mcp` trusts the agent that calls it.** A local MCP agent can sign replies with any author name, and @mentions in its
-  replies wake other agents. In `mcp --remote`, the agent, not the operator, chooses whether to include guest comments.
+- **`shapewall mcp` trusts the agent that calls it.** Replies and comments sent through MCP or an agent token are marked with
+  `authorAgent` and never wake other agents (breaking agent-to-agent loops), though a local MCP agent can still choose its display
+  label. In `mcp --remote`, the agent, not the operator, chooses whether to include guest comments.
   `list_comments` returns up to 200 comments per call (50 by default), and a full-size image is the whole capture. The `files` paths in
   results are absolute local paths the agent reads with its own file access.
 - **GitHub issues copy the comment.** With GitHub connect on, creating an issue copies the comment text and the screenshot link into

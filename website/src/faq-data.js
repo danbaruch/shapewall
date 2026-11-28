@@ -46,6 +46,6 @@ export const FAQ = [
   },
   {
     q: 'Can my team use it together?',
-    a: 'Yes, on a server you host. The team server (beta), started with shapewall hosted, adds accounts (a passkey each, or on your tailnet just your tailnet login), workspaces with owner, admin, member and viewer roles, live presence, and read-only share links. Captures run on your machines and upload to your server.',
+    a: 'Yes. Start alone and run shapewall serve --team to invite teammates over your tailnet to the same board, with tailnet sign-in and nothing copied. For an always-on server, shapewall hosted (beta) adds passkey or tailnet accounts, workspaces with owner, admin, member and viewer roles, live presence, and read-only share links.',
   },
 ]
