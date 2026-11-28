@@ -128,14 +128,13 @@ export function fitWholeViewport(nodes, box, { padding = FIT_OPTIONS.padding, to
   if (!box?.width || !box?.height || !nodes?.length) return null
   const bounds = boundsOf(nodes)
   if (!bounds?.width || !bounds?.height) return null
-  // When top > 0 (CanvasNotes, FollowBar, PresenceBar), reserve START_TOP_BASE + top so height-constrained
-  // boards never push the first group label behind the top bars.
+  // When top > 0 (CanvasNotes, FollowBar, PresenceBar), reserve START_TOP_BASE + top as the top clearance so
+  // height-constrained boards never push the first group label behind the top bars; only apply `padding` at the
+  // bottom (1 + padding) instead of double-charging top padding on top of `above`.
   const above = top > 0 ? START_TOP_BASE + top : LABEL_ROOM
   const availH = Math.max(1, box.height - above)
-  const zoom = Math.max(
-    MIN_ZOOM,
-    Math.min(maxZoom, box.width / (bounds.width * (1 + 2 * padding)), availH / (bounds.height * (1 + 2 * padding))),
-  )
+  const heightSpan = bounds.height * (1 + (top > 0 ? padding : 2 * padding))
+  const zoom = Math.max(MIN_ZOOM, Math.min(maxZoom, box.width / (bounds.width * (1 + 2 * padding)), availH / heightSpan))
   const x = (box.width - bounds.width * zoom) / 2 - bounds.x * zoom
   const centred = above + Math.max(0, availH - bounds.height * zoom) / 2 - bounds.y * zoom
   const fromTop = START_TOP_BASE + top - bounds.y * zoom
