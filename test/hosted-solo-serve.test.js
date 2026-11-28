@@ -399,8 +399,11 @@ test('--read-only and --no-chat: the board API refuses writes and chat, the comm
   info.res.json({ title: 'x' })
   assert.deepEqual(info.body, { title: 'x', readOnly: true })
   const noChat = soloFlagGate({ chat: false })
-  assert.equal(run(noChat, 'POST', '/w/ws1/p/p1/api/boards/sample/threads').body.error.code, 'chat_off')
-  assert.equal(run(noChat, 'GET', '/w/ws1/p/p1/api/boards/sample/permissions/abc').body.error.code, 'chat_off')
+  // The chat router's real paths (chat-routes.js, mounted at <board API>/agent), by any letter case (2.0 re-check R1-2).
+  assert.equal(run(noChat, 'POST', '/w/ws1/p/p1/api/agent/boards/sample/threads').body.error.code, 'chat_off')
+  assert.equal(run(noChat, 'GET', '/w/ws1/p/p1/api/agent/boards/sample/threads/chat-1/stream').body.error.code, 'chat_off')
+  assert.equal(run(noChat, 'GET', '/w/ws1/p/p1/api/agent/boards/sample/permissions/abc').body.error.code, 'chat_off')
+  assert.equal(run(noChat, 'POST', '/w/ws1/p/p1/api/Agent/Boards/sample/Batch').body.error.code, 'chat_off')
   assert.equal(run(noChat, 'POST', '/w/ws1/p/p1/api/boards/sample/comments').next, true)
 })
 

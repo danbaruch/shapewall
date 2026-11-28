@@ -224,7 +224,8 @@ export function issueContent(settings, boardId, item, { screenshots = true } = {
   const where = item.page ? item.page.title : `Variant: ${item.variant?.title || 'removed'}`
   const text = commentText({ body: item.body, images: item.files?.images, drawing: item.drawing })
   const first = text.split('\n')[0].replace(/\s+/g, ' ').trim()
-  const title = `${where}: ${first.length > 90 ? `${first.slice(0, 89)}...` : first}`.slice(0, 200)
+  // Quiet in the title too (C R1-5): GitHub does not notify there, but it shows the text as written.
+  const title = quiet(`${where}: ${first.length > 90 ? `${first.slice(0, 89)}...` : first}`).slice(0, 200)
   const crop = aroundRect(item.position, item.viewport)
   const shot = screenshots ? screenshotLink(settings, boardId, item) : null
   const shotText = shot
@@ -235,7 +236,8 @@ export function issueContent(settings, boardId, item, { screenshots = true } = {
   const lines = [
     ...text.split('\n').map((line) => `> ${quiet(line)}`),
     '',
-    `-- ${quiet(item.author)}, on Shapewall comment #${item.id}`,
+    // A share link guest chose their own name (C R1-1): said, as the comment list says it.
+    `-- ${quiet(item.author)}${item.authorGuest ? ' (share link guest, unverified name)' : ''}, on Shapewall comment #${item.id}`,
     '',
     item.page
       ? `**Page:** [${item.page.title}](${item.page.url}) (${code(item.page.path)}), ${item.viewport.name} ${item.viewport.width}x${item.viewport.height}`
@@ -357,7 +359,10 @@ export function localGithubStore(config) {
 // the address `shapewall serve` uses (the default port), since an engine
 // started just for this command is gone when it ends. `syncFile`: the sync
 // state, in the engine's project folder (src/cli/board-home.js).
-export function engineGithubStore(remote, config, { syncFile = null } = {}) {
+// `guests`: whether share link guests' comments are in reach. The owner's own `shapewall github` (CLI and sync) keeps
+// them; `shapewall mcp` (an agent, 2.0 final review C R1-1) passes false, so a guest's text reaches GitHub only when the
+// owner files it, and the agent is told guest_comment.
+export function engineGithubStore(remote, config, { syncFile = null, guests = true } = {}) {
   const asComment = async (work) => {
     try {
       return await work()
@@ -380,15 +385,15 @@ export function engineGithubStore(remote, config, { syncFile = null } = {}) {
     },
     comment: (boardId, commentId) =>
       asComment(async () => {
-        const { comment } = await remote.comment(boardId, commentId, { guests: true })
+        const { comment } = await remote.comment(boardId, commentId, { guests })
         return { comment, item: () => comment }
       }),
-    comments: (boardId) => asComment(async () => (await remote.comments(boardId, { status: 'all', guests: true })).comments),
+    comments: (boardId) => asComment(async () => (await remote.comments(boardId, { status: 'all', guests })).comments),
     setIssue: (boardId, commentId, issue) =>
-      asComment(async () => (await remote.githubIssue(boardId, commentId, issue, { guests: true })).comment),
+      asComment(async () => (await remote.githubIssue(boardId, commentId, issue, { guests })).comment),
     recordPull: (boardId, commentId, pull, { via }) =>
       asComment(async () => {
-        const { comment, changed, merged } = await remote.githubPull(boardId, commentId, pull, { via, guests: true })
+        const { comment, changed, merged } = await remote.githubPull(boardId, commentId, pull, { via, guests })
         return { comment, changed: Boolean(changed), merged: Boolean(merged) }
       }),
   }

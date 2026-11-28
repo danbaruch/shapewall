@@ -802,7 +802,8 @@ export async function createRemoteMcpServer({
     )
   }
   if (canGithub) {
-    const store = engineGithubStore(remote, config)
+    // Never a share link guest's comment (C R1-1): the agent gets guest_comment; the owner files those with shapewall github.
+    const store = engineGithubStore(remote, config, { guests: false })
     if (scopes.has('reply'))
       server.registerTool(
         'create_github_issue',

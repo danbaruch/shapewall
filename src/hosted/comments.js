@@ -371,7 +371,7 @@ export function createCommentStore(t, projectId, boardId) {
       ...(author.guest ? { guest: true } : {}),
       ...(author.guest && author.shareId ? { share: author.shareId } : {}),
       ...(!author.guest && author.userId ? { user: author.userId } : {}),
-      ...(author.agent && author.tokenId ? { token: author.tokenId } : {}),
+      ...((author.agent || author.viaToken) && author.tokenId ? { token: author.tokenId } : {}),
       body,
       createdAt: now.toISOString(),
       ...(images.length ? { images } : {}),
@@ -473,11 +473,15 @@ export function createCommentStore(t, projectId, boardId) {
   // resolves an open comment (the pull request becomes its fix reference,
   // resolution "Merged in pull request #N (title).") and adds a reply from
   // "github", as on a local board. -> { comment, changed, merged }.
-  function recordGithubPull(number, pull, { via = 'manual' } = {}, now = new Date()) {
+  // `beforeResolve(row)`: runs when this merge would resolve the comment, before anything is written (the token
+  // API's claim and running-fix checks; a throw changes nothing). `tokenId`: the token that said so, kept on the
+  // "github" reply (stored only, never shown).
+  function recordGithubPull(number, pull, { via = 'manual', tokenId = null, beforeResolve = null } = {}, now = new Date()) {
     githubWithPull(null, pull, { via, now })
     const row = get(number)
     const step = githubWithPull(parseJson(row.github), pull, { via, now })
     if (!step) return { comment: rowToComment(row), changed: false, merged: false }
+    if (step.merging && row.status === 'open') beforeResolve?.(row)
     writeGithub(row, step.github, now)
     if (!step.merging) return { comment: rowToComment(rowOf(row.number)), changed: true, merged: false }
     if (row.status === 'open')
@@ -492,7 +496,7 @@ export function createCommentStore(t, projectId, boardId) {
       comment = reply(
         row.number,
         { body: `Merged ${step.label}: ${step.pull.url}`.slice(0, COMMENT_BODY_MAX) },
-        { name: 'github' },
+        { name: 'github', ...(tokenId ? { tokenId, viaToken: true } : {}) },
         now,
       ).comment
     return { comment, changed: true, merged: true }
