@@ -132,7 +132,7 @@ export const COMMAND_FLAGS = {
   auth: AUTH_FLAGS,
   init: ['base-url', 'sitemap', 'no-discover', 'force', 'limit', 'group', 'exclude', 'ci', 'no-agent-docs'],
   sitemap: ['limit', 'group', 'exclude', 'board', 'dry-run', 'json'],
-  migrate: ['dry-run', 'board', 'rollback', 'json'],
+  migrate: ['dry-run', 'board', 'rollback', 'all', 'json'],
   capture: ['board', 'only', 'env', 'json', 'check-external'],
   // Every flag any `checks` action takes; SUBCOMMAND_FLAGS narrows it per action.
   checks: [...new Set([...CHECKS_FLAGS, ...LIGHTHOUSE_FLAGS])],

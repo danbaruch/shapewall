@@ -21,9 +21,9 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { ID_RE } from '../config.js'
-import { ENGINE_DIR, MIGRATED, MIGRATE_LOCK, MIGRATING, engineDir } from '../engine-folder.js'
+import { ENGINE_DIR, MIGRATED, MIGRATE_LOCK, MIGRATING, ROLLING_BACK, engineDir } from '../engine-folder.js'
 import { readLock } from '../lock.js'
 
 function isLink(file) {
@@ -59,6 +59,30 @@ export const MARKER = MIGRATED
 // Written when a run starts, removed when it ends either way: one left
 // behind is a run that was interrupted.
 export const JOURNAL = MIGRATING
+// Written before a rollback restores its first backup, removed when the last
+// one is back (B-4): one left behind is a rollback that was interrupted, and
+// names the backups it was putting back.
+export { ROLLING_BACK }
+
+// A file written whole or not at all (B-10): a temporary file in the same
+// folder, synced, then renamed over. A kill or a full disk leaves the old
+// file (or none), never a cut one.
+export function writeAtomic(file, data, { mode = 0o644 } = {}) {
+  const temp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+  const fd = fs.openSync(temp, 'wx', mode)
+  try {
+    try {
+      fs.writeFileSync(fd, data)
+      fs.fsyncSync(fd)
+    } finally {
+      fs.closeSync(fd)
+    }
+    fs.renameSync(temp, file)
+  } catch (error) {
+    fs.rmSync(temp, { force: true })
+    throw error
+  }
+}
 
 // Folder names under the output directory that are not boards: a board with
 // one of these ids would be migrated into (or over) Shapewall's own folder.
@@ -264,9 +288,9 @@ export function writeBackup(outputDir, { stamp, boards, engineDir, marker, versi
   if (engine) linkTree(engineDir, path.join(dir, 'engine'), { copy: true, mode: PRIVATE })
   const markerFile = path.join(outputDir, marker)
   const hadMarker = fs.existsSync(markerFile)
-  if (hadMarker) fs.copyFileSync(markerFile, path.join(dir, marker))
+  if (hadMarker) writeAtomic(path.join(dir, marker), fs.readFileSync(markerFile))
   const record = { version: 1, stamp, by: version, boards: present, engine, marker: hadMarker, digest: digestOf(outputDir, present) }
-  fs.writeFileSync(path.join(dir, 'backup.json'), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 })
+  writeAtomic(path.join(dir, 'backup.json'), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 })
   return { dir, record }
 }
 
@@ -385,12 +409,12 @@ export function restoreBackup(outputDir, dir, { engineDir, marker }) {
   plain(markerFile, markerFile)
   if (record.marker) {
     plain(path.join(dir, marker), `${path.basename(dir)}/${marker}`)
-    fs.copyFileSync(path.join(dir, marker), markerFile)
+    writeAtomic(markerFile, fs.readFileSync(path.join(dir, marker)))
   } else fs.rmSync(markerFile, { force: true })
   const now = digestOf(outputDir, record.boards)
   const changed = record.boards.filter((board) => JSON.stringify(now[board]) !== JSON.stringify(record.digest?.[board]))
   if (changed.length) throw new Error(`the restored ${changed.join(', ')} does not match the backup byte for byte`)
-  fs.writeFileSync(path.join(dir, 'RESTORED'), `${new Date().toISOString()}\n`)
+  writeAtomic(path.join(dir, 'RESTORED'), `${new Date().toISOString()}\n`)
   return record
 }
 
@@ -406,6 +430,18 @@ export function listBackups(outputDir) {
       record: readBackup(path.join(outputDir, name)),
       restored: fs.existsSync(path.join(outputDir, name, 'RESTORED')),
     }))
+}
+
+// The journal of an interrupted rollback: { version, backups: [name] } or null.
+export function readRollingBack(outputDir) {
+  try {
+    const journal = JSON.parse(fs.readFileSync(path.join(outputDir, ROLLING_BACK), 'utf8'))
+    return journal?.version === 1 && Array.isArray(journal.backups) && journal.backups.every((name) => typeof name === 'string')
+      ? journal
+      : null
+  } catch {
+    return null
+  }
 }
 
 export function readJournal(outputDir) {

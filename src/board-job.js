@@ -9,6 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { ID_RE } from './config.js'
 import { acquireLock, isLockLive, readLock, releaseLock } from './lock.js'
+import { assertMigrationAllows, projectRoot } from './engine-folder.js'
 
 export const BOARD_JOB_KINDS = ['capture', 'checks', 'apply']
 
@@ -40,7 +41,19 @@ export function acquireBoardJob(config, boardId, kind) {
   if (!BOARD_JOB_KINDS.includes(kind)) throw new Error(`unknown board job ${kind}`)
   const file = boardJobFile(config, boardId)
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  if (acquireLock(file, { kind })) return { ok: true, release: () => releaseLock(file) }
+  if (acquireLock(file, { kind })) {
+    // B-1: on the engine's board folders, checked again with the lock held.
+    // A migration that started before the lock was taken is refused here; one
+    // that starts after sees the lock (migrate's holders() scans the engine).
+    if (projectRoot(config.outputDir).engine)
+      try {
+        assertMigrationAllows(config)
+      } catch (error) {
+        releaseLock(file)
+        throw error
+      }
+    return { ok: true, release: () => releaseLock(file) }
+  }
   return { ok: false, holder: readBoardJob(config, boardId)?.kind || 'capture' }
 }
 
