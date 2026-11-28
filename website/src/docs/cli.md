@@ -1039,6 +1039,7 @@ Commands
   export                    static read-only copy of the boards, for any static web server
                             (view it with "npx serve shapewall-export"; opening index.html from disk does not work)
       --include-checks      explicitly include private diagnostic reports
+      --include-guests      also include share link guests' comments and images (untrusted; off by default)
       --out DIR             default shapewall-export
       --no-comments         leave comments (their text, authors and replies) out
       --browser-comments    visitors may comment; their comments stay in their own browser
