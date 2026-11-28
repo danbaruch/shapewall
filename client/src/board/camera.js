@@ -1,5 +1,5 @@
-import { contentExtent } from './contentExtent'
-import { motionDuration } from '../lib/motion'
+import { contentExtent } from './contentExtent.js'
+import { motionDuration } from '../lib/motion.js'
 
 // Camera constants and bounds math for the board canvas.
 
@@ -74,15 +74,20 @@ export const READABLE_ZOOM = 0.34
 const SMALL_BOARD = 12
 const START_MAX_ZOOM = 0.75
 // Screen room above the first group for its label and the canvas notes.
-const START_TOP_BASE = 72
+export const START_TOP_BASE = 72
 const START_LEFT = 40
 
-// While the first-run tip sits at the top of the canvas (CanvasNotes.jsx), the first view leaves this much more room
-// above the board, so the tip never covers the first section's name.
+// While the first-run tip or ImportedOk banner sits at the top of the canvas (CanvasNotes.jsx), the first view leaves
+// this much more room above the board, so it never covers the first section's name.
 export const TIP_ROOM = 48
-// While the Follow bar (FollowBar.jsx, top-14 at the left, under the tip) and the presence chips share the row under
-// the tip, the first view leaves this much room instead, so the bar never covers the first section's name (IC4).
-export const FOLLOW_ROOM = 56
+// While the Follow bar (FollowBar.jsx, top-14 at the left, under CanvasNotes) and PresenceBar (top-14 at the right)
+// share the row under CanvasNotes, leave enough extra room above START_TOP_BASE (72 + 60 = 132px; label top 104px)
+// so neither bar covers the first section's name (IC4).
+export const FOLLOW_ROOM = 60
+// On phones (390x844), CanvasNotes sits at top-3 (~12..68px), PresenceBar at top-14 (~56..110px),
+// and FollowBar below PresenceBar at top-28 (~112..156px).
+export const PHONE_TIP_ROOM = 28
+export const PHONE_FOLLOW_ROOM = 120
 // A group's label sits above its frame (nodes.jsx GroupFrameNode): a centred fit keeps this much above the frames.
 const LABEL_ROOM = 28
 
@@ -123,13 +128,15 @@ export function fitWholeViewport(nodes, box, { padding = FIT_OPTIONS.padding, to
   if (!box?.width || !box?.height || !nodes?.length) return null
   const bounds = boundsOf(nodes)
   if (!bounds?.width || !bounds?.height) return null
-  const above = top + LABEL_ROOM
-  const zoom = Math.max(
-    MIN_ZOOM,
-    Math.min(maxZoom, box.width / (bounds.width * (1 + 2 * padding)), (box.height - above) / (bounds.height * (1 + 2 * padding))),
-  )
+  // When top > 0 (CanvasNotes, FollowBar, PresenceBar), reserve START_TOP_BASE + top as the top clearance so
+  // height-constrained boards never push the first group label behind the top bars; only apply `padding` at the
+  // bottom (1 + padding) instead of double-charging top padding on top of `above`.
+  const above = top > 0 ? START_TOP_BASE + top : LABEL_ROOM
+  const availH = Math.max(1, box.height - above)
+  const heightSpan = bounds.height * (1 + (top > 0 ? padding : 2 * padding))
+  const zoom = Math.max(MIN_ZOOM, Math.min(maxZoom, box.width / (bounds.width * (1 + 2 * padding)), availH / heightSpan))
   const x = (box.width - bounds.width * zoom) / 2 - bounds.x * zoom
-  const centred = above + (box.height - above - bounds.height * zoom) / 2 - bounds.y * zoom
+  const centred = above + Math.max(0, availH - bounds.height * zoom) / 2 - bounds.y * zoom
   const fromTop = START_TOP_BASE + top - bounds.y * zoom
   return { x, y: Math.min(centred, fromTop), zoom }
 }

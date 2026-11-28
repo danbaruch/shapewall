@@ -24,7 +24,7 @@ export async function confirmHostedPasskey() {
 const HOSTED_AGENTS_EVENT = 'shapewall:hosted-agents'
 
 // Text an agent wrote, shown as text: control and direction characters as their codes.
-const plain = (text) =>
+export const plain = (text) =>
   String(text || '').replace(
     // eslint-disable-next-line no-control-regex
     /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g,

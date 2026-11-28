@@ -41,12 +41,16 @@ import { api, wsUrl } from '../lib/api'
 import { ROLE_LABEL, ROLE_SUMMARY, expiryLabel } from '../lib/format'
 import { useAction, useLoad, useToast } from '../state'
 import { useWorkspace } from './workspace'
+import { TeamOnDialog, useTeam } from './team'
 import { invitableRoles } from '../../../../src/shared/permissions.js'
 
 export function InvitesSection() {
-  const { workspaceId } = useWorkspace()
+  const { workspaceId, data, isOwner } = useWorkspace()
+  const { team } = useTeam()
+  const ownerOnlyInvites = Boolean(data.features?.ownerOnlyInvites) && (!isOwner || !team)
   const invites = useLoad(wsUrl(workspaceId, '/invites'))
   const [creating, setCreating] = useState(false)
+  const [teamAsk, setTeamAsk] = useState(false)
   const [revoking, setRevoking] = useState(null)
   const revoke = useAction()
   const toast = useToast()
@@ -58,11 +62,24 @@ export function InvitesSection() {
         title="Invites"
         description="Each link works once, for one person, until it expires. Whoever opens it first joins with its role."
         actions={
-          <Button variant="default" size="touch" onClick={() => setCreating(true)} className="lg:h-9" data-sw-new-invite>
-            <UserPlus size={16} aria-hidden="true" /> New invite
-          </Button>
+          ownerOnlyInvites ? null : (
+            <Button
+              variant="default"
+              size="touch"
+              onClick={() => (team && !team.on ? setTeamAsk(true) : setCreating(true))}
+              className="lg:h-9"
+              data-sw-new-invite
+            >
+              <UserPlus size={16} aria-hidden="true" /> New invite
+            </Button>
+          )
         }
       />
+      {ownerOnlyInvites ? (
+        <Notice tone="info" className="mb-4" data-sw-owner-only-invites>
+          Only the owner invites people to this board, from the machine that runs it.
+        </Notice>
+      ) : null}
       {invites.loading ? <Loading /> : null}
       {invites.error ? <LoadError error={invites.error} onRetry={invites.reload} /> : null}
       {invites.data ? (
@@ -172,6 +189,14 @@ export function InvitesSection() {
           </TabsContent>
         </Tabs>
       ) : null}
+      <TeamOnDialog
+        open={teamAsk}
+        onClose={() => setTeamAsk(false)}
+        onDone={() => {
+          setTeamAsk(false)
+          setCreating(true)
+        }}
+      />
       <InviteDialog open={creating} onClose={() => setCreating(false)} onCreated={invites.reload} />
       <ConfirmDialog
         open={Boolean(revoking)}

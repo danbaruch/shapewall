@@ -16,6 +16,7 @@ import { ROOT_DIR } from './helpers.js'
 
 const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_SHOTS) : null
 const DESKTOP = { viewport: { width: 1440, height: 900 } }
+const SMALL_DESKTOP = { viewport: { width: 1280, height: 768 } }
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }
 let site
 let browser
@@ -77,6 +78,7 @@ const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b
 
 for (const [label, options] of [
   ['desktop', DESKTOP],
+  ['small-desktop', SMALL_DESKTOP],
   ['phone', PHONE],
 ]) {
   for (const tip of ['tip open', 'tip closed']) {
@@ -104,6 +106,20 @@ for (const [label, options] of [
         if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `follow-chip-${label}-${tip.replace(' ', '-')}.png`) })
         assert.ok(box && heading, 'chip and heading on screen')
         assert.ok(!overlaps(box, heading), `chip ${JSON.stringify(box)} over the heading ${JSON.stringify(heading)}`)
+        assert.ok(heading.y >= box.y + box.height - 2, `heading y=${heading.y} should sit below Follow chip bottom=${box.y + box.height}`)
+        // F26: Fit (Shift+1) on desktop preserves top clearance for FollowBar/PresenceBar too.
+        if (label !== 'phone') {
+          await page.locator('[data-sw-canvas]').focus()
+          await page.keyboard.press('Shift+1')
+          await page.waitForTimeout(600)
+          const afterFit = await labels.first().boundingBox()
+          assert.ok(afterFit, 'heading on screen after Shift+1 Fit')
+          assert.ok(!overlaps(box, afterFit), `after Shift+1 Fit: chip ${JSON.stringify(box)} over heading ${JSON.stringify(afterFit)}`)
+          assert.ok(
+            afterFit.y >= box.y + box.height - 2,
+            `after Shift+1 Fit: heading y=${afterFit.y} should sit below Follow chip bottom=${box.y + box.height}`,
+          )
+        }
         assert.deepEqual(errors, [])
       } finally {
         await context.close()

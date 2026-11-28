@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { pinPoint } from '../layout'
-import { FIT_OPTIONS } from '../camera'
+import { FIT_OPTIONS, START_TOP_BASE } from '../camera'
 import { focusViewport, focusZoom, settled } from '../commentFocus'
 import { motionDuration } from '../../lib/motion'
 
@@ -142,6 +142,7 @@ export function usePhoneStartView({
   initialCamera,
   selectedCommentId,
   linkedTarget = false,
+  top = 0,
   canvasRef,
   nodes,
   flow,
@@ -164,10 +165,10 @@ export function usePhoneStartView({
     // Two cards across, or the whole group when it is narrower.
     const span = Math.min(group.width, first.width * 2 + 72 + 2 * (first.position.x - group.position.x))
     const zoom = Math.min(1.5, Math.max(0.05, (box.width - 16) / span))
-    const label = 12 + 44 * Math.max(zoom, 0.45)
+    const label = Math.max(12 + 44 * Math.max(zoom, 0.45), top > 0 ? START_TOP_BASE + top : 0)
     setSettledZoom(null)
     flow.setViewport({ x: 8 - group.position.x * zoom, y: label - group.position.y * zoom, zoom })
-  }, [canvasRef, flow, initialCamera, linkedTarget, nodes, nodesReady, selectedCommentId, setSettledZoom, wide])
+  }, [canvasRef, flow, initialCamera, linkedTarget, nodes, nodesReady, selectedCommentId, setSettledZoom, top, wide])
 }
 
 // Refit the board when its shape changes: switching viewport mode changes

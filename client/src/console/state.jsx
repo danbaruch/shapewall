@@ -300,8 +300,9 @@ export function ReauthProvider({ children }) {
                 data-sw-confirm-typed-input
               />
               <p className="text-xs">
-                Your Tailscale account is the sign-in on this server, so there is no passkey to check. Anything running as you on one of
-                your tailnet devices can do this too.
+                {me?.via === 'local'
+                  ? 'You are signed in locally on this machine, so there is no passkey to check. Type the text above to confirm this change.'
+                  : 'Your Tailscale account is the sign-in on this server, so there is no passkey to check. Anything running as you on one of your tailnet devices can do this too.'}
               </p>
             </form>
           ) : noPasskey ? (

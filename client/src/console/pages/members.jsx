@@ -2,7 +2,7 @@
 // when they were last active. Admins change members and viewers; owners
 // change anyone. Every change asks first; the server enforces the rules.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { MoreHorizontal, Search, ShieldCheck, UserMinus, UserPlus, Users } from 'lucide-react'
 import {
   Button,
@@ -31,14 +31,18 @@ import { TailnetVisitors } from './tailnet'
 import { TeamCard, TeamOnDialog, useTeam } from './team'
 
 export function MembersSection() {
-  const { data, role, isAdmin, workspaceId, reload } = useWorkspace()
+  const { data, role, isAdmin, isOwner, workspaceId, reload } = useWorkspace()
   const { me, refresh } = useSession()
   const toast = useToast()
   const [query, setQuery] = useState('')
   const [inviting, setInviting] = useState(false)
   // The solo engine: with team mode off, Invite people first puts the board on the tailnet (./team.jsx).
   const { team } = useTeam()
+  const ownerOnlyInvites = Boolean(data.features?.ownerOnlyInvites) && (!isOwner || !team)
+  const soloTeam = Boolean(data.features?.team)
   const [teamAsk, setTeamAsk] = useState(false)
+  const [teamRefresh, setTeamRefresh] = useState(0)
+  const bumpTeam = useCallback(() => setTeamRefresh((count) => count + 1), [])
   const [change, setChange] = useState(null) // { member, role }
   const [removing, setRemoving] = useState(null)
   const action = useAction()
@@ -71,6 +75,7 @@ export function MembersSection() {
       setChange(null)
       toast(`${change.member.displayName} is now ${roleInSentence(change.role)}`)
       await reload()
+      bumpTeam()
       if (self) await refresh()
     })
   const confirmRemove = () =>
@@ -92,6 +97,7 @@ export function MembersSection() {
           : `Removed ${removing.displayName}`,
       )
       await reload()
+      bumpTeam()
     })
 
   return (
@@ -117,7 +123,7 @@ export function MembersSection() {
                 <ShieldCheck size={15} aria-hidden="true" /> Roles and permissions
               </Button>
             )}
-            {isAdmin ? (
+            {isAdmin && !ownerOnlyInvites ? (
               <Button
                 size="touch"
                 variant="default"
@@ -131,7 +137,7 @@ export function MembersSection() {
           </>
         }
       />
-      <TeamCard onInvite={() => setInviting(true)} />
+      <TeamCard onStartTeam={() => setTeamAsk(true)} refreshKey={teamRefresh} />
       <TeamOnDialog
         open={teamAsk}
         onClose={() => setTeamAsk(false)}
@@ -140,7 +146,7 @@ export function MembersSection() {
           setInviting(true)
         }}
       />
-      {isAdmin ? <TailnetVisitors /> : null}
+      {isAdmin ? <TailnetVisitors onInvited={bumpTeam} /> : null}
       <Card>
         <div className="border-b border-line p-3 sm:px-5">
           <Input
@@ -164,7 +170,8 @@ export function MembersSection() {
           <ul className="divide-y divide-line" data-sw-members>
             {members.map((member) => {
               const self = member.userId === me.user.id
-              const options = assignableRoles(role, member.role)
+              // The solo engine keeps one owner: nobody else can be promoted to owner.
+              const options = assignableRoles(role, member.role).filter((item) => !(soloTeam && item === 'owner'))
               const removable = !self && canRemoveMember(role, member.role)
               const lastOwner = member.role === 'owner' && owners <= 1
               return (
@@ -277,7 +284,7 @@ export function MembersSection() {
         </Card>
       ) : null}
 
-      <InviteDialog open={inviting} onClose={() => setInviting(false)} />
+      <InviteDialog open={inviting} onClose={() => setInviting(false)} onCreated={bumpTeam} />
       <ConfirmDialog
         open={Boolean(change)}
         onClose={() => setChange(null)}
