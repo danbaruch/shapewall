@@ -60,7 +60,9 @@ server. Once the engine holds the project (after the move, or in a project whose
   (`.shapewall/.engine/files/`), running or not.
 - `export` writes the engine's comments and their images (through its token API) next to its captures; `--no-comments` exports
   the captures only.
-- `github` opens issues and links pull requests for the engine's comments, as on a 1.x board.
+- `github` (`issue`, `link`, `sync`) works on the engine's comments, running or not: it asks GitHub itself, with this machine's
+  token, and records the issue and pull request links through the engine's token API. `migrate` carries a 1.x board's links
+  over. The webhook is the 1.x server's only (`sync` does the same by polling).
 - `share --remote` refuses an engine board. To bring people to it, run `shapewall serve --team`: the same board on your tailnet,
   nothing copied. Moving an engine board to a team server is not in 2.0.
 - `comments add --selector` and `comments selectors` read the engine's latest captures.

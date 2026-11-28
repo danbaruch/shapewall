@@ -1344,6 +1344,10 @@ fetches only the current captures and the versions the comments dispatched to it
 anchor? }`, the pin in percent of the page, near the top-left corner by default; no images, drawing or author name; audited as
 `token_commented`), `POST .../comments/:id/replies`, `POST .../comments/:id/agent-status`
 (`{ agentStatus, onlyFrom }`), `POST .../comments/:id/resolve` (`{ note, fixRef, agentStatus }`), `POST .../comments/:id/reopen`,
+on the solo engine only `POST .../comments/:id/github/issue` (scope `reply`, `{ issue: { number, url, title } }`) and
+`POST .../comments/:id/github/pulls` (scope `resolve`, `{ pull: { number, url, title, state, mergedAt }, via }`; a merge not
+noted yet resolves the comment and ends any agent's claim on it, answer `{ comment, changed, merged }`), what `shapewall github`
+records after asking GitHub itself ([migration 25](#migration-25-and-rollback)),
 and for push `POST /api/v1/pushes` (a whole board, or `{ mode: "pages", board, pages }` for
 [a few pages](#pushing-a-few-pages)), `PUT /api/v1/pushes/:id/files/:area/:name`, `POST /api/v1/pushes/:id/commit`.
 
@@ -3269,6 +3273,36 @@ goes, so the folder is no longer marked solo. `PRAGMA user_version` is the highe
 unless a later migration is there too. The next upgrade runs 24 again. Test a rollback on a copy first: `PRAGMA
 integrity_check;` says `ok`, and `SELECT via, COUNT(*) FROM sessions GROUP BY 1;` shows the same sessions as before, without
 `local`. Roll this back before rolling back migration 23 or any earlier one (migration 18's rollback rebuilds `sessions` too).
+Roll back migration 25 first.
+
+### Migration 25 and rollback
+
+Migration 25 (2.0.0) adds one column, `comments.github`: a comment's GitHub links on the solo engine, the issue made from it and
+the pull requests linked to it, in the shape a local board keeps them (`{ "issue": ..., "pulls": [...] }`, see
+[GitHub](github.md)), or `NULL` for none. A check keeps it a JSON object. `shapewall github` writes it through two token API
+routes of the solo engine (`POST /api/v1/boards/:board/comments/:id/github/issue`, scope `reply`, and `.../github/pulls`, scope
+`resolve`, since a merged pull request resolves the comment), and `shapewall migrate` carries a 1.x comment's links into it. Both
+store only what the local store's cleaning keeps. A team server never writes it: those routes answer 404 there. Nothing else
+changes, and no existing row is rewritten (every comment starts with `NULL`).
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running the previous build on the
+upgraded database of a team server also works with no change to it: it ignores the column. On a solo data folder the previous
+build ignores it too, and the board then shows no GitHub links (they stay in the column until the rollback below drops them).
+
+To put the schema back as it was (with the server stopped; SQLite 3.35+, for `DROP COLUMN`):
+
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE comments DROP COLUMN github;
+DELETE FROM schema_migrations WHERE version = 25;
+PRAGMA user_version = 24;
+COMMIT;
+```
+
+Every comment stays as it was, without its GitHub links (a merge that resolved one keeps its resolution, fix reference and the
+reply from `github`). `PRAGMA user_version` is the highest version left in `schema_migrations`: 24 unless a later migration is
+there too. The next upgrade runs 25 again, with no links. Test a rollback on a copy first: `PRAGMA integrity_check;` says `ok`,
+and `SELECT COUNT(*) FROM comments;` is the same before and after. Roll this back before rolling back migration 24.
 
 ## Secrets, logs and legal text
 

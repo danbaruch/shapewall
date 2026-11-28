@@ -484,7 +484,9 @@ shapewall github issue ID | github link ID PR | github sync   [--json]
 reads the repo's pull requests, links the ones that say `shapewall:<id>` or `Fixes shapewall#<id>` (or close the comment's issue), and
 resolves a comment once when its pull request merges. `--board ID` picks a board for `issue` and `link`; `--json` prints the result as
 JSON. The token is read from the environment only, or, when neither variable is set and the API is github.com, from
-`gh auth token` (never printed or stored). Setup, the webhook and safety notes: [GitHub connect](/docs/github).
+`gh auth token` (never printed or stored). Once the solo engine holds the project, the links are kept on its comments (through its
+token API; the token stays on this machine), and the command starts the engine for itself when none runs. Setup, the webhook and safety
+notes: [GitHub connect](/docs/github).
 
 ## shapewall mcp
 

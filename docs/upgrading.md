@@ -30,6 +30,7 @@ left behind; run `shapewall migrate --rollback`), and a board the engine cannot 
 | ------------------------------------------------------------------- | ---------------------------------------------------- |
 | Captures, versions, variants, environments, diffs, journeys, checks | Moved as files into `.shapewall/.engine/files/`      |
 | Comments, replies, reactions, comment images and drawings           | Rows in the engine's database, with their numbers    |
+| A comment's GitHub issue and pull request links                     | Kept with the comment on the engine                  |
 | Chat threads                                                        | Rows in the engine's database                        |
 | A `serve --accounts` owner, with passkeys, recovery codes and photo | The engine's owner (same user id)                    |
 | Agent settings (Settings > Agent, in your user config folder)       | Stay where they are; the engine reads them as before |
@@ -80,6 +81,8 @@ aside into `<backup>/replaced-<time>/`. Rollback is part of the Apache 2.0 core 
   `shapewall serve` runs, they start the engine for themselves on this machine, without the project's agent, and stop it
   when they end, so an agent's `shapewall mcp` works with or without `serve`. A command an agent started never starts one.
   `capture`, `links`, `push`, `journeys`, `variant` and `checks` work on the engine's board folders, running or not.
+  `github issue`, `link` and `sync` work on the engine's comments, with this machine's GitHub token, which never goes to the
+  engine. The GitHub webhook stays the 1.x server's: on the engine, `shapewall github sync` picks up merged pull requests.
 - **Stable surfaces keep their 1.x shapes**: `comments --json`, the `watch` and `watch --exec` JSON, the MCP tools and their
   arguments, and the lines of `.shapewall/events.jsonl` ([stability](stability.md)).
 

@@ -926,6 +926,20 @@ const MIGRATIONS = [
     updated_at TEXT NOT NULL
   );
   `,
+  // 25. A comment's GitHub links on the solo engine (2.0.0, plan R5d:
+  // `shapewall github` through the engine's token API, and `migrate`
+  // carrying the 1.x links over). comments.github is the comment's
+  // { issue, pulls } as the local store keeps it (src/store.js cleanGithub:
+  // the issue made from it, the pull requests linked to it), or NULL for
+  // none. Its writers (src/hosted/comments.js setGithubIssue and
+  // recordGithubPull, the migrate writer) store only what cleanGithub
+  // returns. A team server never writes it: the token routes that do are
+  // the solo engine's only. Nothing else changes (docs/hosted.md,
+  // "Migration 25 and rollback").
+  `
+  ALTER TABLE comments ADD COLUMN github TEXT
+    CHECK (github IS NULL OR (json_valid(github) AND json_type(github) = 'object'));
+  `,
 ]
 
 export const openDatabase = (file) => openSqlite(file, migrate)

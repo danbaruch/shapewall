@@ -12,6 +12,8 @@
 // end; the engine's serve.lock keeps a second one off the same data, and a
 // command that finds one starting waits for it and uses it. Without a start
 // (an agent's own process) they refuse and say to start `shapewall serve`.
+// `github` (2.0.0, R5d) goes there the same way: it asks GitHub itself and
+// records the issue and pull request links through the engine's token API.
 // `SHAPEWALL_ENGINE=legacy` keeps the 1.x files. `export` reads the 1.x
 // comment files: once the engine holds the project (running or not) it is
 // refused unless --no-comments, and then exports the engine's captures.
@@ -21,7 +23,7 @@ import { boardHome } from './board-home.js'
 import { assertMigrationAllows } from '../engine-folder.js'
 import { ENGINE_TARGET, ENGINE_TOKEN, NO_ENGINE_VAR, engineTarget, verifyEngine } from '../engine-target.js'
 
-export const ENGINE_COMMANDS = ['comments', 'watch', 'mcp', 'export']
+export const ENGINE_COMMANDS = ['comments', 'watch', 'mcp', 'export', 'github']
 
 // -> { target, config } when the command goes to the engine (flags changed
 // in place: remote, the token, a default board), else null. Throws when the

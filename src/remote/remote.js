@@ -208,6 +208,13 @@ export function createRemote({
     resolve: (boardId, id, { note, fixRef, agentStatus, guests = false } = {}) =>
       call('POST', one(boardId, id, '/resolve', guests), { json: { note, fixRef, agentStatus } }),
     reopen: (boardId, id, { guests = false } = {}) => call('POST', one(boardId, id, '/reopen', guests), { json: {} }),
+    // GitHub links on the solo engine (`shapewall github`, which asks GitHub itself): the issue made from a comment
+    // ({ number, url, title, createdAt? }), and a pull request linked to it ({ number, url, title, state, mergedAt },
+    // `via` manual, body or issue; a merge resolves the comment -> { comment, changed, merged }).
+    githubIssue: (boardId, id, issue, { guests = false } = {}) =>
+      call('POST', one(boardId, id, '/github/issue', guests), { json: { issue } }),
+    githubPull: (boardId, id, pull, { via = 'manual', guests = false } = {}) =>
+      call('POST', one(boardId, id, '/github/pulls', guests), { json: { pull, via } }),
     startPush: (definition) => call('POST', '/api/v1/pushes', { json: definition }),
     // A push of only these pages and viewports ({ <page>: [<viewport>] }) to a board already pushed.
     startPagePush: (boardId, pages) => call('POST', '/api/v1/pushes', { json: { mode: 'pages', board: boardId, pages } }),

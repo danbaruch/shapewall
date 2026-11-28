@@ -29,7 +29,11 @@ const rollbackSql = () => {
 // 24 is rolled back before 23 (docs/hosted.md).
 const rollback24 = () => {
   const docs = fs.readFileSync(new URL('../docs/hosted.md', import.meta.url), 'utf8')
-  return /```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 24 and rollback')))[1]
+  // 25 before 24.
+  return (
+    /```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 25 and rollback')))[1] +
+    /```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 24 and rollback')))[1]
+  )
 }
 
 function seed(db) {
@@ -48,7 +52,7 @@ test('migration 23: every thread that exists at upgrade is tainted, a new one st
   const file = path.join(tempDir('migration-23'), 'shapewall.db')
   let db = await openDatabase(file)
   assert.ok(columns(db).includes('tainted') && columns(db).includes('taint_authors'))
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 24)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 25)
   // Back to a version 22 database, as docs/hosted.md gives it (24 first), with a thread in it.
   db.exec(rollback24())
   db.exec(rollbackSql())
@@ -62,7 +66,7 @@ test('migration 23: every thread that exists at upgrade is tainted, a new one st
   db.close()
   // Up again: the old thread fails closed; a thread started now is clean.
   db = await openDatabase(file)
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 24)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 25)
   assert.equal(threadRow(db, 'board').tainted, 1)
   const store = createChatStore(tenant(db, WS))
   assert.equal(store.trust('prj_1', 'sample', 'board').tainted, true)

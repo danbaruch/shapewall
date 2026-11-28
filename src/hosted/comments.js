@@ -13,6 +13,9 @@ import {
   COMMENT_BODY_MAX,
   CommentError,
   cleanFixRef,
+  cleanGithub,
+  githubIssueOf,
+  githubWithPull,
   commentOnOtherEnvironment,
   currentVersion,
   validateCommentInput,
@@ -119,6 +122,8 @@ export function rowToComment(row) {
     reactions: combinedReactions(parseList(row.reactions), row.imported_reactions),
     images: parseList(row.images),
     drawing: parseJson(row.drawing),
+    // Its GitHub issue and pull requests (migration 25, the solo engine only), as the local store keeps them.
+    ...(row.github ? { github: cleanGithub(parseJson(row.github)) } : {}),
   })
   // Guests never @mention anyone: their text must not wake a watcher
   // ("watch --mention agent") or page a person.
@@ -446,11 +451,58 @@ export function createCommentStore(t, projectId, boardId) {
   }
 
   // The comment, its images and its replies' images.
+  // GitHub links (migration 25, the solo engine's token routes): the same
+  // semantics as store.setGithubIssue and store.recordGithubPull, through
+  // the same steps (store.js githubIssueOf, githubWithPull).
+  const writeGithub = (row, github, now) =>
+    t.run(`UPDATE comments SET github = :github, updated_at = :at WHERE ${SCOPE} AND number = :number`, {
+      ...key,
+      number: row.number,
+      github: JSON.stringify(cleanGithub(github)),
+      at: now.toISOString(),
+    })
+
+  function setGithubIssue(number, issue, now = new Date()) {
+    const clean = githubIssueOf(issue, now)
+    const row = get(number)
+    writeGithub(row, { ...cleanGithub(parseJson(row.github)), issue: clean }, now)
+    return rowToComment(rowOf(row.number))
+  }
+
+  // Links a pull request, or updates the link. A merge not noted yet
+  // resolves an open comment (the pull request becomes its fix reference,
+  // resolution "Merged in pull request #N (title).") and adds a reply from
+  // "github", as on a local board. -> { comment, changed, merged }.
+  function recordGithubPull(number, pull, { via = 'manual' } = {}, now = new Date()) {
+    githubWithPull(null, pull, { via, now })
+    const row = get(number)
+    const step = githubWithPull(parseJson(row.github), pull, { via, now })
+    if (!step) return { comment: rowToComment(row), changed: false, merged: false }
+    writeGithub(row, step.github, now)
+    if (!step.merging) return { comment: rowToComment(rowOf(row.number)), changed: true, merged: false }
+    if (row.status === 'open')
+      update(
+        row.number,
+        { status: 'resolved', resolution: `Merged in ${step.label}.`.slice(0, COMMENT_BODY_MAX), fixRef: step.pull.url },
+        now,
+      )
+    else if (!row.fix_ref) update(row.number, { fixRef: step.pull.url }, now)
+    let comment = rowToComment(rowOf(row.number))
+    if (comment.replies.length < REPLIES_MAX)
+      comment = reply(
+        row.number,
+        { body: `Merged ${step.label}: ${step.pull.url}`.slice(0, COMMENT_BODY_MAX) },
+        { name: 'github' },
+        now,
+      ).comment
+    return { comment, changed: true, merged: true }
+  }
+
   function remove(number) {
     const row = get(number)
     removeCommentFiles(t, projectId, boardId, row.number)
     t.run(`DELETE FROM comments WHERE ${SCOPE} AND number = :number`, { ...key, number: row.number })
   }
 
-  return { list, counts, get, create, update, reply, react, setAgentStatus, remove }
+  return { list, counts, get, create, update, reply, react, setAgentStatus, setGithubIssue, recordGithubPull, remove }
 }

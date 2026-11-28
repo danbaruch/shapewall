@@ -273,6 +273,10 @@ export async function planMigration(config, { board: only = null, env = process.
       problems.push(
         `board ${board.id}: ${comments.otherEnvironments} comment(s) on another environment need the engine's comment environments (migration 24), which this build does not have yet`,
       )
+    if (comments.githubLinks && !schema.commentGithub)
+      problems.push(
+        `board ${board.id}: ${comments.githubLinks} comment(s) with GitHub issue or pull request links need the engine's GitHub links (migration 25), which this build does not have yet`,
+      )
     let definition
     try {
       definition = E.boardDefinition(config, board)
