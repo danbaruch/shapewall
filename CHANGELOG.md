@@ -5,6 +5,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 2.0.0 - 2026-11-27
+
 ### Upgrading from 1.x
 
 2.0.0 makes the solo engine the local board: `shapewall serve` runs the hosted engine for this project, one owner, on this
@@ -38,8 +40,7 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
 
 - **`shapewall comments approve --imported`** and **Send to agents** on the board's banner (solo engine): the comments a
   migration brought in from 1.x wait for your OK before agents get them; both list each in full and send the ones you read.
-
-- **Team mode on the solo engine** (2.0.0): `shapewall serve --team`, or **Invite people** on the console's Members page,
+- **Team mode on the solo engine**: `shapewall serve --team`, or **Invite people** on the console's Members page,
   puts the same engine on your tailnet for the people you invite, through `tailscale serve` with tailnet sign-in, on the same
   data with nothing copied; you stay its one owner. `shapewall serve --team off`, or **Stop sharing**, puts it back on this
   machine only. The setting is kept in `.shapewall/.engine/team.json`, every start prints exactly who can reach the board,
@@ -69,6 +70,12 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
 
 ### Changed
 
+- **`shapewall serve` runs the solo engine by default**: the hosted engine for this project, one owner, on this
+  machine only, data in `.shapewall/.engine/`. `npx shapewall init && npx shapewall serve` is still a board in seconds with no
+  account. The first start in a project with 1.x board data says which boards move, runs `shapewall migrate` (a backup in
+  `.shapewall/backup-1x-<time>/` first; a failed run puts the folder back), then starts. Anything that stops the move (a 1.x
+  `serve` or `watch` still running, a migration stopped midway, a board the engine cannot take) stops `serve` with the reason
+  and changes nothing. See [Upgrading a 1.x project](docs/where-to-run.md#upgrading-a-1x-project).
 - The solo engine (`serve`, with its flags) and `shapewall migrate` are stable from 2.0, under the
   [stability promise](docs/stability.md); they were experimental in 1.5.0. The promise now reads per major version (2.x).
 - Once the solo engine holds the project and no `shapewall serve` runs, `comments`, `watch`, `mcp`, `export` and `github` start the
@@ -77,12 +84,6 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
   used; serve.lock keeps a second one off the same data. A command an agent started never starts one. `export` writes the
   engine's comments and images, read through the token API's new `/api/v1/boards/<id>/export/comments` (as a public viewer
   sees them). `SHAPEWALL_ENGINE=legacy` keeps the 1.x files.
-- **`shapewall serve` runs the solo engine by default** (2.0.0): the hosted engine for this project, one owner, on this
-  machine only, data in `.shapewall/.engine/`. `npx shapewall init && npx shapewall serve` is still a board in seconds with no
-  account. The first start in a project with 1.x board data says which boards move, runs `shapewall migrate` (a backup in
-  `.shapewall/backup-1x-<time>/` first; a failed run puts the folder back), then starts. Anything that stops the move (a 1.x
-  `serve` or `watch` still running, a migration stopped midway, a board the engine cannot take) stops `serve` with the reason
-  and changes nothing. See [Upgrading a 1.x project](docs/where-to-run.md#upgrading-a-1x-project).
 - The 1.x writers refuse a board the engine holds (409 `board_migrated`): comments and replies, the board chat, the starter
   agent and `capture` into the 1.x folders, also from a `shapewall mcp` or `watch` started before the move.
 - `shapewall share --remote` stops on a board the engine holds instead of sending what is left in the 1.x folders, and says

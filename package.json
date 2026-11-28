@@ -1,6 +1,6 @@
 {
   "name": "shapewall",
-  "version": "1.5.0",
+  "version": "2.0.0",
   "description": "See your whole app and steer your coding agents from it: every screen on desktop and phone, the flows between them, and comments your agent reads as instructions over JSON or MCP.",
   "license": "Apache-2.0 AND FSL-1.1-ALv2",
   "author": "Dan Baruch",
