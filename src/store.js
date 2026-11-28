@@ -1278,10 +1278,47 @@ export function cleanGithub(value) {
   return { issue, pulls }
 }
 
-// Records the issue made from a comment. Returns the comment.
-export async function setGithubIssue(config, boardId, commentId, issue, { now = new Date() } = {}) {
+// The issue for a comment's github field, cleaned (createdAt defaults to
+// now). Throws 400 invalid_issue. Shared with the solo engine's store
+// (src/hosted/comments.js), so both keep links the same way.
+export function githubIssueOf(issue, now = new Date()) {
   const clean = cleanIssue({ createdAt: now.toISOString(), ...issue })
   if (!clean) throw new CommentError(400, 'invalid_issue', 'That is not a GitHub issue.')
+  return clean
+}
+
+// One pull request link added to (or updated on) a comment's github field.
+// -> null when nothing changes, else { github, pull, merging, label }:
+// merging is true when the pull request has merged and that was not noted
+// yet (this call notes it, so it happens once). Throws 400 invalid_pull and
+// 409 too_many_pulls. Shared with the solo engine's store.
+export function githubWithPull(current, pull, { via = 'manual', now = new Date() } = {}) {
+  const incoming = cleanPull({ ...pull, via })
+  if (!incoming) throw new CommentError(400, 'invalid_pull', 'That is not a GitHub pull request.')
+  const github = cleanGithub(current)
+  const index = github.pulls.findIndex((item) => item.number === incoming.number)
+  const previous = index >= 0 ? github.pulls[index] : null
+  if (!previous && github.pulls.length >= PULLS_MAX) {
+    throw new CommentError(409, 'too_many_pulls', `A comment links at most ${PULLS_MAX} pull requests.`)
+  }
+  const next = {
+    ...incoming,
+    // A link keeps how it was first made.
+    via: previous ? previous.via : incoming.via,
+    linkedAt: previous?.linkedAt || now.toISOString(),
+    notedAt: previous?.notedAt || null,
+  }
+  const merging = next.state === 'merged' && !next.notedAt
+  if (merging) next.notedAt = now.toISOString()
+  if (previous && JSON.stringify(previous) === JSON.stringify(next)) return null
+  if (index >= 0) github.pulls[index] = next
+  else github.pulls.push(next)
+  return { github, pull: next, merging, label: `pull request #${next.number}${next.title ? ` (${next.title})` : ''}` }
+}
+
+// Records the issue made from a comment. Returns the comment.
+export async function setGithubIssue(config, boardId, commentId, issue, { now = new Date() } = {}) {
+  const clean = githubIssueOf(issue, now)
   const { comment } = await changeComment(
     config,
     boardId,
@@ -1300,34 +1337,18 @@ export async function setGithubIssue(config, boardId, commentId, issue, { now = 
 // shows it) and a reply from "github" says so. Returns { comment, changed,
 // merged }; merged is true when this call noted the merge.
 export async function recordGithubPull(config, boardId, commentId, pull, { via = 'manual', now = new Date() } = {}) {
-  const incoming = cleanPull({ ...pull, via })
-  if (!incoming) throw new CommentError(400, 'invalid_pull', 'That is not a GitHub pull request.')
+  // A bad pull is refused before the comment is read, as before.
+  githubWithPull(null, pull, { via, now })
   const { comment, changed, result } = await changeComment(
     config,
     boardId,
     commentId,
     (target) => {
-      const github = cleanGithub(target.github)
-      const index = github.pulls.findIndex((item) => item.number === incoming.number)
-      const previous = index >= 0 ? github.pulls[index] : null
-      if (!previous && github.pulls.length >= PULLS_MAX) {
-        throw new CommentError(409, 'too_many_pulls', `A comment links at most ${PULLS_MAX} pull requests.`)
-      }
-      const next = {
-        ...incoming,
-        // A link keeps how it was first made.
-        via: previous ? previous.via : incoming.via,
-        linkedAt: previous?.linkedAt || now.toISOString(),
-        notedAt: previous?.notedAt || null,
-      }
-      const merging = next.state === 'merged' && !next.notedAt
-      if (merging) next.notedAt = now.toISOString()
-      if (previous && JSON.stringify(previous) === JSON.stringify(next)) return false
-      if (index >= 0) github.pulls[index] = next
-      else github.pulls.push(next)
+      const step = githubWithPull(target.github, pull, { via, now })
+      if (!step) return false
+      const { github, pull: next, merging, label } = step
       target.github = github
       if (!merging) return { merged: false }
-      const label = `pull request #${next.number}${next.title ? ` (${next.title})` : ''}`
       const before = withAgentFields({ ...target })
       let reply = null
       if (target.status === 'open') {

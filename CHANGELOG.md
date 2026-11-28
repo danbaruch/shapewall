@@ -18,6 +18,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
   the engine running. `push` sends from there too, and `journeys`, `variant`, `checks`, `export --no-comments` and the
   `recapture_pages` tool of `shapewall mcp` work there as well.
 - `comments add --selector` and `comments selectors` on the solo engine, from the engine's latest captures.
+- `shapewall github` (`issue`, `link`, `sync`) on the solo engine: it still asks GitHub itself with this machine's token, and
+  records the issue and pull request links through two new token API routes of the engine (a merged pull request resolves the
+  comment, as on a 1.x board), starting the engine for itself when none runs. `shapewall migrate` carries a 1.x comment's
+  links over. Hosted database migration 25 adds `comments.github` for them; it is reversible, see
+  [Migration 25 and rollback](docs/hosted.md#migration-25-and-rollback). The webhook stays the 1.x server's.
 - On the solo engine, the `author` of the MCP tools `reply_to_comment` and `add_comment`, and `comments reply --author` and
   `comments add --author`, label the agent's text as they do on a 1.x board (it stays marked as an agent's). The engine's
   comment JSON says `byOwner` for comments its owner wrote, as a 1.x board does.
@@ -29,7 +34,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   1.x comment files, which are not the board. An agent's `shapewall mcp` works with or without `serve`. A running engine is
   used; serve.lock keeps a second one off the same data. A command an agent started never starts one. `export` writes the
   engine's comments and images, read through the token API's new `/api/v1/boards/<id>/export/comments` (as a public viewer
-  sees them). `shapewall github` is refused on an engine board: the engine keeps no issue or pull request links yet.
+  sees them).
   `SHAPEWALL_ENGINE=legacy` keeps the 1.x files.
 - **`shapewall serve` runs the solo engine by default** (2.0.0): the hosted engine for this project, one owner, on this
   machine only, data in `.shapewall/.engine/`. `npx shapewall init && npx shapewall serve` is still a board in seconds with no

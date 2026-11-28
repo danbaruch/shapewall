@@ -60,8 +60,10 @@ server. Once the engine holds the project (after the move, or in a project whose
   (`.shapewall/.engine/files/`), running or not.
 - `export` writes the engine's comments and their images (through its token API) next to its captures; `--no-comments` exports
   the captures only.
-- `github` refuses an engine board for now (the engine does not keep issue and pull request links yet). `share --remote` refuses
-  one too: `shapewall serve --team` moves a solo board to a team server.
+- `github` (`issue`, `link`, `sync`) works on the engine's comments, running or not: it asks GitHub itself, with this machine's
+  token, and records the issue and pull request links through the engine's token API. `migrate` carries a 1.x board's links
+  over. The webhook is the 1.x server's only (`sync` does the same by polling). `share --remote` refuses an engine board:
+  `shapewall serve --team` moves a solo board to a team server.
 - `comments add --selector` and `comments selectors` read the engine's latest captures.
 
 `SHAPEWALL_ENGINE=legacy` puts every command back on the 1.x files (deprecated).

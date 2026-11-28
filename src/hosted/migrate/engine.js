@@ -22,6 +22,7 @@ import { cleanDefinition } from '../push.js'
 import { slugFor } from '../projects.js'
 import { ID_PATTERNS } from '../../remote/ids.js'
 import { pushDefinition } from '../../remote/remote.js'
+import { cleanGithub } from '../../store.js'
 import { newId } from '../../shared/account-tokens.js'
 import { ENGINE_DB, engineDbFile, engineDir } from '../../migrate/files.js'
 
@@ -45,6 +46,8 @@ export function engineSchema(db) {
   const comment = columns(db, 'comments')
   return {
     commentEnvironment: comment.includes('environment'),
+    // Migration 25: comments.github, the GitHub issue and pull request links.
+    commentGithub: comment.includes('github'),
     soloBinding: hasTable(db, 'solo_binding'),
     commentPolicy: hasCommentPolicy(db),
   }
@@ -315,6 +318,10 @@ function writeComment(t, ids, boardId, comment, schema, at) {
   if (schema.commentEnvironment) {
     extra.push('environment')
     params.environment = comment.environment
+  }
+  if (schema.commentGithub && comment.github) {
+    extra.push('github')
+    params.github = JSON.stringify(cleanGithub(comment.github))
   }
   if (byName) {
     extra.push('imported_by', 'imported_at')

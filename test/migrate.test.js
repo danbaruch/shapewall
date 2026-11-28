@@ -978,3 +978,62 @@ test('R2-4: a board folder swapped for a link during the run is refused before a
   assert.ok(outsideBefore)
   assert.deepEqual(treeDigest(outside), outsideBefore, 'nothing moved out of or deleted in the outside folder')
 })
+
+// Migration 25 (2.0.0, plan R5d): a 1.x comment's GitHub issue and pull
+// request links come along onto the engine's comment, as the local board kept
+// them; a link the local store would not keep is reported and stays in the
+// backup. Written into a v1.2.0 fixture copy in the shape the 1.x store writes
+// (src/store.js setGithubIssue, recordGithubPull: none of the fixtures used GitHub).
+test('v1.2.0 with GitHub links: the issue and pull requests come along onto the engine comments', async () => {
+  const p = project('v1.2.0')
+  await withEnvironmentColumn(p.out)
+  const file = path.join(p.out, 'site', 'comments.json')
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'))
+  const at = '2026-10-01T10:00:00.000Z'
+  const issue = { number: 12, url: 'https://github.com/acme/site/issues/12', title: 'Home: logo', createdAt: at }
+  const merged = {
+    number: 30,
+    url: 'https://github.com/acme/site/pull/30',
+    title: 'Fix pricing',
+    state: 'merged',
+    mergedAt: at,
+    via: 'body',
+    linkedAt: at,
+    notedAt: at,
+  }
+  const open = {
+    ...merged,
+    number: 31,
+    url: 'https://github.com/acme/site/pull/31',
+    state: 'open',
+    mergedAt: null,
+    via: 'issue',
+    notedAt: null,
+  }
+  const find = (id) => data.comments.find((comment) => comment.id === id)
+  find(1).github = { issue, pulls: [open] }
+  find(2).github = { issue: null, pulls: [merged, { number: 'x', url: 'javascript:alert(1)' }] }
+  find(3).github = { issue: null, pulls: [] }
+  fs.writeFileSync(file, JSON.stringify(data, null, 2))
+
+  const dry = await run(p, { 'dry-run': true, json: true })
+  assert.equal(dry.code, 0, JSON.stringify(dry.json.problems))
+  const drops = dry.json.boards[0].dropped.map((item) => item.item)
+  assert.ok(drops.includes('comment #2, 1 pull request link(s)'), drops.join('; '))
+  assert.ok(!drops.some((item) => /comment #1, github|comment #3, github/.test(item)), 'carried, not dropped')
+
+  assert.equal((await run(p)).code, 0)
+  const rows = await engineRows(p.out)
+  const by = Object.fromEntries(rows.comments.map(({ row, comment }) => [row.number, { row, comment }]))
+  assert.deepEqual(by[1].comment.github, { issue, pulls: [open] })
+  assert.deepEqual(by[2].comment.github, { issue: null, pulls: [merged] })
+  // No links: no column value, and the comment shape has none, as before.
+  assert.equal(by[3].row.github, null)
+  assert.equal(by[3].comment.github, undefined)
+  assert.equal(by[5].row.github, null)
+
+  // Rollback puts the 1.x file back with its links, byte for byte.
+  const back = await run(p, { rollback: true })
+  assert.equal(back.code, 0, back.text)
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).comments.find((comment) => comment.id === 2).github.pulls.length, 2)
+})

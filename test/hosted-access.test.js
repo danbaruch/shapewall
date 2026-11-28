@@ -725,6 +725,7 @@ test('migration 5 adds its tables and columns on top of a version 4 database', a
   const old = await openDatabase(path.join(dataDir, 'shapewall.db'))
   // Migration 24 and then 18 first, as docs/hosted.md gives them: their checks name sessions.tailnet_login, which 17's rollback drops.
   const docs = fs.readFileSync(new URL('../docs/hosted.md', import.meta.url), 'utf8')
+  old.exec(/```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 25 and rollback')))[1])
   old.exec(/```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 24 and rollback')))[1])
   old.exec(/```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 18 and rollback')))[1])
   old.exec(`
@@ -763,13 +764,13 @@ test('migration 5 adds its tables and columns on top of a version 4 database', a
   `)
   old.close()
   const db = await openDatabase(path.join(dataDir, 'shapewall.db'))
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 24)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 25)
   assert.deepEqual(
     db
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map((row) => row.version),
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],
   )
   assert.equal(db.prepare('SELECT handle FROM users WHERE id = ?').get(owner.user.id).handle, 'mira')
   assert.equal(db.prepare('SELECT name FROM projects WHERE id = ?').get(project.id).name, 'Existing site')
