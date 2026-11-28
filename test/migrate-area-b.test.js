@@ -300,3 +300,13 @@ test('B-10: writeAtomic writes whole or not at all, and leaves no temporary file
   assert.throws(() => writeAtomic(path.join(dir, 'taken'), 'three\n'))
   assert.deepEqual(fs.readdirSync(dir).sort(), ['MIGRATED-TO-2', 'taken'], 'the temporary file is gone')
 })
+
+test('B-12: an engine with no project never falls back to the 1.x folders once a board was migrated', async () => {
+  const { boardHome, BoardHomeError } = await import('../src/cli/board-home.js')
+  const p = project()
+  await withEnvironmentColumn(p.out)
+  const env = { ...p.env, SHAPEWALL_ENGINE: '' }
+  assert.equal((await boardHome(p.config, { env })).engine, false, 'no project and nothing migrated: the 1.x folders')
+  fs.writeFileSync(path.join(p.out, MARKER), JSON.stringify({ version: 1, runs: [{ backup: 'backup-1x-x', boards: { site: {} } }] }))
+  await assert.rejects(boardHome(p.config, { env }), (error) => error instanceof BoardHomeError && /holds no project/.test(error.message))
+})

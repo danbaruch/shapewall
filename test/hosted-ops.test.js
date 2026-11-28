@@ -309,7 +309,9 @@ test('backup: where hard links fail, files are copied straight into the backup, 
     const originalCopy = fs.copyFileSync
     const copiedInto = []
     let links = 0
-    fs.linkSync = () => {
+    fs.linkSync = (from, to) => {
+      // The board job locks the backup holds while pinning (B-7) are not pin links.
+      if (/capture\.lock$/.test(String(to))) return originalLink(from, to)
       links += 1
       throw Object.assign(new Error('cross-device link not permitted'), { code: 'EXDEV' })
     }

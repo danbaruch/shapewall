@@ -11,7 +11,7 @@ import { ID_RE } from './config.js'
 import { acquireLock, isLockLive, readLock, releaseLock } from './lock.js'
 import { assertMigrationAllows, projectRoot } from './engine-folder.js'
 
-export const BOARD_JOB_KINDS = ['capture', 'checks', 'apply']
+export const BOARD_JOB_KINDS = ['capture', 'checks', 'apply', 'backup', 'push']
 
 export function boardJobFile(config, boardId) {
   if (!ID_RE.test(boardId)) throw new Error(`invalid board id ${boardId}`)
@@ -31,6 +31,8 @@ export function readBoardJob(config, boardId) {
 export function boardJobBusyMessage(kind, boardId = null) {
   const board = boardId ? ` of "${boardId}"` : ' of this board'
   if (kind === 'checks') return `Checks${boardId ? ` of "${boardId}"` : ' on this board'} are running. Try again when they finish.`
+  if (kind === 'push') return `A push${boardId ? ` of "${boardId}"` : ' of this board'} is being saved. Try again in a moment.`
+  if (kind === 'backup') return `A backup is reading${boardId ? ` "${boardId}"` : ' this board'}. Try again in a moment.`
   if (kind === 'apply') return `An agent Apply on${boardId ? ` "${boardId}"` : ' this board'} is running. Try again when it is done.`
   return `A capture${board} is already running.`
 }

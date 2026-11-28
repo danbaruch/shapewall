@@ -5,6 +5,8 @@ import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { createRemote, pushDefinition, pushFiles } from '../src/remote/remote.js'
 import { changeEventType } from '../src/hosted/events.js'
 import { b64, pngWithText } from './comment-media-fixtures.js'
@@ -93,6 +95,28 @@ test('only an admin with a fresh passkey check removes a board; wrong ids and ot
   assert.equal(count('boards', 'mistake'), 1)
   assert.equal(count('comments', 'mistake'), 1)
   assert.ok(fs.existsSync(path.join(boardFolder('mistake'), 'captures', 'manifest.json')))
+})
+
+test('B-3: a board a job of another process holds (a capture from the terminal) is not removed: 409 board_busy', async () => {
+  const lockFile = path.join(boardFolder('mistake'), 'capture.lock')
+  const lockJs = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lock.js')
+  const code = `import(${JSON.stringify(lockJs)}).then((m) => { m.acquireLock(${JSON.stringify(lockFile)}, { kind: 'capture' }); console.log('held'); setInterval(() => {}, 1000) })`
+  const child = spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: ['ignore', 'pipe', 'inherit'] })
+  try {
+    await new Promise((resolve, reject) => {
+      child.once('error', reject)
+      child.stdout.once('data', resolve)
+    })
+    await reauth(alice)
+    const busy = await alice.browser.call('DELETE', consoleUrl('mistake'))
+    assert.equal(busy.status, 409, busy.text)
+    assert.equal(busy.json.error.code, 'board_busy')
+    assert.ok(fs.existsSync(path.join(boardFolder('mistake'), 'captures')), 'the folder stays')
+    assert.equal(count('comments', 'mistake'), 1, 'the rows stay')
+  } finally {
+    child.kill('SIGKILL')
+    await new Promise((resolve) => child.once('exit', resolve))
+  }
 })
 
 test('removing a board deletes its rows and files, lowers the storage count, and leaves the other board whole', async () => {

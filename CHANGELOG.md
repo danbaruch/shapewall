@@ -47,6 +47,10 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
   comment, as on a 1.x board), starting the engine for itself when none runs. `shapewall migrate` carries a 1.x comment's
   links over. Hosted database migration 25 adds `comments.github` for them; it is reversible, see
   [Migration 25 and rollback](docs/hosted.md#migration-25-and-rollback). The webhook stays the 1.x server's.
+- `shapewall migrate --rollback --all`: after a run that was stopped midway, `--rollback` puts back only that run; `--all`
+  puts back every run, as `--rollback` did before.
+- The `create_github_issue` and `link_pull_request` tools of `shapewall mcp` on the solo engine, as on a 1.x board: they ask
+  GitHub with this machine's token and record the links on the engine.
 - On the solo engine, the `author` of the MCP tools `reply_to_comment` and `add_comment`, and `comments reply --author` and
   `comments add --author`, label the agent's text as they do on a 1.x board (it stays marked as an agent's). The engine's
   comment JSON says `byOwner` for comments its owner wrote, as a 1.x board does.
@@ -104,6 +108,17 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
 
 ### Security
 
+- `shapewall migrate` and `--rollback` (2.0 security review, area B): a capture, checks run or Apply from the terminal on
+  the engine's board folders now counts as a running job for the migration and the rollback, and is refused while either
+  runs. A migrated board's 1.x folder keeps a note an older Shapewall fails on, instead of starting a second, empty board.
+  A rollback keeps its own journal (`ROLLING-BACK`) and is finished by the next `--rollback` when it was stopped midway; every
+  guard refuses meanwhile. After a stopped run, `--rollback` undoes only that run. The migration refuses an engine folder git
+  tracks and gives the folder its `.gitignore` and 0700 before the database; `MIGRATED-TO-2`, `MIGRATING-TO-2`, `RESTORED`
+  and the backup records are written atomically; the comment and chat files a run converted move into the backup instead of
+  being deleted, so a write that slipped in is kept. Deleting a board in the console is refused (`board_busy`) while a job
+  from the terminal holds it; a server backup holds each board's job lock while it pins it, and a push commit holds it
+  through the swap. Command-line reads of the engine database no longer leave a copy in the temporary folder when the copy
+  fails, and an engine with no project never falls back to the 1.x folders once boards were migrated.
 - Team mode serves members from a second listener on 127.0.0.1 for the same database, and `tailscale serve` forwards the
   tailnet only to that port. The owner's terminal sign-in, the loopback and same-OS-user checks, this machine's tokens
   (`cli.token`, `watch.token`, `agent.token`) and the owner-only engine features (settings, captures, checks, journeys

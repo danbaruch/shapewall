@@ -36,6 +36,7 @@ import {
   versionArg,
 } from '../compare-captures.js'
 import { mcpInstructions } from '../mcp-instructions.js'
+import { createIssue, engineGithubStore, githubSettings, linkPull } from '../github.js'
 import { pushPages } from './cli.js'
 import { REMOTE_HEARTBEAT_MS } from './remote-watch.js'
 import { terminalSafe } from './terminal.js'
@@ -105,6 +106,9 @@ export async function createRemoteMcpServer({
   compare = null,
   // The clock "today" is read from (tests set it).
   now = () => Date.now(),
+  // For the GitHub tools on the solo engine (localAuthor): the GitHub token is read here (GITHUB_TOKEN), never sent to the engine.
+  env = process.env,
+  fetchImpl = undefined,
 }) {
   const project = await remote.project()
   const scopes = new Set(project.token.scopes.flatMap((scope) => (scope === 'comment' ? ['reply', 'status'] : [scope])))
@@ -116,13 +120,18 @@ export async function createRemoteMcpServer({
     )
   const firstBoard = defaultBoard || boardIds[0]
   const canRecapture = Boolean(config) && allowCapture && !readOnly && scopes.has('push')
+  // `shapewall mcp` on the solo engine (2.0.0): create_github_issue and
+  // link_pull_request, as the 1.x MCP had them. This process asks GitHub with
+  // this machine's token and the engine records the link (engineGithubStore,
+  // src/github.js); the engine's own /mcp and a team server never offer them.
+  const canGithub = Boolean(config) && localAuthor && !readOnly && Boolean(githubSettings(config, env).repo)
   const server = new McpServer(
     { name: 'shapewall', version: VERSION },
     {
       instructions: mcpInstructions({
         handIn: canRecapture ? 'remote' : hostedEndpoint ? 'hosted' : 'push',
         hosted: true,
-        github: false,
+        github: canGithub,
       }),
     },
   )
@@ -792,6 +801,43 @@ export async function createRemoteMcpServer({
       }),
     )
   }
+  if (canGithub) {
+    const store = engineGithubStore(remote, config)
+    if (scopes.has('reply'))
+      server.registerTool(
+        'create_github_issue',
+        {
+          title: 'Create a GitHub issue',
+          description:
+            'Opens an issue in the configured GitHub repo from a comment (text, page URL, element and a link back to the board) and records it on the comment. Returns the existing issue if the comment has one.',
+          inputSchema: { board: boardArg, id: commentId },
+        },
+        tool(async ({ board, id }) => {
+          const { issue, created } = await createIssue(config, { boardId: boardFor(board), commentId: id, env, fetchImpl, store })
+          return json({ id, issue, created })
+        }),
+      )
+    if (scopes.has('resolve'))
+      server.registerTool(
+        'link_pull_request',
+        {
+          title: 'Link a pull request',
+          description:
+            'Links a pull request of the configured repo to a comment. When that pull request has merged, the comment is resolved with it as the fix. ' +
+            'Tip: put "shapewall:<id>" in the PR description and `shapewall github sync` (or the webhook) links it by itself.',
+          inputSchema: {
+            board: boardArg,
+            id: commentId,
+            pr: z.string().min(1).max(300).describe('Pull request number (12 or #12) or its URL'),
+          },
+        },
+        tool(async ({ board, id, pr }) => {
+          const { comment, pull, merged } = await linkPull(config, { boardId: boardFor(board), commentId: id, pr, env, fetchImpl, store })
+          return json({ id: comment.id, status: comment.status, pull, merged })
+        }),
+      )
+  }
+
   if (canRecapture) {
     // One capture and push at a time from this server, so pushes land in the
     // order their captures ran. The capture itself holds the board-job lock

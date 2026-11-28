@@ -4,6 +4,9 @@
 // (src/hosted/device-routes.js).
 
 import { listTokens } from './admin.js'
+import { boardJobBusyMessage, readBoardJob } from '../board-job.js'
+import { ID_RE } from '../config.js'
+import { projectDir } from './projects.js'
 import { AuthError } from './auth.js'
 import { agentPolicy, cleanPolicy } from './agent-policy.js'
 import { newId, randomToken, sha256 } from './crypto.js'
@@ -441,6 +444,14 @@ export function mountConsoleRoutes(consoleApi, deps) {
       // The solo engine: a capture or a checks run of this board stops first, so nothing writes its folder after.
       await req.app.locals.soloCapture?.cancel(req.project.id, String(req.params.bid || ''))
       await req.app.locals.soloChecks?.cancel(req.project.id, String(req.params.bid || ''))
+      // B-3: one from the terminal (another process, under the board's job
+      // lock in the same folder) cannot be stopped from here: refused, so the
+      // folder is never removed under it.
+      const bid = String(req.params.bid || '')
+      if (deps.dataDir && ID_RE.test(bid)) {
+        const job = readBoardJob({ outputDir: projectDir(deps.dataDir, req.t.workspaceId, req.project.id) }, bid)
+        if (job) throw new HttpError(409, 'board_busy', boardJobBusyMessage(job.kind, bid))
+      }
       const gone = req.projects.removeBoard(req.project.id, req.params.bid)
       auditOf(req, 'board_removed', `${req.project.id}/${gone.board}`, { project: req.project.name, comments: gone.comments })
       res.json({ ok: true, board: gone.board, comments: gone.comments, bytes: gone.bytes })

@@ -925,11 +925,18 @@ The exit code is 0 when it is done or there is nothing to do, 1 when it refused 
   locks throughout, and a run that fails after the backup puts the folder back as it was. `MIGRATING-TO-2` marks a run in
   progress; after one that was stopped midway, `migrate`, `serve`, `watch` and the engine refuse to start and point at
   `--rollback`. `MIGRATED-TO-2` records each finished run, so a second run does nothing, and the plain `shapewall serve` and
-  `watch` refuse the boards that moved (the engine serves them).
+  `watch` refuse the boards that moved (the engine serves them). A migrated board's 1.x folder keeps only a note (a folder
+  named `comments.json` and a file named `chat`), so an older Shapewall started there fails instead of opening an empty board.
+  The comment and chat files it converted move into the backup (`<backup>/converted-<time>/`), not deleted. The engine
+  folder gets its `.gitignore` and mode 0700 before the database is made, and the migration refuses an engine folder git
+  tracks.
 - **Rollback.** `shapewall migrate --rollback` restores every board from the backups the runs recorded, checked byte for byte,
-  and the engine folder as it was before the run (none, if there was none). Nothing is deleted on the way: what is there now,
+  and the engine folder as it was before the run (none, if there was none). After a run that was stopped midway it puts back
+  only that run, so earlier finished runs and what was made on the engine since stay; `--rollback --all` puts back every run.
+  A rollback keeps its own note, `ROLLING-BACK`, while it works: if it is stopped midway, `migrate`, `serve`, `watch`, capture
+  and the engine refuse to start until `shapewall migrate --rollback` runs again and finishes it. Nothing is deleted on the way: what is there now,
   with anything made on the engine since, moves aside into `<backup>/replaced-<time>/`. The backups stay until you delete them. To go back to an older Shapewall, roll back
-  with this version first, then run the older one pinned (`npx shapewall@1 serve`). The whole upgrade: [upgrading from 1.x](upgrading.md).
+  every run with this version first, then run the older one pinned (`npx shapewall@1 serve`). The whole upgrade: [upgrading from 1.x](upgrading.md).
 - **License.** The planner, the backup and the rollback are part of the Apache 2.0 core (`src/migrate`); only the writer of the
   engine's database (`src/hosted/migrate`) is under this server's license, and `--rollback` never needs it.
 

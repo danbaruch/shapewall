@@ -19,7 +19,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { loadConfig } from '../config.js'
-import { engineDir } from '../engine-folder.js'
+import { engineDir, migratedBoards } from '../engine-folder.js'
 import { ID_PATTERNS } from '../remote/ids.js'
 import { ENGINE_VAR } from './engine-choice.js'
 
@@ -38,7 +38,15 @@ export async function boardHome(config, { env = process.env } = {}) {
   const ids = await engineProject(config.outputDir)
   if (ids?.problem) throw new BoardHomeError(ids.problem)
   // A database with no project yet (an engine stopped before its first start finished): the 1.x folders.
-  if (!ids?.workspaceId || !ids.projectId) return { config, engine: false }
+  // Never once a board was migrated (B-12): the project was deleted on the
+  // engine, and its boards are not in the 1.x folders any more.
+  if (!ids?.workspaceId || !ids.projectId) {
+    if (migratedBoards(config.outputDir).size)
+      throw new BoardHomeError(
+        "The solo engine holds no project, but this project's boards were migrated to it (MIGRATED-TO-2). Run shapewall migrate --rollback to bring the 1.x boards back, or shapewall serve to start the engine again.",
+      )
+    return { config, engine: false }
+  }
   if (!ID_PATTERNS.workspace.test(ids.workspaceId) || !ID_PATTERNS.project.test(ids.projectId))
     throw new BoardHomeError("The solo engine's database names a project this build cannot read.")
   return { config: { ...config, outputDir: path.join(engineDir(config.outputDir), 'files', ids.workspaceId, ids.projectId) }, engine: true }
