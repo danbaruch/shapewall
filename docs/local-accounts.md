@@ -1,7 +1,15 @@
 # Local accounts and profile images
 
-**Deprecated in 2.0.** `serve --accounts` (and `SHAPEWALL_ACCOUNTS=1`) still works through 2.x with a one-line warning and goes
-in 3.0: the solo engine signs its owner in on this machine by itself, and `serve --tailscale` signs in people on your tailnet.
+**Superseded in 2.0.** The local board is the solo engine now, and it has an owner account of its own: `shapewall serve --open`
+signs you in from the terminal, with no passkey to set up, and team mode (`shapewall serve --team`) signs in the people you
+invite through the tailnet ([the solo engine](hosted.md#the-solo-engine-experimental)). This page describes `serve --accounts`
+on the 1.x board server, which is deprecated: it still works through 2.x with a one-line warning (it runs the 1.x server, as
+`serve --engine legacy` does) and goes in 3.0, and so does `SHAPEWALL_ACCOUNTS=1`.
+
+**Your local account moves with the project.** The first 2.0 `serve` (or `shapewall migrate`) makes the `serve --accounts`
+owner the engine's owner, with the same user id, passkeys, recovery codes and profile photo; sign-in sessions stay behind,
+so sign in again. A file with more than one account stops the move, since the engine has one owner. The account file itself
+stays where it is, so `migrate --rollback` has nothing to put back. See [upgrading from 1.x](upgrading.md).
 
 Local accounts are opt-in. Ordinary `shapewall serve` keeps its existing access model and does not create an account database.
 Use Node 22.19 or newer and start with `shapewall serve --accounts`. On a loopback listener its fixed origin uses `localhost` and

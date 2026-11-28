@@ -13,9 +13,12 @@ two years later. The clients (`push` and the `--remote` commands, in `src/remote
 **Status: beta.** Start with one invite-only server that the team reaches over Tailscale. Each teammate signs in with their own Shapewall passkey and joins a workspace.
 Walk through the [checklist before you invite the team](#before-you-invite-the-team) on your own devices and network first.
 
-`shapewall serve` is the separate, single-owner local tool. Its Tailscale/pairing mode lets that owner use their other devices;
-`shapewall hosted` supplies team accounts, roles and collaboration. A public domain or a Shapewall-operated service is not needed
-for tailnet multiplayer.
+From 2.0, `shapewall serve` runs this same server for one project on your own machine: the
+[solo engine](#the-solo-engine-experimental), one owner, on this machine only. Start alone there, and when a few people should see
+the board while you work, switch it to [team mode](#inviting-people-team-mode) (`shapewall serve --team`): the same data on your
+tailnet, with tailnet sign-in. `shapewall hosted` is for a team server that stays on, with passkey accounts, several workspaces
+and projects, and people outside your tailnet. A public domain or a Shapewall-operated service is not needed for tailnet
+multiplayer.
 
 What a team server does not do: capture. It never opens a browser and never fetches a URL a user gives it, so there is no
 SSRF surface. You capture on your machine or in CI (it can reach `localhost` and staging, which a hosted crawler cannot) and push.
@@ -666,13 +669,20 @@ The rules of those commands:
 
 **Experimental.** Outside the [stability promise](stability.md): it can change, or go, in a minor release.
 
-`shapewall serve --engine hosted` runs this server for one project, on your own machine, for you alone. From 2.0 it is what
-`shapewall serve` runs by default ([upgrading a 1.x project](where-to-run.md#upgrading-a-1x-project)). Run it in the project
-folder:
+`shapewall serve` runs this server for one project, on your own machine, for you alone: the solo profile of the same code. It
+is the default since 2.0 (`serve --engine hosted` names it explicitly; it was opt-in in 1.5.0), and the first start in a 1.x
+project moves its board in ([upgrading from 1.x](upgrading.md)). Run it in the project folder:
 
 ```sh
-shapewall serve --engine hosted --open
+shapewall serve --open             # alone, on this machine
+shapewall serve --team             # the same board, for the people you invite on your tailnet
 ```
+
+| Profile                     | Who                                        | Sign-in                                  | Where                         |
+| --------------------------- | ------------------------------------------ | ---------------------------------------- | ----------------------------- |
+| Solo (`serve`)              | You, the one owner                         | From the terminal, a one-time page       | 127.0.0.1 only                |
+| Solo, team mode (`--team`)  | You, and the people you invite             | You: the terminal; them: tailnet sign-in | Also your tailnet, never Funnel |
+| Team server (`hosted`)      | Workspaces, roles, invites                 | Passkeys, or tailnet sign-in             | Tailnet, or your own domain   |
 
 It is this server's code (`src/hosted`), so it is under this server's license, the
 [Functional Source License 1.1, ALv2 future license](../src/hosted/LICENSE.md), not the core's Apache 2.0: anyone may use, change
@@ -883,8 +893,8 @@ there, with this start's key from the data folder, from this machine and your ow
 
 ```sh
 shapewall migrate --dry-run     # what would move, and every item that would not, with the reason; writes nothing
-shapewall migrate               # backup, then move; prints the same counts
-shapewall serve --engine hosted --open
+shapewall migrate               # backup, then move; prints the same counts (the first serve runs it for you)
+shapewall serve --open
 shapewall migrate --rollback    # put it back (add --dry-run to see what it would restore)
 ```
 
@@ -907,7 +917,7 @@ The exit code is 0 when it is done or there is nothing to do, 1 when it refused 
 - **Rollback.** `shapewall migrate --rollback` restores every board from the backups the runs recorded, checked byte for byte,
   and the engine folder as it was before the run (none, if there was none). Nothing is deleted on the way: what is there now,
   with anything made on the engine since, moves aside into `<backup>/replaced-<time>/`. The backups stay until you delete them. To go back to an older Shapewall, roll back
-  with this version first, then run the older one pinned (`npx shapewall@1.4 serve`).
+  with this version first, then run the older one pinned (`npx shapewall@1 serve`). The whole upgrade: [upgrading from 1.x](upgrading.md).
 - **License.** The planner, the backup and the rollback are part of the Apache 2.0 core (`src/migrate`); only the writer of the
   engine's database (`src/hosted/migrate`) is under this server's license, and `--rollback` never needs it.
 
@@ -3377,6 +3387,10 @@ as `shapewall mcp --remote` is available. A project selector cannot override the
 token's project. Rotate/revoke tokens from the project's console.
 
 ## Move a local project to your team
+
+This moves a 1.x local board (the 1.x board server's files). A board the solo engine holds is refused: to bring people to it,
+turn on [team mode](#inviting-people-team-mode) (`shapewall serve --team`), the same board on your tailnet with nothing copied.
+Moving an engine board to a team server is not in 2.0; `shapewall migrate --rollback` puts the 1.x board back to share it.
 
 Run `shapewall share --remote https://board.example.com` from the local project, or use **Profile > Share with your team...** through the
 host's private settings link. Sign in on the destination's `/device` page, choose or create a project, and explicitly select **Import local
