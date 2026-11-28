@@ -38,6 +38,8 @@ import { openBrowser } from '../../cli/open.js'
 import { UPDATE_RESTART_EXIT } from '../../cli/serve.js'
 import { keyWarningLines } from '../../config-keys.js'
 import { pathToFileURL } from 'node:url'
+import { verifyEngine } from '../../engine-target.js'
+import { terminalSafe } from '../../remote/terminal.js'
 import { OPEN_KEY_FILE, soloHostName, soloHostSuffix } from './signin.js'
 import { teamPortProblem } from './team.js'
 
@@ -95,8 +97,30 @@ export function teamWanted(flags) {
   return want
 }
 
+// Before solo-open.key goes to the port serve.json names: whoever answers there proves it holds this start's proof
+// key (engine-target.js verifyEngine, rev57 R57-6; 2.0 final review A-7). A stale lock that passes for live, and
+// another user on the port, get nothing.
+async function proveRunning(running) {
+  const proof = typeof running.proof === 'string' && /^[A-Za-z0-9_-]{43}$/.test(running.proof) ? running.proof : null
+  if (!proof)
+    throw new Error(
+      `The solo engine for this project (pid ${running.pid}) left no way to check it is the one answering. Restart it with this version of Shapewall.`,
+    )
+  // The port proven is the port the key goes to: serve.json's origin and port must agree.
+  let origin = null
+  try {
+    origin = new URL(String(running.origin))
+  } catch {
+    origin = null
+  }
+  if (!origin || Number(origin.port) !== running.port)
+    throw new Error(`The solo engine for this project (pid ${running.pid}) left a serve.json that does not read. Restart it.`)
+  await verifyEngine({ origin: origin.origin, proof, pid: running.pid })
+}
+
 // `serve --team [off]` while the engine runs: it switches there (POST /solo/team-switch, this start's key).
 async function switchRunning(dir, running, { on, httpsPort }) {
+  await proveRunning(running)
   const key = fs.readFileSync(path.join(dir, OPEN_KEY_FILE), 'utf8').trim()
   const response = await fetch(`http://127.0.0.1:${running.port}/solo/team-switch`, {
     method: 'POST',
@@ -104,7 +128,8 @@ async function switchRunning(dir, running, { on, httpsPort }) {
     body: JSON.stringify({ on, ...(httpsPort ? { httpsPort } : {}) }),
   })
   const body = await response.json().catch(() => null)
-  if (!response.ok) throw new Error(body?.error?.message || `The running engine did not switch team mode (HTTP ${response.status}).`)
+  if (!response.ok)
+    throw new Error(terminalSafe(body?.error?.message) || `The running engine did not switch team mode (HTTP ${response.status}).`)
   return body
 }
 
@@ -126,6 +151,7 @@ function runningEngine(dir) {
 // A new sign-in page from the engine that already runs for this folder: the
 // path of a 0600 file in the data folder that posts a one-time nonce.
 async function pageFromRunning(dir, running, { keep }) {
+  await proveRunning(running)
   const key = fs.readFileSync(path.join(dir, OPEN_KEY_FILE), 'utf8').trim()
   const response = await fetch(`http://127.0.0.1:${running.port}/solo/open-link`, {
     method: 'POST',
@@ -176,7 +202,7 @@ export async function serveEngine(flags, out, options = {}) {
   const teamPort = flags['team-port'] === undefined ? null : Number(flags['team-port'])
   if (running && team !== null) {
     const answer = await switchRunning(dir, running, { on: team, httpsPort: teamPort })
-    for (const line of answer.lines || []) out(line)
+    for (const line of Array.isArray(answer?.lines) ? answer.lines : []) out(terminalSafe(line))
     if (!flags.open && !flags['print-owner-link']) return null
   }
   if (running) {

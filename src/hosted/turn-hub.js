@@ -134,7 +134,11 @@ export function createTurnHub({ now = () => Date.now(), limits = {} } = {}) {
     return [...turns.values()].filter((turn) => time - turn.openedAt > limit.maxMs || (time - turn.heardAt > limit.lostMs && !linked(turn)))
   }
 
+  // Every live turn (a copy).
+  const list = () => [...turns.values()]
+
   return {
+    list,
     open,
     push,
     get,

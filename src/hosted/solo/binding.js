@@ -81,18 +81,22 @@ const START_OVER = 'To start over, stop the engine (shapewall serve) and move it
 export const SOLO_BOUND_DELETE_MESSAGE = {
   workspace: 'This is the workspace the engine serves, so it cannot be deleted here. ' + START_OVER,
   account: 'Your account owns the workspace the engine serves, so it cannot be deleted here. ' + START_OVER,
+  project: 'This is the project the engine serves, so it cannot be deleted here. ' + START_OVER,
 }
-// Whether deleting `workspaceId`, or the account `userId` (which removes the
-// workspaces it owns), would take the workspace the engine serves.
-export function deletesSoloBinding(db, { workspaceId = null, userId = null }) {
+// Whether deleting `workspaceId`, the project `projectId`, or the account
+// `userId` (which removes the workspaces it owns), would take the workspace or
+// the project the engine serves.
+export function deletesSoloBinding(db, { workspaceId = null, userId = null, projectId = null }) {
   if (!isSoloFolder(db)) return false
-  let bound
+  let binding
   try {
-    bound = readSoloBinding(db)?.workspaceId
+    binding = readSoloBinding(db)
   } catch {
     return true
   }
+  const bound = binding?.workspaceId
   if (!bound) return true
+  if (projectId && projectId === binding.projectId) return true
   if (workspaceId && workspaceId === bound) return true
   if (userId)
     return Boolean(

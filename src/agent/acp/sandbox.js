@@ -153,6 +153,13 @@ export function createSandbox({
       ...denyRead.filter((item) => typeof item === 'string' && path.isAbsolute(item)).map((item) => realTarget(item)),
     ]),
   ]
+  // The same folders as the project spells them (C-4): the agent's own Read rules (acp.js sessionSettings) name both,
+  // since an agent may match a rule on the path it was asked for, before any link in it is followed.
+  const spelledDenied = [
+    ...protect.map((dir) => path.resolve(dir)),
+    path.join(path.resolve(root), AUTH_DIR),
+    ...denyRead.filter((item) => typeof item === 'string' && path.isAbsolute(item)).map((item) => path.resolve(item)),
+  ]
 
   const check = (target, real, write) => {
     if (!inside(realRoot, real)) throw new SandboxError(`${target} is outside the project; only files under ${realRoot} are allowed`)
@@ -246,7 +253,7 @@ export function createSandbox({
 
   return {
     root: realRoot,
-    denyRead: realDenied,
+    denyRead: [...new Set([...realDenied, ...spelledDenied])],
     resolve,
     sensitive,
     // ACP's line is 1-based; limit is a number of lines.

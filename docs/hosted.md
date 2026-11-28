@@ -865,15 +865,29 @@ there, with this start's key from the data folder, from this machine and your ow
   They do not get anything that belongs to the engine's owner on this machine: the engine's settings, captures, checks
   runs, journeys editing, batch fixes, updates, the terminal sign-in and this machine's tokens (`cli.token`, `watch.token`,
   `agent.token`) all stay on your loopback address, which the tailnet never reaches. On the team address a request with
-  one of this machine's tokens is refused, a member cannot make or remove projects or workspaces, and a member cannot
-  invite anyone. The board's chat and Fix with run through the engine's agent, at the trust tier the member's role gets,
-  as on a team server.
+  one of this machine's tokens is refused, and a member (an admin too) cannot make or remove projects or workspaces,
+  invite anyone, turn on share links or make one, or change who the engine's own agents take work from, their approval
+  rule or the project's default agent. These refusals hold however the address is spelled (letter case included), and
+  `--read-only` and `--no-chat` hold for members as for you.
+- **The engine's own agent** runs on this machine, so it takes work from you only, whatever is set on the server, until
+  you let members in yourself: `shapewall agent set --as local --audience server`. Members' chat and Fix with then run
+  through it at the trust tier their role gets, as on a team server. When team mode goes off, or you remove a member,
+  the turns members started stop.
 - **How it is built.** Team mode starts a second listener on 127.0.0.1 (a random port) for the same database and the same
   live state (comments, chat, presence, the agent link), and `tailscale serve` forwards the tailnet to that port only.
   Your own sign-in is on the engine's port, which keeps every rule above (this machine, your OS user, the engine's name):
   a tailnet request never reaches it, and the terminal session's cookie counts for nothing on the team address. Turning it
   off removes the `tailscale serve` entry, closes the listener and signs out every tailnet session; members and their
   comments stay for the next time.
+- **Only `shapewall serve` shares it.** The engine that `comments`, `watch` and `mcp` start for themselves when no
+  `serve` runs never turns team mode on and never runs `tailscale`, whatever was saved; the saved setting stays for the
+  next `shapewall serve`.
+- **After a crash.** `tailscale serve --bg` outlives the process that added it. The engine records the entry it adds
+  (`team-serve.json` in its data folder) and removes it when it stops; a stop that could not remove it tries again once
+  the engine's port is closed, and the next `shapewall serve` in the folder removes one a crash or `kill -9` left
+  behind (only if it still points at the engine's old port). Until then the entry points at a closed port on
+  127.0.0.1, which another user of this machine could listen on and answer tailnet members from. On a machine you share
+  with other users, check `tailscale serve status` after a crash, or start `shapewall serve` again.
 - **The public internet** is not part of team mode. For a board on your own domain, run a team server with
   [own domain deployment](#own-domain-deployment-mode-2) and its [checklist](#before-public-hosting).
 
