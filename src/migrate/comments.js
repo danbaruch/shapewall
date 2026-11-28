@@ -20,7 +20,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { boardDir, commentOnOtherEnvironment, commentsFile, VERSION_RE } from '../store.js'
+import { boardDir, cleanGithub, commentOnOtherEnvironment, commentsFile, VERSION_RE } from '../store.js'
 import { CommentError, STORED_AGENT_STATUSES, cleanFixRef, validateAnchor } from '../comment-fields.js'
 import { validateDrawing } from '../comment-drawing.js'
 import { REACTIONS } from '../reactions.js'
@@ -71,6 +71,7 @@ const CARRIED = new Set([
   'images',
   'drawing',
   'environment',
+  'github',
   'byOwner',
   'authorAgent',
   'authorGuest',
@@ -79,7 +80,6 @@ const CARRIED = new Set([
 export const DROPPED_FIELDS = {
   agentClaim: "a local watcher's claim; the engine's agents claim through their own link (the status stays)",
   agentBranch: 'the branch of a branch-ready fix; the branch stays in git and the comment keeps its status',
-  github: 'its GitHub issue or pull request link; the engine has no GitHub link yet (1.5.0 gap G7)',
   mentions: 'read from the text again on the engine',
 }
 const REPLY_CARRIED = new Set([
@@ -106,6 +106,23 @@ const clean = (value) =>
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase()
+
+// A comment's GitHub issue and pull request links (migration 25), as the
+// local store reads them (store.js cleanGithub): what it would not keep is
+// reported, and stays in the backup. -> null for none.
+function githubOf(comment, where, drop) {
+  if (comment.github == null) return null
+  const raw = comment.github
+  const github = cleanGithub(raw)
+  if (raw?.issue && !github.issue) drop(`${where}, GitHub issue`, 'not an issue link Shapewall writes; it stays in the backup')
+  const pulls = Array.isArray(raw?.pulls) ? raw.pulls.length : 0
+  if (pulls > github.pulls.length)
+    drop(
+      `${where}, ${pulls - github.pulls.length} pull request link(s)`,
+      'not a pull request link Shapewall writes, or more than a comment keeps; it stays in the backup',
+    )
+  return github.issue || github.pulls.length ? github : null
+}
 
 // The comments file, parsed. A file that does not parse stops the
 // migration (it is never read as "no comments").
@@ -348,6 +365,8 @@ export function planComments(config, board, { owner }) {
       // with none is on the board's first one (MIG24 section 1).
       environment: environmentOf(board, comment, where, notes),
       otherEnvironment: commentOnOtherEnvironment(board, comment),
+      // Migration 25: its GitHub issue and pull requests, as the local board kept them.
+      github: githubOf(comment, where, drop),
       files: files.map((file) => ({ ...file, createdAt })),
     })
   }
@@ -370,6 +389,7 @@ export function planComments(config, board, { owner }) {
     comments: planned,
     nextComment: Math.max(nextId, highest + 1),
     otherEnvironments: planned.filter((comment) => comment.otherEnvironment).length,
+    githubLinks: planned.filter((comment) => comment.github).length,
     counts,
     drops,
     notes,

@@ -22,7 +22,10 @@ const WS = 'ws_aaaaaaaaaaaaaaaaaaaaaaaa'
 const AT = '2026-11-01T00:00:00.000Z'
 const NEVER = '1970-01-01T00:00:00.000Z'
 const docs = fs.readFileSync(new URL('../docs/hosted.md', import.meta.url), 'utf8')
-const ROLLBACK_24 = /```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 24 and rollback')))[1]
+// Migration 25 is rolled back before 24 (docs/hosted.md), so "back to 23" is both, in that order.
+const ROLLBACK_24 =
+  /```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 25 and rollback')))[1] +
+  /```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 24 and rollback')))[1]
 
 const versions = (db) =>
   db
@@ -92,8 +95,8 @@ async function at23(name) {
 test('a new database has migration 24: environments on comments, local sessions, the solo binding', async () => {
   const db = await openDatabase(path.join(tempDir('migration-24-new'), 'shapewall.db'))
   try {
-    assert.equal(userVersion(db), 24)
-    assert.deepEqual(versions(db).slice(-3), [22, 23, 24])
+    assert.equal(userVersion(db), 25)
+    assert.deepEqual(versions(db).slice(-4), [22, 23, 24, 25])
     assert.ok(columns(db, 'comments').includes("environment TEXT 1 'default' 0"))
     assert.match(tableSql(db, 'sessions'), /CHECK \(via IN \('passkey', 'recovery', 'tailnet', 'local'\)\)/)
     assert.ok(tableSql(db, 'solo_binding'))
@@ -134,11 +137,11 @@ test('migration 24 on a version 23 database keeps every row, runs once, and the 
 
   // Up: every session copied as it was, every comment on 'default'.
   db = await openDatabase(file)
-  assert.equal(userVersion(db), 24)
+  assert.equal(userVersion(db), 25)
   assert.deepEqual(rows(db, 'SELECT * FROM sessions ORDER BY token_hash'), sessionsBefore)
   assert.deepEqual(
     rows(db, 'SELECT * FROM comments ORDER BY id'),
-    commentsBefore.map((row) => ({ ...row, environment: 'default' })),
+    commentsBefore.map((row) => ({ ...row, environment: 'default', github: null })),
   )
   assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok')
   assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
@@ -159,7 +162,7 @@ test('migration 24 on a version 23 database keeps every row, runs once, and the 
   db.close()
   // Opened again: 24 does not run twice (the rows it would have rewritten stay).
   db = await openDatabase(file)
-  assert.deepEqual(versions(db).slice(-2), [23, 24])
+  assert.deepEqual(versions(db).slice(-3), [23, 24, 25])
   assert.equal(db.prepare("SELECT via FROM sessions WHERE token_hash = 'h_local'").get().via, 'local')
   assert.equal(db.prepare('SELECT environment FROM comments WHERE number = 3').get().environment, 'staging')
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM solo_binding').get().n, 1)
@@ -181,7 +184,7 @@ test('migration 24 on a version 23 database keeps every row, runs once, and the 
 
   // And up again: 24 runs once more, on the rolled back rows.
   db = await openDatabase(file)
-  assert.equal(userVersion(db), 24)
+  assert.equal(userVersion(db), 25)
   assert.deepEqual(
     rows(db, 'SELECT number, environment FROM comments ORDER BY number'),
     [1, 2, 3].map((number) => ({ number, environment: 'default' })),

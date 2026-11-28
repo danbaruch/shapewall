@@ -10,6 +10,13 @@
 // `gh auth token`, and the webhook secret only from
 // $SHAPEWALL_GITHUB_WEBHOOK_SECRET: neither is ever written to a file, an
 // export, a log line or an API response. Calls use the REST API with fetch.
+//
+// Where the links are kept (`store`): a local board's comments are the 1.x
+// JSON files (localGithubStore, the default); once the solo engine holds the
+// project they are its comments, read and written through its token API
+// (engineGithubStore, 2.0.0, plan R5d). Either way this module asks GitHub
+// itself, with the token from this machine's environment, which never goes
+// to the engine; the store only keeps the result.
 
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -21,6 +28,7 @@ import { DEFAULT_BOARD_URL, runningBoardUrl } from './serve-state.js'
 import { boardLink as deepLink } from './board-links.js'
 import { commentText } from './comment-fields.js'
 import { CommentError, getComment, listComments, readJson, recordGithubPull, setGithubIssue, writeJsonAtomic } from './store.js'
+import { RemoteError } from './remote/remote.js'
 import { absoluteProgram } from './which.js'
 
 // Checked in this order; the first one set wins.
@@ -209,13 +217,21 @@ function screenshotLink(settings, boardId, item) {
 }
 
 // The issue made from one comment (the feedback item shape).
-export function issueContent(settings, boardId, item) {
+// `screenshots: false`: the board's capture files are not public links (the
+// solo engine's need its sign-in), so the issue points at the comment on the
+// board for them.
+export function issueContent(settings, boardId, item, { screenshots = true } = {}) {
   const where = item.page ? item.page.title : `Variant: ${item.variant?.title || 'removed'}`
   const text = commentText({ body: item.body, images: item.files?.images, drawing: item.drawing })
   const first = text.split('\n')[0].replace(/\s+/g, ' ').trim()
   const title = `${where}: ${first.length > 90 ? `${first.slice(0, 89)}...` : first}`.slice(0, 200)
   const crop = aroundRect(item.position, item.viewport)
-  const shot = screenshotLink(settings, boardId, item)
+  const shot = screenshots ? screenshotLink(settings, boardId, item) : null
+  const shotText = shot
+    ? `[${item.viewport.name} capture](${shot})`
+    : item.files?.screenshot
+      ? `${item.viewport.name} capture on the board (link below)`
+      : 'not captured'
   const lines = [
     ...text.split('\n').map((line) => `> ${quiet(line)}`),
     '',
@@ -228,7 +244,7 @@ export function issueContent(settings, boardId, item) {
   if (item.element) lines.push(`**Element:** ${code(item.element.selector)}${item.element.text ? ` ("${quiet(item.element.text)}")` : ''}`)
   lines.push(`**Pin:** ${item.position.x}, ${item.position.y} px (${item.position.xPercent}% / ${item.position.yPercent}%)`)
   lines.push(
-    `**Screenshot:** ${shot ? `[${item.viewport.name} capture](${shot})` : 'not captured'}; the part around the pin is x ${crop.x}-${crop.x + crop.width}, y ${crop.y}-${crop.y + crop.height}${item.captureVersion ? ` (capture ${item.captureVersion})` : ''}`,
+    `**Screenshot:** ${shotText}; the part around the pin is x ${crop.x}-${crop.x + crop.width}, y ${crop.y}-${crop.y + crop.height}${item.captureVersion ? ` (capture ${item.captureVersion})` : ''}`,
   )
   lines.push(`**On the board:** [comment #${item.id}](${boardLink(settings, boardId, item.id)})`)
   lines.push(
@@ -247,17 +263,20 @@ const pendingIssues = new Map()
 
 // Creates the GitHub issue for a comment, or returns the one it already has.
 // Returns { comment, issue, created }.
-export async function createIssue(config, { boardId = null, commentId, env = process.env, fetchImpl, now = new Date() }) {
-  const settings = githubSettings(config, env)
+export async function createIssue(
+  config,
+  { boardId = null, commentId, env = process.env, fetchImpl, now = new Date(), store = localGithubStore(config) },
+) {
+  const settings = await store.settings(githubSettings(config, env), env)
   const board = boardFor(config, boardId)
-  const existing = getComment(config, board.id, commentId)
-  if (existing.github.issue) return { comment: existing, issue: existing.github.issue, created: false }
+  const { comment: existing, item: itemOf } = await store.comment(board.id, commentId)
+  const linked = githubOf(existing)
+  if (linked.issue) return { comment: existing, issue: linked.issue, created: false }
   if (!settings.ready) throw new CommentError(400, 'github_not_configured', notReady(settings))
-  const key = `${board.id}/${existing.id}`
+  const key = `${store.key}:${board.id}/${existing.id}`
   if (pendingIssues.has(key)) return pendingIssues.get(key)
   const run = (async () => {
-    const item = feedbackItem(feedbackContext(config, board), existing)
-    const { title, body } = issueContent(settings, board.id, item)
+    const { title, body } = issueContent(settings, board.id, itemOf(), { screenshots: store.screenshots })
     const created = await githubRequest(settings, env, 'POST', `/repos/${settings.repo}/issues`, {
       body: { title, body, ...(settings.labels.length ? { labels: settings.labels } : {}) },
       fetchImpl,
@@ -266,8 +285,8 @@ export async function createIssue(config, { boardId = null, commentId, env = pro
       throw new CommentError(502, 'github_error', 'GitHub did not return the new issue.')
     }
     const issue = { number: created.number, url: created.html_url, title: created.title || title, createdAt: now.toISOString() }
-    const comment = await setGithubIssue(config, board.id, existing.id, issue, { now })
-    return { comment, issue: comment.github.issue, created: true }
+    const comment = await store.setIssue(board.id, existing.id, issue, now)
+    return { comment, issue: githubOf(comment).issue, created: true }
   })()
   pendingIssues.set(key, run)
   try {
@@ -299,6 +318,80 @@ function boardFor(config, boardId) {
   const board = config.boards.find((item) => item.id === boardId)
   if (!board) throw new CommentError(404, 'unknown_board', `No board "${boardId}".`)
   return board
+}
+
+// ---- Where the links are kept ---------------------------------------------------------
+
+const githubOf = (comment) => ({
+  issue: comment?.github?.issue || null,
+  pulls: Array.isArray(comment?.github?.pulls) ? comment.github.pulls : [],
+})
+
+// The 1.x JSON files (src/store.js). `comment` -> { comment, item() }, item
+// being the comment in the feedback item shape (what an issue is made of).
+export function localGithubStore(config) {
+  return {
+    key: 'local',
+    screenshots: true,
+    syncFile: syncStateFile(config),
+    settings: async (settings) => settings,
+    comment: async (boardId, commentId) => {
+      const comment = getComment(config, boardId, commentId)
+      return { comment, item: () => feedbackItem(feedbackContext(config, boardFor(config, boardId)), comment) }
+    },
+    comments: async (boardId) => listComments(config, boardId),
+    setIssue: (boardId, commentId, issue, now) => setGithubIssue(config, boardId, commentId, issue, { now }),
+    recordPull: (boardId, commentId, pull, { via, now }) => recordGithubPull(config, boardId, commentId, pull, { via, now }),
+  }
+}
+
+// The solo engine's comments, through its token API (`remote`: a client of
+// src/remote/remote.js with the engine's command-line token). Its answers are
+// the token API's items (feedback item shape, github included). A guest's
+// comment is reached with the guests opt-in, as a local board links any
+// comment a pull request names. The engine's refusals come back as
+// CommentError, so sync skips a comment it cannot link the same way.
+// The link back from an issue: where people open the board, when
+// $SHAPEWALL_BOARD_URL or the config's boardUrl names it; else the engine's
+// board path (/w/<workspace>/p/<project>/, as its comment list gives it) on
+// the address `shapewall serve` uses (the default port), since an engine
+// started just for this command is gone when it ends. `syncFile`: the sync
+// state, in the engine's project folder (src/cli/board-home.js).
+export function engineGithubStore(remote, config, { syncFile = null } = {}) {
+  const asComment = async (work) => {
+    try {
+      return await work()
+    } catch (error) {
+      if (error instanceof RemoteError && error.status >= 400 && error.status < 500 && error.status !== 401)
+        throw new CommentError(error.status, error.code === 'not_found' ? 'unknown_comment' : error.code, error.message)
+      throw error
+    }
+  }
+  return {
+    key: 'engine',
+    screenshots: false,
+    syncFile,
+    settings: async (settings, env = process.env) => {
+      if (env.SHAPEWALL_BOARD_URL || config.boardUrl || !settings.ready || !config.boards[0]) return settings
+      const listed = await asComment(() => remote.comments(config.boards[0].id, { status: 'resolved' }))
+      const where = typeof listed?.board?.url === 'string' ? new URL(listed.board.url).pathname : null
+      if (!where || !/^\/w\/[^/]+\/p\/[^/]+\/$/.test(where)) return settings
+      return { ...settings, boardUrl: new URL(where, settings.boardUrl).toString() }
+    },
+    comment: (boardId, commentId) =>
+      asComment(async () => {
+        const { comment } = await remote.comment(boardId, commentId, { guests: true })
+        return { comment, item: () => comment }
+      }),
+    comments: (boardId) => asComment(async () => (await remote.comments(boardId, { status: 'all', guests: true })).comments),
+    setIssue: (boardId, commentId, issue) =>
+      asComment(async () => (await remote.githubIssue(boardId, commentId, issue, { guests: true })).comment),
+    recordPull: (boardId, commentId, pull, { via }) =>
+      asComment(async () => {
+        const { comment, changed, merged } = await remote.githubPull(boardId, commentId, pull, { via, guests: true })
+        return { comment, changed: Boolean(changed), merged: Boolean(merged) }
+      }),
+  }
 }
 
 // ---- Pull requests ------------------------------------------------------------------
@@ -346,14 +439,15 @@ export function refsInText(text, defaultBoard) {
 }
 
 // Which comments link to which issue and pull request numbers, on every board.
-function linkIndex(config) {
+async function linkIndex(config, store) {
   const issues = new Map()
   const pulls = new Map()
   const add = (map, key, value) => map.set(key, [...(map.get(key) || []), value])
   for (const board of config.boards) {
-    for (const comment of listComments(config, board.id)) {
-      if (comment.github.issue) add(issues, comment.github.issue.number, { boardId: board.id, commentId: comment.id })
-      for (const pull of comment.github.pulls) add(pulls, pull.number, { boardId: board.id, commentId: comment.id, state: pull.state })
+    for (const comment of await store.comments(board.id)) {
+      const github = githubOf(comment)
+      if (github.issue) add(issues, github.issue.number, { boardId: board.id, commentId: comment.id })
+      for (const pull of github.pulls) add(pulls, pull.number, { boardId: board.id, commentId: comment.id, state: pull.state })
     }
   }
   return { issues, pulls }
@@ -361,7 +455,7 @@ function linkIndex(config) {
 
 // Links (or updates) one pull request on every comment it concerns. Returns
 // { linked: [...], merged: [...], skipped: [...] } with { board, comment, pull, state }.
-async function applyPull(config, settings, pr, index, now) {
+async function applyPull(config, store, settings, pr, index, now) {
   const pull = pullFromApi(pr)
   const refs = refsInText(`${pr.title || ''}\n${pr.body || ''}`, settings.board)
   const targets = new Map()
@@ -380,7 +474,7 @@ async function applyPull(config, settings, pr, index, now) {
       continue
     }
     try {
-      const { changed, merged } = await recordGithubPull(config, target.boardId, target.commentId, pull, { via: target.via, now })
+      const { changed, merged } = await store.recordPull(target.boardId, target.commentId, pull, { via: target.via, now })
       if (changed) result.linked.push(entry)
       if (merged) result.merged.push(entry)
     } catch (error) {
@@ -401,16 +495,19 @@ function mergeResults(into, from) {
 // Links a pull request to a comment by hand (`shapewall github link`). Reads
 // the PR from GitHub, so a merged one resolves the comment right away.
 // Returns { comment, pull, merged }.
-export async function linkPull(config, { boardId = null, commentId, pr, env = process.env, fetchImpl, now = new Date() }) {
+export async function linkPull(
+  config,
+  { boardId = null, commentId, pr, env = process.env, fetchImpl, now = new Date(), store = localGithubStore(config) },
+) {
   const settings = githubSettings(config, env)
   const board = boardFor(config, boardId)
-  getComment(config, board.id, commentId)
+  await store.comment(board.id, commentId)
   if (!settings.ready) throw new CommentError(400, 'github_not_configured', notReady(settings))
   const number = parsePullRef(pr, settings.repo)
   const data = await githubRequest(settings, env, 'GET', `/repos/${settings.repo}/pulls/${number}`, { fetchImpl })
   const pull = pullFromApi(data)
-  const { comment, merged } = await recordGithubPull(config, board.id, commentId, pull, { via: 'manual', now })
-  return { comment, pull: comment.github.pulls.find((item) => item.number === number), merged }
+  const { comment, merged } = await store.recordPull(board.id, commentId, pull, { via: 'manual', now })
+  return { comment, pull: githubOf(comment).pulls.find((item) => item.number === number), merged }
 }
 
 // ---- Sync (polling) -----------------------------------------------------------------
@@ -423,14 +520,17 @@ export function syncStateFile(config) {
 // a few pages at most), links the ones that name a comment, and refreshes
 // linked ones that were not in the list. Returns { repo, scanned, linked,
 // merged, skipped, since }.
-export async function syncGithub(config, { env = process.env, fetchImpl, now = new Date(), log = () => {} } = {}) {
+export async function syncGithub(
+  config,
+  { env = process.env, fetchImpl, now = new Date(), log = () => {}, store = localGithubStore(config) } = {},
+) {
   const settings = githubSettings(config, env)
   if (!settings.ready) throw new CommentError(400, 'github_not_configured', notReady(settings))
-  const stateFile = syncStateFile(config)
+  const stateFile = store.syncFile || syncStateFile(config)
   const state = readJson(stateFile)
   const since = state?.repo === settings.repo && typeof state.lastSyncAt === 'string' ? state.lastSyncAt : null
   const cutoff = since ? Date.parse(since) - SYNC_OVERLAP_MS : null
-  const index = linkIndex(config)
+  const index = await linkIndex(config, store)
   const result = { repo: settings.repo, since, scanned: 0, linked: [], merged: [], skipped: [] }
   const seen = new Set()
   let done = false
@@ -451,7 +551,7 @@ export async function syncGithub(config, { env = process.env, fetchImpl, now = n
       if (!Number.isSafeInteger(pr?.number) || seen.has(pr.number)) continue
       seen.add(pr.number)
       result.scanned += 1
-      mergeResults(result, await applyPull(config, settings, pr, index, now))
+      mergeResults(result, await applyPull(config, store, settings, pr, index, now))
     }
     if (list.length < SYNC_PAGE_SIZE) done = true
   }
@@ -461,7 +561,7 @@ export async function syncGithub(config, { env = process.env, fetchImpl, now = n
     try {
       const pr = await githubRequest(settings, env, 'GET', `/repos/${settings.repo}/pulls/${number}`, { fetchImpl })
       result.scanned += 1
-      mergeResults(result, await applyPull(config, settings, pr, index, now))
+      mergeResults(result, await applyPull(config, store, settings, pr, index, now))
     } catch (error) {
       if (!(error instanceof CommentError) || error.code !== 'github_not_found') throw error
       log(`pull request #${number} is gone from ${settings.repo}`)
@@ -496,7 +596,8 @@ export async function handleWebhook(config, { event, payload, env = process.env,
   if (!pr || !Number.isSafeInteger(pr.number) || typeof pr.html_url !== 'string') {
     return { status: 400, body: { error: { code: 'invalid_payload', message: 'No pull request in the event.' } } }
   }
-  const result = await applyPull(config, settings, pr, linkIndex(config), now)
+  const store = localGithubStore(config)
+  const result = await applyPull(config, store, settings, pr, await linkIndex(config, store), now)
   return { status: 200, body: { ok: true, action: payload.action || null, pull: pr.number, ...result } }
 }
 

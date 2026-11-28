@@ -463,3 +463,17 @@ test('the export comments route is the solo engine only: a team server answers 4
   assert.equal(answer.status, 404)
   assert.equal(answer.json?.error?.message, 'Not on this server.', 'the route itself refuses (not a missing route)')
 })
+
+test('the GitHub link routes are the solo engine only: a team server answers 404 and keeps no links', async () => {
+  const issue = { number: 3, url: 'https://github.com/acme/site/issues/3', title: 'x' }
+  const pull = { number: 4, url: 'https://github.com/acme/site/pull/4', title: 'y', state: 'merged', mergedAt: new Date().toISOString() }
+  for (const [route, body] of [
+    ['github/issue', { issue }],
+    ['github/pulls', { pull, via: 'manual' }],
+  ]) {
+    const answer = await tokenCall(hosted, token, 'POST', `/api/v1/boards/sample/comments/1/${route}`, { body })
+    assert.equal(answer.status, 404, route)
+    assert.equal(answer.json?.error?.message, 'Not on this server.', route)
+  }
+  assert.equal(hosted.db.prepare('SELECT COUNT(*) AS n FROM comments WHERE github IS NOT NULL').get().n, 0)
+})

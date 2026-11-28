@@ -140,7 +140,7 @@ test("export: the engine's comments through its token API (started for the comma
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(bare, 'data', 'boards', 'sample', 'comments.json'), 'utf8')).comments, [])
 })
 
-test("journeys and variants read the engine's board folder; github refuses", async () => {
+test("journeys and variants read the engine's board folder; github goes to the engine", async () => {
   const { board, file, home } = await migratedProject('everywhere-folders')
   // Only in the engine's folder: proves the command reads there, not .shapewall/<board>/.
   await createJourney(home, board, { name: 'Made on the engine', steps: ['home', 'pricing'] })
@@ -156,7 +156,10 @@ test("journeys and variants read the engine's board folder; github refuses", asy
 
   const github = await cli(['github', 'issue', '1', '--config', file])
   assert.notEqual(github.code, 0)
-  assert.match(github.err, /shapewall github works on the 1\.x board files, and the solo engine holds this project's board/)
+  // The engine's comment, found (test/github-engine.test.js has the whole flow): only GitHub is not set up here.
+  assert.match(github.err, /Solo engine: started for this command/)
+  assert.match(github.err, /GitHub/)
+  assert.doesNotMatch(github.err, /works on the 1\.x board files/)
 })
 
 test('share --remote stays refused on an engine board', async () => {

@@ -1,24 +1,34 @@
 // `shapewall github` and `shapewall doctor`.
 
+import path from 'node:path'
 import { getBoard, loadConfig } from '../config.js'
 import { acpFlag } from './serve.js'
-import { assertNotEngineBoard } from './board-home.js'
+import { assertNotEngineBoard, boardHome } from './board-home.js'
+import { ENGINE_TOKEN } from '../engine-target.js'
 
 export async function github(positional, flags, out) {
   const config = loadConfig(flags.config)
-  await assertNotEngineBoard(
-    config,
-    'shapewall github',
-    'Its issues and pull request links for the solo engine are not in this build yet; SHAPEWALL_ENGINE=legacy runs it on the 1.x board files (deprecated).',
-  )
-  const { createIssue, linkPull, syncGithub } = await import('../github.js')
+  const { createIssue, engineGithubStore, linkPull, localGithubStore, syncGithub } = await import('../github.js')
+  // Once the solo engine holds the project, the links are its comments' (2.0.0, R5d): main() points flags at the
+  // engine (src/cli/engine-mode.js, started for this command when it does not run). This command still asks GitHub
+  // itself, with this machine's token; the engine only keeps what it found. Its sync state is in the engine's folder.
+  let store
+  if (typeof flags[ENGINE_TOKEN] === 'string') {
+    const { createRemote, remoteSettings } = await import('../remote/remote.js')
+    const home = (await boardHome(config)).config
+    store = engineGithubStore(createRemote(remoteSettings(flags)), config, { syncFile: path.join(home.outputDir, 'github-sync.json') })
+  } else {
+    // An engine board reached some other way (an explicit --remote): never the 1.x files, which are not the board.
+    await assertNotEngineBoard(config, 'shapewall github', 'Run it without --remote: it goes to the solo engine of this folder.')
+    store = localGithubStore(config)
+  }
   const action = positional[0]
   const print = (value, line) => out(flags.json ? JSON.stringify(value, null, 2) : line)
   if (action === 'issue') {
     const id = positional[1]
     if (!id) throw new Error('usage: shapewall github issue COMMENT_ID')
     const board = getBoard(config, flags.board)
-    const result = await createIssue(config, { boardId: board.id, commentId: id })
+    const result = await createIssue(config, { boardId: board.id, commentId: id, store })
     print(
       result,
       `${result.created ? 'Opened' : 'Already has'} issue #${result.issue.number} for comment #${result.comment.id}: ${result.issue.url}`,
@@ -29,13 +39,13 @@ export async function github(positional, flags, out) {
     const [, id, pr] = positional
     if (!id || !pr) throw new Error('usage: shapewall github link COMMENT_ID PR (12, #12 or the pull request URL)')
     const board = getBoard(config, flags.board)
-    const result = await linkPull(config, { boardId: board.id, commentId: id, pr })
+    const result = await linkPull(config, { boardId: board.id, commentId: id, pr, store })
     const merged = result.merged ? '; it has merged, so the comment is resolved' : ''
     print(result, `Linked pull request #${result.pull.number} [${result.pull.state}] to comment #${result.comment.id}${merged}`)
     return
   }
   if (action === 'sync') {
-    const result = await syncGithub(config, { log: out })
+    const result = await syncGithub(config, { log: out, store })
     const lines = [`Read ${result.scanned} pull request${result.scanned === 1 ? '' : 's'} of ${result.repo}`]
     for (const item of result.linked) lines.push(`  linked #${item.pull} [${item.state}] to comment ${item.board}/${item.comment}`)
     for (const item of result.merged) lines.push(`  resolved comment ${item.board}/${item.comment} (pull request #${item.pull} merged)`)

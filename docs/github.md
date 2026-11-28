@@ -79,6 +79,17 @@ Reads the repo's pull requests, most recently updated first, links the ones that
 that are still open. It remembers when it last ran (`.shapewall/github-sync.json`) and next time only reads what changed since (up to 250
 pull requests per run). Run it by hand, after a merge in CI, or on whatever schedule you like; Shapewall does not schedule it for you.
 
+## On the solo engine
+
+Once the solo engine holds the project (2.0.0: `shapewall serve`, or `shapewall migrate`), `issue`, `link` and `sync` work on its
+comments, whether `serve` runs or not (with none running, the command starts the engine for itself and stops it at the end). The
+command still asks GitHub itself, with the token from this machine's environment; the engine never sees that token, it only keeps
+the issue and pull request links (through its token API) and resolves a comment once when its pull request merges. The sync state is
+in the engine's project folder (`.shapewall/.engine/files/<workspace>/<project>/github-sync.json`). `shapewall migrate` carries a 1.x
+comment's links over. The link back from an issue goes to the engine's board on the address `serve` uses, unless `boardUrl` or
+`$SHAPEWALL_BOARD_URL` names another; the issue points at the comment on the board for its screenshot, since the engine's capture files
+need its sign-in. The webhook below is the 1.x server's only: on the engine, use `sync`.
+
 ## Webhook
 
 With a public board you can let GitHub tell Shapewall instead of polling:

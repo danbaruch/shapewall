@@ -960,6 +960,41 @@ export function mountTokenApi({
       res.json({ board: boardRef(ctx.board), comment: v1Item(req, ctx, comment) })
     }),
   )
+  // GitHub links (2.0.0, plan R5d; migration 25): what `shapewall github`
+  // records on the solo engine after it asked GitHub itself, with the
+  // owner's GitHub token, which never comes here. The solo engine only: a
+  // team server keeps no GitHub links. The issue made from a comment is a
+  // note on it (reply scope); a pull request link resolves the comment when
+  // it has merged, so it needs the resolve scope, and that merge ends any
+  // agent's claim on the comment as a resolve does.
+  const soloOnly = (req, res, next) => (solo ? next() : fail(res, 404, 'not_found', 'Not on this server.'))
+  v1.post(
+    '/boards/:bid/comments/:cid/github/issue',
+    soloOnly,
+    scope('reply'),
+    v1Json,
+    v1Comment((req, res, ctx) => {
+      const comment = transaction(db, () => ctx.comments.setGithubIssue(req.params.cid, req.body?.issue, now()))
+      res.json({ board: boardRef(ctx.board), comment: v1Item(req, ctx, comment) })
+    }),
+  )
+  v1.post(
+    '/boards/:bid/comments/:cid/github/pulls',
+    soloOnly,
+    scope('resolve'),
+    v1Json,
+    v1Comment((req, res, ctx) => {
+      const via = typeof req.body?.via === 'string' ? req.body.via : 'manual'
+      const result = transaction(db, () => {
+        const outcome = ctx.comments.recordGithubPull(req.params.cid, req.body?.pull, { via }, now())
+        if (outcome.merged) agentsFor(req.t).closeCommentClaims(req.project.id, ctx.board.id, outcome.comment.id)
+        return outcome
+      })
+      if (result.merged)
+        auditOf(req, 'comment_resolved', `${ctx.board.id}#${result.comment.id}`, { project: req.project.id, via: 'github' })
+      res.json({ board: boardRef(ctx.board), comment: v1Item(req, ctx, result.comment), changed: result.changed, merged: result.merged })
+    }),
+  )
   v1.use(v1Json)
   mountHostedApprovals({
     v1,
