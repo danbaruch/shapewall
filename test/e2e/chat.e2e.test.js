@@ -354,8 +354,8 @@ test('build: the natural voice is not in the main bundle or the app shell', () =
   )
   const sw = fs.readFileSync(path.join(dist, 'sw.js'), 'utf8')
   assert.ok(!sw.includes('assets/tts-'), 'the service worker never precaches the voice')
-  // A few kB of glue, not megabytes.
-  assert.ok(fs.statSync(path.join(dist, main)).size < 900 * 1024, `main bundle ${fs.statSync(path.join(dist, main)).size} bytes`)
+  // A few kB of glue, not megabytes (the voice model is several MB). 940 KiB since B-20: staging sat 144 bytes under 900.
+  assert.ok(fs.statSync(path.join(dist, main)).size < 940 * 1024, `main bundle ${fs.statSync(path.join(dist, main)).size} bytes`)
 })
 
 test('desktop 1440: Stop ends the answer and marks it stopped', async () => {

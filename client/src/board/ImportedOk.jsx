@@ -3,6 +3,7 @@
 // comment). A banner says how many; "Review and send" lists each one in full,
 // and "Send to agents" sends exactly those, each with the hash of the text
 // shown (one changed meanwhile stays waiting). Admins only; nobody else sees it.
+// Board.jsx loads this file lazily, for admins only: the main bundle has no room to spare.
 import { useCallback, useEffect, useState } from 'react'
 import { Inbox } from 'lucide-react'
 import { api } from '../lib/api'
@@ -10,7 +11,7 @@ import { Button, Dialog } from '../components/ui'
 import { confirmHostedPasskey } from './HostedApprovals'
 import { sendWithStepUp } from './stepUp'
 
-export function useImportedOk({ boardId, enabled }) {
+function useImportedOk({ boardId, enabled }) {
   const [comments, setComments] = useState([])
   const url = `/api/boards/${encodeURIComponent(boardId)}/waiting-ok`
   const load = useCallback(async () => {
@@ -31,7 +32,8 @@ export function useImportedOk({ boardId, enabled }) {
 export const waitingOkText = (count) =>
   `${count} comment${count === 1 ? '' : 's'} from 1.x wait${count === 1 ? 's' : ''} for your OK before agents get ${count === 1 ? 'it' : 'them'}`
 
-export default function ImportedOk({ boardId, comments, reload, onSent, wide = true }) {
+export default function ImportedOk({ boardId, onSent, wide = true }) {
+  const { comments, reload } = useImportedOk({ boardId, enabled: true })
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState(null)
