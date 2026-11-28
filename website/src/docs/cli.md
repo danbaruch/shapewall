@@ -1031,7 +1031,7 @@ Commands
       --browser-comments    visitors may comment; their comments stay in their own browser
       --no-index            ask search engines not to index the export
   share --remote URL        move local captures, history and comments to a shared project
-                            (a 1.x board; a board the solo engine holds is refused: use serve --team)
+                            (a 1.x board; a solo engine board is refused: invite people with serve's team mode)
       --include-checks      explicitly include private diagnostic reports
       --board ID            move only this board (default all)
       --dry-run             show counts; sends nothing
