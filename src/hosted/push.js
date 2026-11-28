@@ -36,7 +36,7 @@ import { findApiToken, openPushIds, pushStatus, staleOpenPushes, tenant } from '
 import { mergeCheckEnvironments, validateCheckEnvironments } from '../checks/environments.js'
 import { projectDir } from './projects.js'
 import { readSoloBinding } from './solo/binding.js'
-import { boardJobBusyMessage, readBoardJob } from '../board-job.js'
+import { boardJobBusyMessage, boardSwapFile, readBoardJob } from '../board-job.js'
 import { acquireLock, releaseLock } from '../lock.js'
 import { CHECKS_BUNDLE_MAX, validateChecksBundle } from '../checks/transport.js'
 import { listReports } from '../checks/store.js'
@@ -711,8 +711,10 @@ export function createPushStore(
     const swap = { push: push.id, workspace: t.workspaceId, project: projectId, board: boardId, hadTarget: fs.existsSync(target) }
     writeSwap(dataDir, swap)
     let settled = false
-    // B-8: the board's job lock, held from the check through the swap.
+    // B-8: the board's job lock, held from the check through the swap, and
+    // B-17: the swap lock beside the folder, which does not move with it.
     let held = false
+    let swapLock = null
     try {
       transaction(db, () => {
         try {
@@ -749,6 +751,7 @@ export function createPushStore(
       // Moved with the folder it is in: in the old one after a swap (which
       // goes), back in place after a failed one. Only our own lock is removed.
       if (held) for (const dir of [target, old]) releaseLock(path.join(dir, 'capture.lock'))
+      if (swapLock) releaseLock(swapLock)
     }
     function commitInLock() {
       const at = now.toISOString()
@@ -764,6 +767,10 @@ export function createPushStore(
       // route was spelled. Held, not only checked (B-8): a capture from the
       // terminal (another process, no database lock) cannot take the board
       // between this check and the swap.
+      const swapFile = boardSwapFile({ outputDir: projectDir(dataDir, t.workspaceId, projectId) }, boardId)
+      if (!acquireLock(swapFile, { kind: 'push' }))
+        throw new PushError(409, 'push_running', 'A push of this board is being saved. Try again in a moment.')
+      swapLock = swapFile
       if (fs.existsSync(target) && !fs.lstatSync(target).isSymbolicLink()) {
         held = acquireLock(path.join(target, 'capture.lock'), { kind: 'push' })
         if (!held) {

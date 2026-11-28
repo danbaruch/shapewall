@@ -25,9 +25,10 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
   `serve --engine legacy` or `SHAPEWALL_ENGINE=legacy` (deprecated, removed in 3.0).
 - **What re-pairs or changes.** Sign-in sessions and paired devices do not move: `serve --open` signs the browser in from
   the terminal, and other devices and people come in through team mode. The board's address becomes
-  `http://<project>-<random>.shapewall.localhost:<port>`. Your comments are the owner account's: only comments the 1.x board
-  stamped as the owner's become the owner's, others signed with your name come in as imported text, and other names stay
-  labels. An agent's `--author` (and the MCP `author`) still labels its text.
+  `http://<project>-<random>.shapewall.localhost:<port>`. Your comments are the owner account's. On a plain local 1.x board
+  (no `serve --accounts`) every comment that is not an agent's or a share guest's becomes the owner's and goes to agents as
+  it did on 1.x; with `serve --accounts`, only comments the 1.x board stamped as the owner's become the owner's, others
+  signed with your name come in as imported text (not sent to agents until you send them), and other names stay labels. An agent's `--author` (and the MCP `author`) still labels its text.
 - **Refused on the engine.** `share --remote` refuses an engine board and points to `serve --team`; `comments delete` is
   not on the engine yet. The removed spellings are listed under Removed, each with its replacement.
 
@@ -51,6 +52,10 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
   [Migration 25 and rollback](docs/hosted.md#migration-25-and-rollback). The webhook stays the 1.x server's.
 - `shapewall migrate --rollback --all`: after a run that was stopped midway, `--rollback` puts back only that run; `--all`
   puts back every run, as `--rollback` did before.
+- `shapewall migrate --abandon`: when a run was stopped midway and its backup is gone, keeps what the engine has of it and
+  records it as done (what was left of its 1.x comment and chat files moves to `.shapewall/abandoned-<time>/`).
+  `shapewall migrate --rollback --give-up` ends a rollback that keeps failing and keeps the folder as it is. No message
+  advises deleting `MIGRATING-TO-2` any more.
 - The `create_github_issue` and `link_pull_request` tools of `shapewall mcp` on the solo engine, as on a 1.x board: they ask
   GitHub with this machine's token and record the links on the engine.
 - On the solo engine, the `author` of the MCP tools `reply_to_comment` and `add_comment`, and `comments reply --author` and
@@ -120,7 +125,13 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
   being deleted, so a write that slipped in is kept. Deleting a board in the console is refused (`board_busy`) while a job
   from the terminal holds it; a server backup holds each board's job lock while it pins it, and a push commit holds it
   through the swap. Command-line reads of the engine database no longer leave a copy in the temporary folder when the copy
-  fails, and an engine with no project never falls back to the 1.x folders once boards were migrated.
+  fails, and an engine with no project never falls back to the 1.x folders once boards were migrated. Re-check: a run
+  stopped with its journal removed by hand is found from its backup and put back alone by `--rollback`; a rollback's
+  pre-check no longer walks what earlier rollbacks set aside; a push holds a lock beside the board folder for the whole
+  swap; a 1.x `github` value that is not an object shows as dropped in the plan; the tombstone also stops a 1.x capture.
+  Upgrade rehearsal: a plain local board's comments go to agents after the move; the real run no longer lists its own chat
+  locks as not carried; `--rollback --dry-run` says when it would clear a run stopped during its backup; a rollback moves
+  the engine's `events.jsonl` lines aside (1.x reuses those comment ids) and removes the empty `remote/.../agent` folders.
 - Team mode serves members from a second listener on 127.0.0.1 for the same database, and `tailscale serve` forwards the
   tailnet only to that port. The owner's terminal sign-in, the loopback and same-OS-user checks, this machine's tokens
   (`cli.token`, `watch.token`, `agent.token`) and the owner-only engine features (settings, captures, checks, journeys
@@ -141,6 +152,12 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
   owner saves `--audience server`; a batch of fixes stays with the agent it was confirmed with; members' running turns
   stop when team mode goes off or they are removed; the agent's Read deny rules name a linked `.shapewall`,
   `.shapewall-auth` or storageState by both paths.
+- 2.0 final security review, re-check 1: on the team listener nobody renames, revokes or claims with this machine's own
+  tokens; `--no-chat` refuses the real chat routes (threads, permissions, batch); a merged pull request resolves a comment
+  only for the claim holder and never under a running fix, as a resolve would, and its reply records the token. The agent's
+  `create_github_issue` tool never files a share link guest's comment (`guest_comment`); an issue made from a guest's comment
+  by the owner's `shapewall github` says the name is unverified, and @-mentions in its title are quieted. A member made a
+  viewer, or an account deleted, has its running turns stopped. Glob characters in the agent's Read deny paths are escaped.
 
 ## 1.5.0 - 2026-11-27
 

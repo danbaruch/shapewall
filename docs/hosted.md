@@ -916,8 +916,11 @@ The exit code is 0 when it is done or there is nothing to do, 1 when it refused 
 
 - **What moves.** Captures, versions, variants, environments, diffs and journeys move as files into `.shapewall/.engine/`.
   Comments (with replies, reactions, images and drawings) and chat threads become engine rows with their numbers, and a
-  `serve --accounts` owner becomes the engine's owner with their passkeys and recovery codes. Only comments the board stamped
-  as the owner's become the owner's; others signed with the owner's name come in as imported text, and other names stay labels.
+  `serve --accounts` owner becomes the engine's owner with their passkeys and recovery codes. On a plain local board (no
+  `serve --accounts`) every comment that is not an agent's or a share guest's becomes the owner's, vouched for, so agents get
+  it as 1.x `watch` did. With `serve --accounts`, only comments the board stamped as the owner's become the owner's; others
+  signed with the owner's name come in as imported text (not sent to agents until the owner sends them), and other names
+  stay labels.
 - **What does not.** Agent settings and keys stay on the machine (the engine reads Settings > Agent as before). Sign-in
   sessions and paired devices do not move: sign in and pair again. `events.jsonl` stays where it is, and the engine keeps
   writing it. The dry run lists every item that would not come along.
@@ -926,7 +929,11 @@ The exit code is 0 when it is done or there is nothing to do, 1 when it refused 
   progress; after one that was stopped midway, `migrate`, `serve`, `watch` and the engine refuse to start and point at
   `--rollback`. `MIGRATED-TO-2` records each finished run, so a second run does nothing, and the plain `shapewall serve` and
   `watch` refuse the boards that moved (the engine serves them). A migrated board's 1.x folder keeps only a note (a folder
-  named `comments.json` and a file named `chat`), so an older Shapewall started there fails instead of opening an empty board.
+  named `comments.json`, a file named `chat` and a folder named `status.json`), so nothing an older Shapewall writes lands
+  beside the moved board. An older build does not know the note: Shapewall 1.1.0 starts and says it serves the board, then
+  the board API answers 500 and `shapewall comments` fails with "Not a regular capture file." Roll back first. A rollback
+  also moves the lines the engine added to `events.jsonl` into `<backup>/replaced-<time>/events.jsonl` (unless the log was
+  rotated or edited since, which it reports), and removes empty `remote/<engine project>/<board>/agent/` folders.
   The comment and chat files it converted move into the backup (`<backup>/converted-<time>/`), not deleted. The engine
   folder gets its `.gitignore` and mode 0700 before the database is made, and the migration refuses an engine folder git
   tracks.
@@ -934,7 +941,14 @@ The exit code is 0 when it is done or there is nothing to do, 1 when it refused 
   and the engine folder as it was before the run (none, if there was none). After a run that was stopped midway it puts back
   only that run, so earlier finished runs and what was made on the engine since stay; `--rollback --all` puts back every run.
   A rollback keeps its own note, `ROLLING-BACK`, while it works: if it is stopped midway, `migrate`, `serve`, `watch`, capture
-  and the engine refuse to start until `shapewall migrate --rollback` runs again and finishes it. Nothing is deleted on the way: what is there now,
+  and the engine refuse to start until `shapewall migrate --rollback` runs again and finishes it. If a backup keeps failing,
+  the message names it; fix what it says and run `--rollback` again, or run `shapewall migrate --rollback --give-up` to end
+  the rollback and keep the folder as it is now (some boards may be back, others not).
+- **A stopped run without its backup.** When the backup of a run that was stopped midway is gone, `--rollback` cannot put it
+  back and says so. `shapewall migrate --abandon` then keeps what the engine has of that run and records it in
+  `MIGRATED-TO-2`; what was left of its boards' 1.x comment and chat files moves to `.shapewall/abandoned-<time>/`. Never
+  delete `MIGRATING-TO-2` by hand: a run whose journal is gone is found again from its backup, and `--rollback` puts back
+  that run only. Nothing is deleted on the way: what is there now,
   with anything made on the engine since, moves aside into `<backup>/replaced-<time>/`. The backups stay until you delete them. To go back to an older Shapewall, roll back
   every run with this version first, then run the older one pinned (`npx shapewall@1 serve`). The whole upgrade: [upgrading from 1.x](upgrading.md).
 - **License.** The planner, the backup and the rollback are part of the Apache 2.0 core (`src/migrate`); only the writer of the

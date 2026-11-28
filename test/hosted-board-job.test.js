@@ -232,9 +232,16 @@ test('a board job cannot start while a push commit swaps the board: the commit h
     const outputDir = projectDir(hosted.dataDir, ws, project.id)
     const folder = path.join(outputDir, 'sample')
     let tried = null
+    let between = null
+    let betweenLeft = null
     fs.renameSync = (from, to) => {
       // The swap's first rename: the board folder moving aside.
       if (!tried && path.resolve(String(from)) === folder) tried = acquireBoardJob({ outputDir }, 'sample', 'capture')
+      // B-17: between the two renames the folder is not there; a job then is refused too, and leaves none behind.
+      if (!between && path.resolve(String(to)) === folder) {
+        between = acquireBoardJob({ outputDir }, 'sample', 'capture')
+        betweenLeft = fs.existsSync(folder)
+      }
       return realRename(from, to)
     }
     await push()
@@ -242,7 +249,12 @@ test('a board job cannot start while a push commit swaps the board: the commit h
     assert.ok(tried, 'a job tried to start during the swap')
     assert.equal(tried.ok, false, 'refused')
     assert.equal(tried.holder, 'push')
+    assert.equal(between?.ok, false, 'refused between the renames')
+    assert.equal(between.holder, 'push')
+    assert.equal(betweenLeft, false, 'no folder left where the new one goes')
     assert.equal(fs.existsSync(path.join(folder, 'capture.lock')), false, 'the commit let go of the lock')
+    // B-17: the swap lock beside the folder, held through both renames, is gone too.
+    assert.equal(fs.existsSync(`${folder}.swap.lock`), false, 'the commit let go of the swap lock')
     const after = acquireBoardJob({ outputDir }, 'sample', 'capture')
     assert.equal(after.ok, true)
     after.release()

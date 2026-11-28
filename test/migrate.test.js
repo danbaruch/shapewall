@@ -12,6 +12,7 @@ import { ID_RE, loadConfig } from '../src/config.js'
 import { main } from '../src/cli.js'
 import { openDatabase, quietSqliteWarning } from '../src/hosted/db.js'
 import { rowToComment } from '../src/hosted/comments.js'
+import { dispatchHash } from '../src/hosted/agent-policy.js'
 import { processStartTime } from '../src/lock.js'
 import { migrateCommand, MigrateError } from '../src/migrate/index.js'
 import { ENGINE_DIR, JOURNAL, MARKER, RESERVED, engineDbFile, reservedBoardId, treeDigest, validBoardName } from '../src/migrate/files.js'
@@ -147,7 +148,7 @@ for (const version of VERSIONS) {
     assert.equal(first.code, 0, first.text)
     assert.ok(fs.existsSync(path.join(p.out, MARKER)))
     // B-2: only the tombstone stays, so a 1.x Shapewall fails there instead of starting an empty board.
-    assert.deepEqual(fs.readdirSync(path.join(p.out, 'site')).sort(), ['chat', 'comments.json'], 'only the tombstone stays')
+    assert.deepEqual(fs.readdirSync(path.join(p.out, 'site')).sort(), ['chat', 'comments.json', 'status.json'], 'only the tombstone stays')
     assert.ok(fs.statSync(path.join(p.out, 'site', 'comments.json')).isDirectory())
     assert.ok(fs.statSync(path.join(p.out, 'site', 'chat')).isFile())
     assert.ok(fs.readdirSync(p.out).some((name) => name.startsWith('backup-1x-')))
@@ -271,6 +272,40 @@ test('without a local account the owner is the name this machine signs with', as
   assert.equal(rows.users[0].display_name, 'Owner')
   assert.equal(rows.passkeys.length, 0)
   assert.equal(rows.comments[0].row.author_user_id, rows.users[0].id)
+})
+
+// IC4 B2: on a plain local board (no 1.x accounts) only the owner could
+// comment, so every person's comment becomes the owner's and is vouched for,
+// and agents get it after the migration as 1.x watch did. With accounts, a
+// comment with the owner's name only stays imported text, never dispatched.
+test("IC4 B2: a plain local board's comments become the owner's and go to agents; with accounts they do not", async () => {
+  const vouched = (row, user) =>
+    Boolean(row.dispatch_hash && row.dispatch_hash === dispatchHash(row) && row.dispatch_by === user && row.run_approved === 1)
+  const local = project('v1.2.0', { accounts: false })
+  await withEnvironmentColumn(local.out)
+  const dry = await run(local, { 'dry-run': true, json: true })
+  assert.equal(dry.json.boards[0].counts.comments.ownerLocal ?? dry.json.boards[0].counts.ownerLocal, 5)
+  const text = (await run(local, { 'dry-run': true })).text
+  assert.match(text, /5 typed on this local board \(no accounts, so the owner's/)
+  assert.equal((await run(local)).code, 0)
+  const rows = await engineRows(local.out)
+  const owner = rows.users[0].id
+  assert.equal(rows.comments.length, 5)
+  for (const { row } of rows.comments) {
+    assert.equal(row.author_user_id, owner, `comment ${row.number} is the owner's`)
+    assert.ok(vouched(row, owner), `comment ${row.number} is vouched for by the owner`)
+  }
+
+  const accounts = project('v1.2.0')
+  await withEnvironmentColumn(accounts.out)
+  stampOwner(accounts, [1])
+  assert.equal((await run(accounts)).code, 0)
+  const by = Object.fromEntries((await engineRows(accounts.out)).comments.map(({ row }) => [row.number, row]))
+  assert.ok(vouched(by[1], OWNER_ID), "a stamped comment is the owner's own")
+  for (const number of [2, 3]) {
+    assert.equal(by[number].author_user_id, null)
+    assert.equal(by[number].dispatch_hash, null, `comment ${number} is not dispatched`)
+  }
 })
 
 test('the dry run says what migration 24 must add before comments on another environment can move', async () => {
@@ -781,7 +816,9 @@ test('N2: a journal whose run left nothing to put back is cleared by --rollback,
   fs.writeFileSync(path.join(p.out, JOURNAL), JSON.stringify({ version: 1, backup: name, stamp: 'x', pid: 1 }))
   const refused = await run(p)
   assert.equal(refused.code, 1)
-  assert.match(refused.text, /To give up on that run instead, delete \.shapewall\/MIGRATING-TO-2/)
+  // B-15: never "delete MIGRATING-TO-2"; --rollback puts back that run only.
+  assert.doesNotMatch(refused.text, /delete .*MIGRATING-TO-2/)
+  assert.match(refused.text, /shapewall migrate --rollback to put that run back \(only that run\)/)
   const back = await run(p, { rollback: true })
   assert.equal(back.code, 0)
   assert.match(back.text, /before it changed anything; nothing needs restoring and MIGRATING-TO-2 was removed/)
@@ -912,7 +949,7 @@ test('R2-2: a journal whose backup was deleted after the run changed the engine 
   assert.equal(back.code, 1, back.text)
   assert.doesNotMatch(back.text, /before it changed anything/)
   assert.match(back.text, /cannot be put back: its backup is gone, and the engine already has comments, chat or files of site/)
-  assert.match(back.text, /may be half moved: copy \.shapewall\/site aside first\. Then, to give up on that run/)
+  assert.match(back.text, /may be half moved: copy \.shapewall\/site aside first\. Then, .*run shapewall migrate --abandon/)
   assert.equal(fs.existsSync(path.join(p.out, JOURNAL)), true, 'the journal stays')
   const json = await run(p, { rollback: true, json: true })
   assert.equal(json.json.ok, false)

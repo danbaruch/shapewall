@@ -986,7 +986,21 @@ export function mountTokenApi({
     v1Comment((req, res, ctx) => {
       const via = typeof req.body?.via === 'string' ? req.body.via : 'manual'
       const result = transaction(db, () => {
-        const outcome = ctx.comments.recordGithubPull(req.params.cid, req.body?.pull, { via }, now())
+        // A merge that resolves the comment is a resolve (2.0 re-check R1-3): the same claim and running-fix checks.
+        const outcome = ctx.comments.recordGithubPull(
+          req.params.cid,
+          req.body?.pull,
+          {
+            via,
+            tokenId: req.token.id,
+            beforeResolve: (row) => {
+              requireNoRunningFix(hub, req.t.workspaceId, req.project.id, ctx.board.id, row.number)
+              requireClaimOwner(req, ctx.board.id, row.number)
+              if (!['queued', 'working'].includes(row.agent_status)) requireClaimNotEnded(req, ctx.board.id, row)
+            },
+          },
+          now(),
+        )
         if (outcome.merged) agentsFor(req.t).closeCommentClaims(req.project.id, ctx.board.id, outcome.comment.id)
         return outcome
       })

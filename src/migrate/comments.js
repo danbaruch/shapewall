@@ -6,7 +6,14 @@
 // and drawings all come along. Images move from comment-files/ into the
 // engine's comment_files table (their bytes, under the same file name).
 //
-// Authors: a local board's comments carry free names. Only a comment the
+// Authors (IC4 B2): on a plain local board (no 1.x accounts, `localOnly`),
+// everyone who could type a comment was the owner, at this machine or on a
+// device the owner paired, and no released 1.x build stamped byOwner: every
+// person's comment there (not an agent's or a share guest's, not stamped
+// byOwner: false) becomes the owner's, so the engine sends it to agents as
+// 1.x watch did. With 1.x accounts (serve --accounts), other people could
+// comment, and the rule below holds.
+// A local board's comments carry free names. Only a comment the
 // board stamped byOwner: true becomes the owner's account (author_user_id),
 // the same rule the local agent uses (watch-capabilities.js ownersComment).
 // A comment signed with the owner's name but not stamped (made before the
@@ -114,6 +121,11 @@ function githubOf(comment, where, drop) {
   if (comment.github == null) return null
   const raw = comment.github
   const github = cleanGithub(raw)
+  // B-18: a value that is not an object (a string, a list) keeps nothing; said so.
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    drop(`${where}, GitHub links`, 'not the GitHub links Shapewall writes; it stays in the backup')
+    return null
+  }
   if (raw?.issue && !github.issue) drop(`${where}, GitHub issue`, 'not an issue link Shapewall writes; it stays in the backup')
   const pulls = Array.isArray(raw?.pulls) ? raw.pulls.length : 0
   if (pulls > github.pulls.length)
@@ -147,13 +159,23 @@ export function readCommentsFile(config, boardId) {
 
 // `owner`: { names: [...] } the owner's display names (the account's, the
 // machine's); `board`: the config board (pages, environments).
-export function planComments(config, board, { owner }) {
+export function planComments(config, board, { owner, localOnly = false }) {
   const names = new Set((owner.names || []).map(clean).filter(Boolean))
   const { nextId, comments: raw } = readCommentsFile(config, board.id)
   const filesDir = path.join(boardDir(config, board.id), 'comment-files')
   const drops = []
   const notes = []
-  const counts = { comments: 0, replies: 0, reactions: 0, images: 0, drawings: 0, ownerStamped: 0, ownerByName: 0, labels: 0 }
+  const counts = {
+    comments: 0,
+    replies: 0,
+    reactions: 0,
+    images: 0,
+    drawings: 0,
+    ownerStamped: 0,
+    ownerLocal: 0,
+    ownerByName: 0,
+    labels: 0,
+  }
   const used = new Set()
   const pages = new Set(board.pages.map((page) => page.id))
   const drop = (item, reason) => drops.push({ item, reason })
@@ -163,6 +185,10 @@ export function planComments(config, board, { owner }) {
     if (item.authorAgent === true || item.authorGuest === true || item.agent === true || item.guest === true) return null
     if (item.byOwner === true) {
       counts.ownerStamped += 1
+      return 'owner'
+    }
+    if (localOnly && item.byOwner !== false) {
+      counts.ownerLocal += 1
       return 'owner'
     }
     if (item.byOwner !== false && names.has(clean(item.author))) {

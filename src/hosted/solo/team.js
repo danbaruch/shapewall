@@ -155,6 +155,16 @@ export function teamGuard({ db, dataDir }) {
   guard.put(agentPaths, refuseMachineAgent)
   guard.delete(agentPaths, refuseMachineAgent)
   guard.put(ws + `/projects/:pid/default-agent`, refuseWith('owner_agents', ONLY_OWNER_AGENTS))
+  // This machine's own token rows (cli, watch, agent): not renamed, revoked or narrowed from the tailnet either
+  // (2.0 re-check R1-1; revoking the agent's token is the same as removing the agent).
+  const refuseMachineToken = (req, res, next) =>
+    machineTokenIds(dataDir).includes(String(req.params.tid || '')) ? refuse(res, 403, 'owner_agents', ONLY_OWNER_AGENTS) : next()
+  const tokenPaths = [
+    ws + '/projects/:pid/tokens/:tid',
+    ws + '/projects/:pid/claim-tokens/:tid/agent',
+    ws + '/projects/:pid/claim-tokens/:tid/claim',
+  ]
+  for (const method of ['patch', 'put', 'post', 'delete']) guard[method](tokenPaths, refuseMachineToken)
   // This machine's own tokens: cli.token, watch.token and agent.token stay on this machine.
   guard.use(['/api/v1', '/mcp'], (req, res, next) => {
     const match = /^Bearer (\S+)$/.exec(String(req.headers.authorization || ''))

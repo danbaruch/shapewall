@@ -257,6 +257,8 @@ export function mountConsoleRoutes(consoleApi, deps) {
         // longer make or manage tokens; grantsToRevoke).
         if (target.role !== role) revoked = revokeGrantsOf(req, String(req.params.uid), role)
       })
+      // A viewer sends no work: what they asked an agent and is still running ends now (C R1-4).
+      if (role === 'viewer') req.app.locals.chat?.stopTurnsOf?.(req.t.workspaceId, (id) => id === String(req.params.uid))
       res.json({ ok: true, revoked })
     }),
   )

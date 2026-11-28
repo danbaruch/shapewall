@@ -22,7 +22,8 @@ import { quietSqliteWarning } from '../src/hosted/db.js'
 import { startHosted } from '../src/hosted/server.js'
 import { OPEN_KEY_FILE, soloOrigin } from '../src/hosted/solo/signin.js'
 import { TEAM_FILE, TEAM_SERVE_FILE, readServeRecord, readTeamSetting, reachLines, teamGuard } from '../src/hosted/solo/team.js'
-import { CLI_TOKEN_FILE } from '../src/hosted/solo/machine-tokens.js'
+import { CLI_TOKEN_FILE, WATCH_TOKEN_FILE, machineTokenIds } from '../src/hosted/solo/machine-tokens.js'
+import { sha256 } from '../src/shared/account-tokens.js'
 import { engineFlagProblem, teamWanted } from '../src/hosted/solo/serve.js'
 import { parseArgs } from '../src/cli/args.js'
 import { SAMPLE, request, tempDir } from './helpers.js'
@@ -558,9 +559,21 @@ test('A-2: --read-only and --no-chat hold for members on the team listener, and 
   assert.equal(wrote.json.error.code, 'read_only')
   const upper = await ben.post('/W/' + ws + '/P/' + project + '/API/boards/sample/comments', comment)
   assert.equal(upper.status, 403, upper.text)
-  const threads = await ben.get(base + '/boards/sample/threads')
-  assert.equal(threads.status, 403)
-  assert.equal(threads.json.error.code, 'chat_off')
+  // The chat router's real routes (chat-routes.js, at <board API>/agent), for the member and the owner.
+  for (const [who, browser] of [
+    ['member', ben],
+    ['owner', owner],
+  ]) {
+    for (const url of [
+      base + '/agent/boards/sample/threads',
+      base + '/agent/boards/sample/permissions',
+      '/W/' + ws + '/P/' + project + '/API/AGENT/boards/sample/threads',
+    ]) {
+      const threads = await browser.get(url)
+      assert.equal(threads.status, 403, who + ' ' + url + ' ' + threads.text)
+      assert.equal(threads.json.error.code, 'chat_off')
+    }
+  }
   assert.equal(engine.db.prepare('SELECT COUNT(*) AS n FROM comments').get().n, 0)
 })
 
@@ -723,4 +736,105 @@ test('C-5: team mode off, or a member removed, stops the turns members started o
   await engine.team.stop()
   assert.equal(ben.cancel, true)
   assert.equal(mine.cancel, false)
+})
+
+// ---- 2.0 final security review, re-check 1 ----
+
+test('R1-1: an admin on the team listener cannot rename, revoke or narrow this machine’s own tokens', async () => {
+  const engine = await startEngine('sec-r1-1', { want: true })
+  const owner = await ownerBrowser(engine)
+  const ws = engine.solo.owner.workspaceId
+  const project = engine.solo.owner.projectId
+  const { browser: ben } = await joinedAs(engine, owner, BEN, 'admin')
+  const confirm = confirmFor(engine)
+  const ids = machineTokenIds(engine.dataDir)
+  assert.ok(ids.length >= 2, 'the engine has its machine tokens')
+  for (const id of ids) {
+    const tokens = '/api/workspaces/' + ws + '/projects/' + project + '/tokens/' + id
+    for (const [method, url, body] of [
+      ['PATCH', tokens, { name: 'Mine now' }],
+      ['DELETE', tokens, undefined],
+      ['DELETE', tokens.replace('/api/', '/API/'), undefined],
+      ['DELETE', '/api/workspaces/' + ws + '/projects/' + project + '/claim-tokens/' + id + '/claim', undefined],
+      ['POST', '/api/workspaces/' + ws + '/projects/' + project + '/claim-tokens/' + id + '/agent', {}],
+    ]) {
+      const answer = await ben.call(method, url, { ...(body ? { body } : {}), ...confirm })
+      assert.equal(answer.status, 403, method + ' ' + url + ' ' + answer.text)
+      assert.equal(answer.json.error.code, 'owner_agents')
+    }
+  }
+  const rows = engine.db.prepare('SELECT id, name, revoked_at FROM api_tokens').all()
+  for (const id of ids) {
+    const row = rows.find((item) => item.id === id)
+    assert.equal(row.revoked_at, null)
+    assert.notEqual(row.name, 'Mine now')
+  }
+})
+
+test('R1-3: a merged pull request resolves a comment only as a resolve would: the claim holder, no running fix', async () => {
+  const engine = await startEngine('sec-r1-3', { want: false })
+  const owner = await ownerBrowser(engine)
+  const ws = engine.solo.owner.workspaceId
+  const project = engine.solo.owner.projectId
+  const made = await owner.post('/w/' + ws + '/p/' + project + '/api/boards/sample/comments', {
+    pageId: 'home',
+    viewport: 'desktop',
+    x: 10,
+    y: 10,
+    body: 'Make it blue',
+  })
+  assert.equal(made.status, 201, made.text)
+  const number = made.json.comment.id
+  const host = new URL(engine.ownerOrigin).host
+  const tokenOf = (file) => fs.readFileSync(path.join(engine.dataDir, file), 'utf8').trim()
+  const api = (file, method, url, body) =>
+    request(engine.port, method, '/api/v1' + url, { headers: { Host: host, Authorization: 'Bearer ' + tokenOf(file) }, body }).then(
+      (answer) => ({ ...answer, json: JSON.parse(answer.text || 'null') }),
+    )
+  // The watcher takes the comment.
+  const taken = await api(WATCH_TOKEN_FILE, 'POST', '/boards/sample/comments/' + number + '/agent-status', { agentStatus: 'working' })
+  assert.equal(taken.status, 200, taken.text)
+  const pull = { number: 4, url: 'https://github.com/acme/site/pull/4', title: 'Blue', state: 'merged', mergedAt: new Date().toISOString() }
+  // Another token (the command line's) saying a pull request merged does not resolve what the watcher holds.
+  const other = await api(CLI_TOKEN_FILE, 'POST', '/boards/sample/comments/' + number + '/github/pulls', { pull, via: 'manual' })
+  assert.equal(other.status, 403, other.text)
+  assert.equal(other.json.error.code, 'claim_owner')
+  const still = engine.db.prepare('SELECT status, github FROM comments WHERE number = ?').get(number)
+  assert.equal(still.status, 'open')
+  assert.equal(still.github, null, 'nothing was written')
+  // The holder may; the "github" reply keeps which token said so (stored only).
+  const mine = await api(WATCH_TOKEN_FILE, 'POST', '/boards/sample/comments/' + number + '/github/pulls', { pull, via: 'manual' })
+  assert.equal(mine.status, 200, mine.text)
+  assert.equal(mine.json.merged, true)
+  const row = engine.db.prepare('SELECT status, replies FROM comments WHERE number = ?').get(number)
+  assert.equal(row.status, 'resolved')
+  const watchId = engine.db.prepare('SELECT id FROM api_tokens WHERE token_hash = ?').get(sha256(tokenOf(WATCH_TOKEN_FILE))).id
+  const github = JSON.parse(row.replies).find((item) => item.author === 'github')
+  assert.equal(github.token, watchId)
+  assert.ok(!JSON.stringify(mine.json).includes(watchId), 'never shown')
+})
+
+test('C R1-4: a member made a viewer, or an account deleted, has its running turns stopped', async () => {
+  const engine = await startEngine('sec-c-r1-4', { want: true })
+  const owner = await ownerBrowser(engine)
+  const ws = engine.solo.owner.workspaceId
+  const project = engine.solo.owner.projectId
+  const { browser: cydBrowser } = await joinedAs(engine, owner, CYD, 'member')
+  await joinedAs(engine, owner, BEN, 'member')
+  const hub = engine.app.locals.chat.hub
+  const turn = (id, startedBy) =>
+    hub.open({ id, workspaceId: ws, projectId: project, boardId: 'sample', threadId: 'chat-' + id, agentId: 'ag_none', startedBy })
+  const ben = turn('tu_ben_v', userIdOf(engine, BEN.login))
+  const cyd = turn('tu_cyd_d', userIdOf(engine, CYD.login))
+  const viewer = await owner.call('PATCH', '/api/workspaces/' + ws + '/members/' + userIdOf(engine, BEN.login), {
+    body: { role: 'viewer' },
+    ...confirmFor(engine),
+  })
+  assert.equal(viewer.status, 200, viewer.text)
+  assert.equal(ben.cancel, true)
+  assert.equal(cyd.cancel, false)
+  const handle = engine.db.prepare('SELECT handle FROM users WHERE tailnet_login = ?').get(CYD.login).handle
+  const gone = await cydBrowser.call('DELETE', '/auth/me', { body: { confirm: handle }, headers: { 'X-Shapewall-Confirm': handle } })
+  assert.equal(gone.status, 200, gone.text)
+  assert.equal(cyd.cancel, true)
 })

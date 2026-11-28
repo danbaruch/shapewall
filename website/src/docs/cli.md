@@ -577,6 +577,7 @@ Private diagnostic reports are excluded unless `--include-checks` is explicitly 
 ```text
 shapewall migrate [--dry-run] [--board ID] [--json]
 shapewall migrate --rollback [--all] [--dry-run] [--json]
+shapewall migrate --rollback --give-up | --abandon
 ```
 
 Moves this project's `.shapewall/` into the [solo engine](/docs/hosted#the-solo-engine-experimental) (`.shapewall/.engine/`), so
@@ -1049,6 +1050,9 @@ Commands
       --rollback            put every migration back from its backup (checked byte for byte); after a run
                             that was stopped midway, only that run
       --all                 with --rollback: every run, also after a stopped one
+      --give-up             with --rollback: end a rollback that keeps failing, keep the folder as it is
+      --abandon             keep what a stopped run left on the engine when its backup is gone,
+                            and record it as done (--rollback is the way while the backup is there)
       --json                machine-readable result
                             exit code: 0 done or nothing to do, 1 refused or failed (the folder is put back)
   buzz-bridge               run a private foreground gateway to existing Buzz agents (experimental)

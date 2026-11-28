@@ -7,14 +7,15 @@
 //                 board's /info says readOnly (the client hides the
 //                 controls). As on a local board, the command line still
 //                 writes (the token API: push, comments, agents).
-//   --no-chat     no board chat: the chat routes (threads, permissions)
+//   --no-chat     no board chat: the chat routes (threads, permissions, batch)
 //                 answer 403 chat_off. Connected agents still take comments.
 //   --no-capture  solo.allowCapture = false: capture.js mounts nothing (no
 //                 capture from the board, no recapture_pages on /mcp).
 //
 // solo: { readOnly, chat } from src/hosted/solo/serve.js.
 const BOARD_API = /^\/w\/[^/]+\/p\/[^/]+\/api(\/.*)?$/i
-const CHAT = /^\/boards\/[^/]+\/(?:threads|permissions)(?:\/|$)/i
+// The chat router is mounted at <board API>/agent (chat-routes.js): threads, their permission cards and batches.
+const CHAT = /^\/agent\/boards\/[^/]+\/(?:threads|permissions|batch)(?:\/|$)/i
 
 export function soloFlagGate(solo = {}) {
   const readOnly = solo.readOnly === true

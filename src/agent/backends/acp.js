@@ -210,12 +210,18 @@ const NO_AUTO_MEMORY = Object.freeze({ autoMemoryEnabled: false })
 // folders the sandbox never reads (sandbox.js denyRead: the solo engine's
 // keys and tokens). Claude Code reads files itself (Read, Grep, Glob), not
 // only through Shapewall, so the rule has to be its own too. `//` starts an
-// absolute path in a Claude Code rule.
+// absolute path in a Claude Code rule. A rule is a pattern: the path's own
+// glob characters (* ? [ ] { } ( ) ! and the backslash) are escaped, so a
+// project at ~/code/app[2] is matched literally (2.0 final review C R1-3).
+// What a rule cannot cover: a third spelling of the folder through another
+// link, and other letter cases on a case-insensitive volume (macOS, Windows)
+// -- docs/agent-hardening.md.
+export const escapeRuleGlob = (value) => value.replace(/[*?[\]{}()!\\]/g, '\\$&')
 export function sessionSettings(denyRead = []) {
   const deny = denyRead
     .filter((dir) => typeof dir === 'string' && path.isAbsolute(dir))
     .flatMap((dir) => {
-      const rule = `/${dir.split(path.sep).join('/')}`
+      const rule = `/${dir.split(path.sep).map(escapeRuleGlob).join('/')}`
       return [`Read(${rule})`, `Read(${rule}/**)`]
     })
   return deny.length ? { ...NO_AUTO_MEMORY, permissions: { deny } } : NO_AUTO_MEMORY
