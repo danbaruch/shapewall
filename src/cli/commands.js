@@ -7,7 +7,7 @@ import { findConfigFile, getBoard, loadConfig } from '../config.js'
 import { formatJourneys, listJourneys } from '../journeys.js'
 import { openBrowser } from './open.js'
 import { withNotifications } from './notify.js'
-import { boardHome, projectConfig } from './board-home.js'
+import { assertNotEngineBoard, boardHome, projectConfig } from './board-home.js'
 import { agentRunEnv } from '../agent-run.js'
 
 export async function buzzBridge(flags, out) {
@@ -93,7 +93,7 @@ export async function mcp(flags, err) {
   // An MCP server runs for an agent: it and what it starts are an agent's
   // process (src/agent-run.js), whichever app started it.
   Object.assign(process.env, agentRunEnv())
-  if (flags.remote !== undefined) {
+  if (flags.remote !== undefined || Boolean(process.env.SHAPEWALL_REMOTE)) {
     const { createRemote, remoteSettings } = await import('../remote/remote.js')
     const { runRemoteMcp } = await import('../remote/remote-mcp.js')
     const readOnly = Boolean(flags['read-only'])
@@ -114,6 +114,7 @@ export async function mcp(flags, err) {
   }
   if (flags.board !== undefined) throw new Error('mcp --board picks a hosted board: use it with --remote URL.')
   const config = loadConfig(flags.config)
+  await assertNotEngineBoard(config, 'shapewall mcp', 'Start shapewall serve, or run mcp without SHAPEWALL_NO_ENGINE.')
   const { runMcp } = await import('../mcp.js')
   const readOnly = Boolean(flags['read-only'])
   // stdout is the MCP protocol, so notification log lines go to stderr.

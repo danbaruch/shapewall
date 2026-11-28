@@ -701,9 +701,12 @@ test('what a run leaves is what serve and watch read: the marker, the journal an
   assert.deepEqual([...engineFolder.migrationState(p.out).migrated], ['site'])
   assert.throws(() => engineFolder.assertMigrationAllows(p.config, { local: true }), /Board site was migrated to the solo engine/)
   assert.deepEqual([...engineFolder.assertMigrationAllows(p.config)], ['site'])
-  // A journal left behind (a run stopped midway): nothing starts.
-  fs.writeFileSync(path.join(p.out, JOURNAL), JSON.stringify({ version: 1, backup: done.json.backup }))
+  // A journal left behind by a run stopped midway: nothing starts, and it directs to --rollback.
+  fs.writeFileSync(path.join(p.out, JOURNAL), JSON.stringify({ version: 1, backup: 'backup-1x-unfinished' }))
   assert.throws(() => engineFolder.assertMigrationAllows(p.config), /stopped midway/)
+  // A journal left behind by a finished run (already in MIGRATED-TO-2): advises `shapewall migrate` to clear it.
+  fs.writeFileSync(path.join(p.out, JOURNAL), JSON.stringify({ version: 1, backup: done.json.backup }))
+  assert.throws(() => engineFolder.assertMigrationAllows(p.config), /Run shapewall migrate to clear MIGRATING-TO-2/)
   fs.rmSync(path.join(p.out, JOURNAL))
   // migrate's own lock, held by a live process: nothing starts.
   fs.writeFileSync(

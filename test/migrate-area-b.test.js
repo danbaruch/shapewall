@@ -671,3 +671,63 @@ test('re-check 2: a link planted as the replaced-* folder stops the rollback; no
   await assert.rejects(run(p, { rollback: true }), /replaced-\d{8}T\d{6}Z-\d+ already exists; the rollback stops/)
   assert.deepEqual(fs.readdirSync(outside), [], 'nothing went through the link')
 })
+
+test('F8: parseArgs accepts migrate --abandon and --rollback --give-up as boolean flags', async () => {
+  const { parseArgs } = await import('../src/cli/args.js')
+  const abandon = parseArgs(['migrate', '--abandon'], { strict: true })
+  assert.equal(abandon.command, 'migrate')
+  assert.equal(abandon.flags.abandon, true)
+  const giveUp = parseArgs(['migrate', '--rollback', '--give-up'], { strict: true })
+  assert.equal(giveUp.command, 'migrate')
+  assert.equal(giveUp.flags.rollback, true)
+  assert.equal(giveUp.flags['give-up'], true)
+})
+
+test('F13c: planMigration stops cleanly on broken symlinks inside a board folder without throwing ENOENT', async () => {
+  const { planMigration } = await import('../src/migrate/index.js')
+  const p = project()
+  fs.symlinkSync('/nonexistent-shapewall-target', path.join(p.out, 'site', 'comments.json.link'))
+  // Replace comments.json with a broken symlink to ensure planComments is never called on it.
+  fs.rmSync(path.join(p.out, 'site', 'comments.json'), { force: true })
+  fs.symlinkSync('/nonexistent-shapewall-comments', path.join(p.out, 'site', 'comments.json'))
+  const plan = await planMigration(p.config, { env: { SHAPEWALL_USER_NAME: 'Robin Tester' } })
+  assert.ok(
+    plan.problems.some((problem) => /symbolic link/.test(problem)),
+    plan.problems.join('\n'),
+  )
+  assert.equal(plan.boards.length, 0)
+})
+
+test('F13d & F13e: rollback removes engine-created events.jsonl when 1.x had none; finished journal advises migrate; variant refuses during migration', async () => {
+  const { assertMigrationAllows } = await import('../src/engine-folder.js')
+  const { variant } = await import('../src/cli/variant.js')
+  const p = project()
+  await withEnvironmentColumn(p.out)
+  // Start with no events.jsonl in 1.x.
+  const log = path.join(p.out, 'events.jsonl')
+  fs.rmSync(log, { force: true })
+  const done = await run(p, { json: true })
+  assert.equal(done.code, 0)
+  // Engine creates events.jsonl after migration.
+  const engineLines = '{"type":"comment.created","commentId":1}\n'
+  fs.writeFileSync(log, engineLines)
+  const back = await run(p, { rollback: true })
+  assert.equal(back.code, 0, back.text)
+  assert.equal(fs.existsSync(log), false, 'engine-created events.jsonl removed on rollback')
+  const backup = path.join(p.out, done.json.backup)
+  const [replaced] = fs.readdirSync(backup).filter((name) => name.startsWith('replaced-'))
+  assert.equal(fs.readFileSync(path.join(backup, replaced, 'events.jsonl'), 'utf8'), engineLines)
+
+  // Finished leftover MIGRATING-TO-2 journal advises running `shapewall migrate`, not `--rollback`.
+  const q = project()
+  await withEnvironmentColumn(q.out)
+  const doneQ = await run(q, { json: true })
+  assert.equal(doneQ.code, 0)
+  fs.writeFileSync(path.join(q.out, JOURNAL), JSON.stringify({ version: 1, backup: doneQ.json.backup, pid: 1, boards: ['site'] }))
+  assert.throws(() => assertMigrationAllows(q.config), /Run shapewall migrate to clear MIGRATING-TO-2/)
+  // variant remove refuses while MIGRATING-TO-2 is present.
+  await assert.rejects(
+    variant(['remove', 'v1'], { config: q.config.file }, () => {}),
+    /Run shapewall migrate to clear MIGRATING-TO-2/,
+  )
+})

@@ -30,12 +30,19 @@ const engineRunning = (config) => isLockLive(readLock(path.join(engineDir(config
 
 // The 1.x data of `config` into the engine, when there is any. -> { migrated, boards }.
 // Throws AutoMigrateError (after the migration printed why) when it cannot run.
-export async function autoMigrate(config, out, { env = process.env, version = 'dev', now, migrate = null } = {}) {
+export async function autoMigrate(config, out, { env = process.env, version = 'dev', now, migrate = null, skipGitCheck = false } = {}) {
   if (!fs.existsSync(config.outputDir)) return { migrated: false, boards: [] }
   const M = migrate || (await import('../migrate/index.js'))
   // From the files only: nothing is written to learn whether anything moves.
   const plan = await M.pendingMigration(config, { env })
-  if (!plan.boards.length) return { migrated: false, boards: [] }
+  const problems = skipGitCheck ? (plan.problems || []).filter((problem) => !/^git tracks files in /.test(problem)) : plan.problems || []
+  if (!plan.boards.length) {
+    if (!problems.length) return { migrated: false, boards: [] }
+    for (const problem of problems) out(`Cannot migrate: ${problem}`)
+    throw new AutoMigrateError(
+      'Did not start: the 1.x board folder has problems (above). Nothing was changed. Fix what it lists and run shapewall serve again, or run the 1.x server with shapewall serve --engine legacy (deprecated).',
+    )
+  }
   const ids = plan.boards.map((board) => board.id)
   const folder = path.basename(config.outputDir)
   out(
@@ -71,7 +78,7 @@ export async function serveCommand(flags, out, { env = process.env, version = 'd
     assertMigrationAllows(config)
     // A start that cannot listen (the port taken, a refused flag) stops here, before the 1.x data moves (IC4 B7).
     if (preflight) await preflight(flags)
-    await autoMigrate(config, out, { env, version })
+    await autoMigrate(config, out, { env, version, skipGitCheck: Boolean(flags['skip-git-check']) })
   }
   return startEngine({ ...flags, engine: 'hosted' }, out, { env })
 }

@@ -80,6 +80,8 @@ const BOOLEAN_FLAGS = new Set([
   'write',
   'no-agent-docs',
   'rollback',
+  'abandon',
+  'give-up',
 ])
 // Flag spellings removed in 2.0 (deprecated through 1.x), per command (or
 // command and action, as actionScope names it): what to use instead. A strict parse refuses one with a one-line error naming

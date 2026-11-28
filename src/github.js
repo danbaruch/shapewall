@@ -458,6 +458,8 @@ async function linkIndex(config, store) {
   return { issues, pulls }
 }
 
+const TRANSIENT_SYNC_CODES = new Set(['claim_owner', 'fix_running'])
+
 // Links (or updates) one pull request on every comment it concerns. Returns
 // { linked: [...], merged: [...], skipped: [...] } with { board, comment, pull, state }.
 async function applyPull(config, store, settings, pr, index, now) {
@@ -484,7 +486,11 @@ async function applyPull(config, store, settings, pr, index, now) {
       if (merged) result.merged.push(entry)
     } catch (error) {
       if (!(error instanceof CommentError)) throw error
-      result.skipped.push({ ...entry, reason: error.code === 'unknown_comment' ? 'no such comment' : error.message })
+      result.skipped.push({
+        ...entry,
+        reason: error.code === 'unknown_comment' ? 'no such comment' : error.message,
+        ...(TRANSIENT_SYNC_CODES.has(error.code) ? { transient: true, code: error.code } : {}),
+      })
     }
   }
   return result
@@ -539,6 +545,12 @@ export async function syncGithub(
   const result = { repo: settings.repo, since, scanned: 0, linked: [], merged: [], skipped: [] }
   const seen = new Set()
   let done = false
+  let retryBeforeMs = null
+  const noteRetry = (pr, applied) => {
+    if (!applied.skipped.some((item) => item.transient)) return
+    const updatedMs = Date.parse(pr?.updated_at)
+    if (Number.isFinite(updatedMs)) retryBeforeMs = retryBeforeMs === null ? updatedMs : Math.min(retryBeforeMs, updatedMs)
+  }
   for (let page = 1; page <= SYNC_PAGES_MAX && !done; page += 1) {
     const list = await githubRequest(
       settings,
@@ -556,7 +568,9 @@ export async function syncGithub(
       if (!Number.isSafeInteger(pr?.number) || seen.has(pr.number)) continue
       seen.add(pr.number)
       result.scanned += 1
-      mergeResults(result, await applyPull(config, store, settings, pr, index, now))
+      const applied = await applyPull(config, store, settings, pr, index, now)
+      noteRetry(pr, applied)
+      mergeResults(result, applied)
     }
     if (list.length < SYNC_PAGE_SIZE) done = true
   }
@@ -566,13 +580,16 @@ export async function syncGithub(
     try {
       const pr = await githubRequest(settings, env, 'GET', `/repos/${settings.repo}/pulls/${number}`, { fetchImpl })
       result.scanned += 1
-      mergeResults(result, await applyPull(config, store, settings, pr, index, now))
+      const applied = await applyPull(config, store, settings, pr, index, now)
+      noteRetry(pr, applied)
+      mergeResults(result, applied)
     } catch (error) {
       if (!(error instanceof CommentError) || error.code !== 'github_not_found') throw error
       log(`pull request #${number} is gone from ${settings.repo}`)
     }
   }
-  writeJsonAtomic(stateFile, { repo: settings.repo, lastSyncAt: now.toISOString() })
+  const syncAt = retryBeforeMs === null ? now : new Date(Math.min(now.getTime(), retryBeforeMs - 1000))
+  writeJsonAtomic(stateFile, { repo: settings.repo, lastSyncAt: syncAt.toISOString() })
   return result
 }
 

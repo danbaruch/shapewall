@@ -7,6 +7,8 @@
 
 import { loadConfig, boardViewports } from '../config.js'
 import { boardLink, hostedBoardBase, localBoardBase } from '../board-links.js'
+import { ENGINE_TARGET } from '../engine-target.js'
+import { DEFAULT_PORT } from '../serve-state.js'
 import { getComment } from '../store.js'
 import { openBrowser } from './open.js'
 
@@ -162,11 +164,46 @@ async function remoteTarget(flags) {
   return { item, base: hostedBoardBase(remote.origin, project.workspace.id, project.project.id), running: true }
 }
 
+async function engineTargetLink(flags, env) {
+  const config = loadConfig(flags.config)
+  const board = flags.board === undefined ? config.boards[0] : config.boards.find((item) => item.id === flags.board)
+  if (!board) fail(`No board "${flags.board}". Boards: ${config.boards.map((item) => item.id).join(', ')}`)
+  const engine = flags[ENGINE_TARGET]
+  const item = await target(flags, {
+    board: board.id,
+    pages: board.pages,
+    viewports: Object.keys(boardViewports(config, board)),
+    environments: board.environments || null,
+    lookupComment: async (n) => {
+      const { createRemote, remoteSettings } = await import('../remote/remote.js')
+      const remote = createRemote(remoteSettings(flags))
+      try {
+        const answer = await remote.comment(board.id, n, { guests: Boolean(flags['include-guests']) })
+        const found = answer?.comment || {}
+        return { pageId: found.page?.id || found.variant?.pageId || null, viewport: found.viewport?.name || null }
+      } catch (error) {
+        if (error?.status === 404) return fail(`No comment #${n} on board "${board.id}" (a share link guest's needs --include-guests).`)
+        throw error
+      }
+    },
+  })
+  const configured = env.SHAPEWALL_BOARD_URL || config.boardUrl
+  if (configured) return { item, base: configured, running: engine.headless ? null : true }
+  if (!engine.headless) return { item, base: engine.url, running: true }
+  // Headless engine started only for this command (no `shapewall serve` running): point at the default solo port.
+  const url = new URL(engine.url)
+  url.port = String(DEFAULT_PORT)
+  return { item, base: url.toString(), running: false }
+}
+
 // Exit code 0 whenever a link was made, even for a local board no server is
 // running for: the link is right, it only needs `shapewall serve`.
-export async function openCommand(flags, out, { open = openBrowser } = {}) {
-  const remote = flags.remote !== undefined
-  const { item, base, running } = remote ? await remoteTarget(flags) : await localTarget(flags)
+export async function openCommand(flags, out, { open = openBrowser, env = process.env } = {}) {
+  const { item, base, running } = flags[ENGINE_TARGET]
+    ? await engineTargetLink(flags, env)
+    : flags.remote !== undefined || Boolean(env.SHAPEWALL_REMOTE)
+      ? await remoteTarget(flags)
+      : await localTarget(flags)
   const url = linkOf(base, item)
   if (flags.json) {
     out(

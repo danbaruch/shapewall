@@ -183,15 +183,18 @@ export async function main(
   const engine = ENGINE_COMMANDS.includes(command)
     ? await engineMode(command, flags, {
         err,
-        startEngine: async (config) => (await import('./hosted/ops-cli.js')).startEngineHeadless(config),
+        startEngine: async (config, options) => (await import('./hosted/ops-cli.js')).startEngineHeadless(config, options),
       })
     : null
   // http to the solo engine's own name: every connection of this process to it goes to 127.0.0.1 (src/remote/loopback-pin.js).
   const remote = typeof flags.remote === 'string' ? flags.remote : process.env.SHAPEWALL_REMOTE
-  if (remote && soloHttpRemote(remote)) await pinSoloLoopback()
-  if (!engine?.stop) return COMMANDS[command]({ positional, flags, out, err, fetch })
+  const run = async () => {
+    if (remote && soloHttpRemote(remote)) await pinSoloLoopback()
+    return COMMANDS[command]({ positional, flags, out, err, fetch })
+  }
+  if (!engine?.stop) return run()
   try {
-    return await COMMANDS[command]({ positional, flags, out, err, fetch })
+    return await run()
   } finally {
     await engine.stop()
   }

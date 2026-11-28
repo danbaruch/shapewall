@@ -106,7 +106,16 @@ export function engineTarget(config, { which = 'cli' } = {}) {
     throw new EngineTargetError(
       `The solo engine for this project (pid ${lock.pid}) left no way to check it is the one answering. Restart it with this version of Shapewall.`,
     )
-  return { origin, url: typeof state.url === 'string' ? state.url : `${origin}/`, token, pid: Number(lock.pid), dir, proof }
+  return {
+    origin,
+    url: typeof state.url === 'string' ? state.url : `${origin}/`,
+    token,
+    pid: Number(lock.pid),
+    dir,
+    proof,
+    headless: Boolean(state.headless),
+    ephemeral: Boolean(state.ephemeral),
+  }
 }
 
 // The engine's answer to a challenge: HMAC-SHA256 of it under the key in its serve.json (0600, a new one each start).

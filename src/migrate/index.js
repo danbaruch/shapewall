@@ -304,10 +304,12 @@ export async function planMigration(config, { board: only = null, env = process.
     }
     const files = classifyBoard(dir)
     const links = linksIn(dir)
-    if (links.length)
+    if (links.length) {
       problems.push(
         `board ${board.id}: ${links.slice(0, 3).join(', ')}${links.length > 3 ? ` and ${links.length - 3} more` : ''} ${links.length === 1 ? 'is a symbolic link' : 'are symbolic links'}; replace them with the real files or folders first (the migration never follows a link)`,
       )
+      continue
+    }
     // IC4 B2: no 1.x accounts store, so only the owner could comment.
     const comments = planComments(config, board, { owner, localOnly: !accounts })
     const chat = planChat(config, board)

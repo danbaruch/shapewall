@@ -325,8 +325,10 @@ function makeAside(aside) {
   if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${aside} is not a plain folder; the rollback stops`)
 }
 
+const EMPTY_SHA256 = createHash('sha256').update(Buffer.alloc(0)).digest('hex')
+
 // The event log (events.jsonl) as it is: its size and the digest of its
-// bytes, or null when there is none (or it is not a plain file).
+// bytes, an absent-file mark when there was none yet, or null when it is not a plain file.
 function eventLogMark(outputDir) {
   const file = path.join(outputDir, EVENT_LOG)
   try {
@@ -334,7 +336,8 @@ function eventLogMark(outputDir) {
     if (!stat.isFile()) return null
     const bytes = fs.readFileSync(file)
     return { size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
-  } catch {
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { size: 0, sha256: EMPTY_SHA256, absent: true }
     return null
   }
 }
@@ -352,13 +355,21 @@ export function restoreEventLog(outputDir, record, aside, ensureAside, { beforeC
   let stat
   try {
     stat = fs.lstatSync(file)
-  } catch {
+  } catch (error) {
+    if (mark.absent && error?.code === 'ENOENT') return 'unchanged'
     return 'kept'
   }
   if (!stat.isFile()) return 'kept'
-  if (stat.size === mark.size) return 'unchanged'
+  if (stat.size === mark.size) {
+    if (mark.absent) {
+      fs.unlinkSync(file)
+      return 'moved'
+    }
+    return 'unchanged'
+  }
   if (stat.size < mark.size) return 'kept'
   const fd = fs.openSync(file, fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW || 0))
+  let shouldUnlink = false
   try {
     const bytes = Buffer.alloc(fs.fstatSync(fd).size)
     let read = 0
@@ -375,11 +386,13 @@ export function restoreEventLog(outputDir, record, aside, ensureAside, { beforeC
     // copied; the log is cut only while it is exactly what was copied.
     beforeCut?.()
     if (fs.fstatSync(fd).size !== read) return 'kept'
-    fs.ftruncateSync(fd, mark.size)
-    return 'moved'
+    if (mark.absent) shouldUnlink = true
+    else fs.ftruncateSync(fd, mark.size)
   } finally {
     fs.closeSync(fd)
   }
+  if (shouldUnlink) fs.unlinkSync(file)
+  return 'moved'
 }
 
 const digestOf = (outputDir, boards) => Object.fromEntries(boards.map((board) => [board, treeDigest(path.join(outputDir, board))]))

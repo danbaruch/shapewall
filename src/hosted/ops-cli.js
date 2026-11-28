@@ -43,12 +43,14 @@ export async function preflightEngine(flags) {
 // Never team mode (2.0 final review A-3): an engine started for a command (an agent app's `mcp` among them) does
 // not put the board on the tailnet, runs no tailscale command, and leaves the saved team setting as it is.
 // `team` (tests): the fake tailscale of test/tailnet-helpers.js; headless always wins.
-export async function startEngineHeadless(config, { env = process.env, team = {} } = {}) {
+export async function startEngineHeadless(config, { env = process.env, team = {}, ephemeral = false } = {}) {
   const { startHosted } = await import('./server.js')
   return serveEngine({ engine: 'hosted', config: config.file, port: 0, 'no-chat': true }, () => {}, {
     // A copy: `mcp` marks its own process.env as an agent's afterwards, which is not the engine's.
     env: { ...env },
-    start: (options) => startHosted({ ...options, exitOnStop: false, retentionHours: 0 }),
+    headless: true,
+    ephemeral: Boolean(ephemeral),
+    start: (options) => startHosted({ ...options, exitOnStop: false, handleSignals: false, retentionHours: 0 }),
     team: { ...team, headless: true },
   })
 }
