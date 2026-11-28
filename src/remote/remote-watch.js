@@ -64,6 +64,9 @@ export async function watchRemote({
   heartbeatMs = REMOTE_HEARTBEAT_MS,
   // The local project's output folder (its config's outputDir), else .shapewall here.
   outputDir = null,
+  // false (`watch --no-claim`, on this project's solo engine): only looks, as the local watch does. Every open
+  // comment is printed or run once per process (again when reopened), and no agent status or reply is written.
+  claim = true,
 }) {
   if (!ID_PATTERNS.project.test(String(projectId || ''))) throw new Error('the server sent an invalid project id')
   if (!ID_RE.test(String(boardId || ''))) throw new Error('the server sent an invalid board id')
@@ -153,13 +156,15 @@ export async function watchRemote({
     const repliesBefore = Array.isArray(item.replies) ? item.replies.length : 0
     const logFd = fs.openSync(logFile, WRITE_FLAGS, 0o600)
     let result
-    // Keeps the claim alive while the command runs (every mode: --once too).
-    const heartbeat = setInterval(() => {
-      remote.comment(boardId, item.id, reportOptions).catch((error) => log(`#${item.id}: heartbeat failed (${error.message})`))
-    }, heartbeatMs)
-    heartbeat.unref?.()
+    // Keeps the claim alive while the command runs (every mode: --once too). --no-claim holds no claim.
+    const heartbeat = claim
+      ? setInterval(() => {
+          remote.comment(boardId, item.id, reportOptions).catch((error) => log(`#${item.id}: heartbeat failed (${error.message})`))
+        }, heartbeatMs)
+      : null
+    heartbeat?.unref?.()
     try {
-      await remote.setAgentStatus(boardId, item.id, 'working', reportOptions)
+      if (claim) await remote.setAgentStatus(boardId, item.id, 'working', reportOptions)
       log(`#${item.id} working: ${path.basename(argv[0])} (log ${path.relative(cwd, logFile) || logFile})`)
       result = await runWatchCommand(argv, {
         cwd,
@@ -190,6 +195,11 @@ export async function watchRemote({
       fs.closeSync(logFd)
     }
     const seconds = Math.round((Date.now() - began) / 1000)
+    if (!claim) {
+      const how = result.code === 0 ? 'exit 0' : result.error ? 'could not start' : `exit ${result.code ?? result.signal}`
+      log(`#${item.id} finished (${how}, ${seconds}s); --no-claim leaves its agent status alone`)
+      return
+    }
     let comment = null
     try {
       comment = (await remote.comment(boardId, item.id, reportOptions)).comment
@@ -269,6 +279,28 @@ export async function watchRemote({
     }
   }
 
+  // --no-claim: every open comment once per process (again when reopened), as id:reopenCount, claiming nothing.
+  const handed = new Set()
+  const handedKey = (item) => `${item.id}:${item.reopenCount || 0}`
+  const look = async () => {
+    const candidates = (await list())
+      .filter((item) => validCommentId(item.id) && item.id > baseline && !running.has(item.id) && !handed.has(handedKey(item)))
+      .sort((a, b) => a.id - b.id)
+    for (const item of candidates) {
+      if (stopped || (argv && running.size >= concurrency)) break
+      handed.add(handedKey(item))
+      if (!argv) {
+        out(JSON.stringify(handOut(item)))
+        continue
+      }
+      const entry = { done: null }
+      running.set(item.id, entry)
+      entry.done = runCommand(item)
+        .catch((error) => log(`#${item.id} error: ${error.message}`))
+        .finally(() => running.delete(item.id))
+    }
+  }
+
   const onAbort = () => {
     if (stopped) return
     stopped = true
@@ -296,7 +328,7 @@ export async function watchRemote({
     if (!once) log(`Watching hosted board "${boardId}" for new comments (every ${Math.round(pollMs / 1000)}s). Ctrl+C stops.`)
     for (;;) {
       try {
-        await scan()
+        await (claim ? scan() : look())
         failures = 0
         scanError = null
       } catch (error) {

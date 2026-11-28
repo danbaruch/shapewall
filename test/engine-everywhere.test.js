@@ -197,3 +197,26 @@ test('an agent starts shapewall mcp with no serve running: the tools answer from
     if (!closed) await client.close()
   }
 })
+
+test('watch --no-claim on the engine hands out every open comment once and claims nothing (IC4 B2b)', async () => {
+  const { file } = await migratedProject('everywhere-noclaim')
+  const looked = await cli(['watch', '--once', '--no-claim', '--config', file])
+  assert.equal(looked.code, 0, looked.err)
+  assert.doesNotMatch(looked.err, /not with --remote/)
+  const handed = looked.out.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+  assert.deepEqual(
+    handed.map((item) => item.comment.body),
+    ['Bigger logo'],
+  )
+  const listed = await cli(['comments', 'list', '--config', file, '--json'])
+  assert.equal(listed.code, 0, listed.err)
+  assert.deepEqual(
+    JSON.parse(listed.out).comments.map((item) => item.agentStatus),
+    [null],
+    'no agent status written',
+  )
+  // An explicit --remote is another server: still refused there, with a message that says so.
+  const remote = await cli(['watch', '--once', '--no-claim', '--remote', 'http://127.0.0.1:9', '--board', 'sample'])
+  assert.notEqual(remote.code, 0)
+  assert.match(remote.err, /--no-claim works on this project's board only \(its solo engine or a 1\.x board\), not with --remote/)
+})
