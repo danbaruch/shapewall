@@ -179,15 +179,17 @@ export function ensureSoloOwner(
     const users = db.prepare('SELECT COUNT(*) AS n FROM users').get().n
     const binding = readSoloBinding(db)
     if (binding) {
-      const owner = db
-        .prepare("SELECT user_id FROM memberships WHERE workspace_id = ? AND role = 'owner' ORDER BY created_at, user_id LIMIT 1")
-        .get(binding.workspaceId)
-      if (!owner) throw new SoloSignInError('The solo engine folder has no owner (its workspace lost it). Use a new folder.')
-      // One account: the engine has no invites or sign-up (passkeys are off), so a second one was not made by it.
-      if (users !== 1)
+      const owners = db
+        .prepare("SELECT user_id FROM memberships WHERE workspace_id = ? AND role = 'owner' ORDER BY created_at, user_id")
+        .all(binding.workspaceId)
+      if (!owners.length) throw new SoloSignInError('The solo engine folder has no owner (its workspace lost it). Use a new folder.')
+      // One owner: other accounts are the people the owner invited in team mode (src/hosted/solo/team.js), and the
+      // engine never makes a second owner (team-routes.js). A folder with two is not one this engine made.
+      if (owners.length !== 1)
         throw new SoloSignInError(
-          `The solo engine folder holds ${users} accounts; it serves one owner. Use a new folder for a team server.`,
+          `The solo engine folder's workspace has ${owners.length} owners; the engine serves one. Use a new folder for a team server.`,
         )
+      const owner = owners[0]
       bindSoloProject(db, { projectId: binding.projectId, configPath, boardIds, now })
       return { userId: owner.user_id, workspaceId: binding.workspaceId, projectId: binding.projectId, created: false }
     }
@@ -325,17 +327,22 @@ export function mountSoloSignIn(app, { auth, db, setCookie, SESSION_COOKIE, now,
   const key = randomBytes(32).toString('base64url')
   fs.rmSync(keyFile, { force: true })
   fs.writeFileSync(keyFile, `${key}\n`, { mode: 0o600, flag: 'wx' })
-  app.post('/solo/open-link', (req, res) => {
-    res.setHeader('Cache-Control', 'no-store')
+  // From this machine and this OS user, with no proxy headers and no Origin (not a page), carrying this start's
+  // key: the command line in the folder (a second `serve`). Also `serve --team` against the running engine (team-routes.js).
+  const keyAdmits = (req) => {
     const local = samePerson(req, gate.peer) && !PROXY_HEADERS.some((name) => req.headers[name] !== undefined)
     // Browsers never send this header on their own; a page cannot set it cross-origin without a preflight.
     const given = String(req.headers['x-shapewall-solo-key'] || '')
-    if (!local || req.headers.origin !== undefined || !given || !safeEqual(given, key))
-      return res.status(403).json({ error: { code: 'forbidden', message: 'Not from this machine.' } })
+    return Boolean(local && req.headers.origin === undefined && given && safeEqual(given, key))
+  }
+  app.post('/solo/open-link', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store')
+    if (!keyAdmits(req)) return res.status(403).json({ error: { code: 'forbidden', message: 'Not from this machine.' } })
     res.json({ file: mint({ keep: req.headers['x-shapewall-keep'] === '1' }), origin })
   })
   log('Sign-in: a one-time page from this terminal (no passkeys on the solo engine).')
   return {
+    keyAdmits,
     close() {
       for (const nonce of [...nonces.keys()]) drop(nonce)
       try {

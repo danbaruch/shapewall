@@ -312,12 +312,13 @@ export function mountTailnetAuth(authRouter, deps) {
 // The admins' side: who arrived and belongs to nobody. Inviting one is an
 // invite with `tailnetLogin` (console-routes.js); this is the list.
 export function mountTailnetAdmin(consoleApi, deps) {
-  const { tailnet, tailnetAccounts, iso, handle, inWorkspace, auditOf } = deps
+  const { tailnet, tailnetAccounts, iso, handle, inWorkspace, auditOf, team = null } = deps
   consoleApi.get(
     '/workspaces/:ws/tailnet-visitors',
     inWorkspace(NEEDS.invites),
     handle(async (req, res) => {
-      if (!tailnet) return res.json({ enabled: false, visitors: [] })
+      // On the solo engine's owner app: while team mode is on (the logins arrive at its team listener).
+      if (!tailnet && !team?.on()) return res.json({ enabled: false, visitors: [] })
       const invited = new Set(
         req.t
           .all(

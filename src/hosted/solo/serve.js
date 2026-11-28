@@ -14,8 +14,14 @@
 // - Boards come from shapewall.config.json, live (src/hosted/solo/config.js).
 // - Events and notifications are the engine's (src/hosted/solo/events.js):
 //   no second notifier here.
-// - Exposure of any kind is refused until sharing lands (G12): --host, --lan,
-//   --tailscale, TLS, extra Host names, paired devices, --trust-proxy.
+// - Exposure of any kind is refused: --host, --lan, --tailscale, TLS, extra
+//   Host names, paired devices, --trust-proxy. The one way to let other
+//   people in is team mode (R6, src/hosted/solo/team.js): `--team` puts the
+//   engine on the tailnet through tailscale serve with tailnet sign-in, for
+//   the people the owner invites; `--team off` takes it off again. It is
+//   kept in the data folder (team.json), so a later `serve` starts the way it
+//   was left. While the engine runs, `serve --team [off]` switches it there.
+//   Each start prints who can reach the board.
 // - Self-update (G10): SHAPEWALL_UPDATE_RESTART=1 makes a successful apply
 //   that needs a restart stop the engine with exit 75 (what the service
 //   manager restarts), as `serve` does; a stop waits for an apply in flight.
@@ -33,6 +39,7 @@ import { UPDATE_RESTART_EXIT } from '../../cli/serve.js'
 import { keyWarningLines } from '../../config-keys.js'
 import { pathToFileURL } from 'node:url'
 import { OPEN_KEY_FILE, soloHostName, soloHostSuffix } from './signin.js'
+import { teamPortProblem } from './team.js'
 
 export const ENGINES = ['hosted']
 
@@ -40,8 +47,8 @@ export const ENGINES = ['hosted']
 // or that belong to the local server only (G12, G20).
 const REFUSED = {
   host: 'the solo engine listens on 127.0.0.1 only',
-  lan: 'sharing on your network comes with team sign-in, later',
-  tailscale: 'sharing on your tailnet comes with team sign-in, later (shapewall hosted --tailscale runs a team server)',
+  lan: 'shapewall serve --team shares it on your tailnet instead, with tailnet sign-in',
+  tailscale: 'shapewall serve --team puts the solo engine on your tailnet, with tailnet sign-in for the people you invite',
   'tls-cert': 'the solo engine listens on this machine only',
   'tls-key': 'the solo engine listens on this machine only',
   'allowed-host': 'the solo engine answers its own host name only',
@@ -64,7 +71,41 @@ export function engineFlagProblem(flags) {
   for (const [flag, why] of Object.entries(REFUSED))
     if (flags[flag] !== undefined)
       return `--${flag} is not for the solo engine: ${why}. The 1.x board server still takes it (shapewall serve --engine legacy, deprecated).`
+  try {
+    teamWanted(flags)
+  } catch (error) {
+    return error.message
+  }
   return null
+}
+
+// --team (on), --team on|off, --team=false: true, false, or null (the way it was left). --team-port N: the
+// HTTPS port on the tailnet, with --team only.
+export function teamWanted(flags) {
+  const value = flags.team
+  let want = null
+  if (value === true || value === 'on' || value === 'true') want = true
+  else if (value === false || value === 'off' || value === 'false') want = false
+  else if (value !== undefined) throw new Error('--team: on (the default) or off')
+  if (flags['team-port'] !== undefined) {
+    if (want !== true) throw new Error('--team-port goes with --team (the HTTPS port on your tailnet; 443 by default)')
+    const problem = teamPortProblem(flags['team-port'])
+    if (problem) throw new Error(problem)
+  }
+  return want
+}
+
+// `serve --team [off]` while the engine runs: it switches there (POST /solo/team-switch, this start's key).
+async function switchRunning(dir, running, { on, httpsPort }) {
+  const key = fs.readFileSync(path.join(dir, OPEN_KEY_FILE), 'utf8').trim()
+  const response = await fetch(`http://127.0.0.1:${running.port}/solo/team-switch`, {
+    method: 'POST',
+    headers: { 'X-Shapewall-Solo-Key': key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ on, ...(httpsPort ? { httpsPort } : {}) }),
+  })
+  const body = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(body?.error?.message || `The running engine did not switch team mode (HTTP ${response.status}).`)
+  return body
 }
 
 const stateFile = (dir) => path.join(dir, 'serve.json')
@@ -118,7 +159,8 @@ function showLink(flags, env) {
   return Boolean(process.stdout.isTTY) && env.TERM !== 'dumb'
 }
 
-export async function serveEngine(flags, out, { env = process.env, start = null, spawnImpl = undefined, agentSpawn = null } = {}) {
+export async function serveEngine(flags, out, options = {}) {
+  const { env = process.env, start = null, spawnImpl = undefined, agentSpawn = null } = options
   const problem = engineFlagProblem(flags)
   if (problem) throw new Error(problem)
   const config = loadConfig(flags.config)
@@ -130,6 +172,13 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
 
   // Already running for this project: --open signs a browser in there, and nothing starts twice.
   const running = runningEngine(dir)
+  const team = teamWanted(flags)
+  const teamPort = flags['team-port'] === undefined ? null : Number(flags['team-port'])
+  if (running && team !== null) {
+    const answer = await switchRunning(dir, running, { on: team, httpsPort: teamPort })
+    for (const line of answer.lines || []) out(line)
+    if (!flags.open && !flags['print-owner-link']) return null
+  }
   if (running) {
     if (!flags.open && !flags['print-owner-link'])
       throw new Error(
@@ -176,6 +225,8 @@ export async function serveEngine(flags, out, { env = process.env, start = null,
     env,
     proofKey,
     localAgent: agentPlan && !agentPlan.off ? { ...agentPlan.identity, machine: null } : null,
+    // Team mode (R6): asked for now (true, false) or the way it was left (null); the tailnet HTTPS port.
+    team: { ...(team === null ? {} : { want: team }), ...(teamPort ? { httpsPort: teamPort } : {}), ...(options.team || {}) },
     // A managed installer opts in to a restart after its helper switched the release (exit 75), as `serve`.
     appUpdate: env.SHAPEWALL_UPDATE_RESTART === '1' ? { onRestart: () => holder.stop?.(UPDATE_RESTART_EXIT) } : {},
   }

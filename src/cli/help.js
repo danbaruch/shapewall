@@ -102,6 +102,12 @@ export const SECTIONS = {
                             (start even when git cannot say whether it tracks .engine/); while it runs,
                             comments, watch and mcp in this folder go to it, and it runs this project's
                             agent (a coding agent or a model endpoint) on the link; --no-chat without one
+      --team [on|off]       hosted engine: put this board on your tailnet (tailscale serve, tailnet sign-in) for
+                            the people you invite: the same data, nothing copied, you stay the owner. off: this
+                            machine only again. Kept in .shapewall/.engine/, so the next serve starts the way it
+                            was left; each start prints who can reach it. While the engine runs it switches
+                            there. Invite people in the console does the same
+      --team-port N         with --team: the HTTPS port on your tailnet (default 443)
       --engine legacy       the 1.x board server (deprecated, removed in 3.0; also $SHAPEWALL_ENGINE=legacy);
                             --host, --lan, --tailscale, --accounts, --agent-acp and the other 1.x-only flags pick it too`,
   devices: `  devices list              paired devices and pending requests for this project [--json]

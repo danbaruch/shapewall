@@ -777,12 +777,13 @@ existing project's `.shapewall/` moves into it with [`shapewall migrate`](#movin
   or one it sits in outside the project. When git cannot answer (not installed while the folder is in a repository, a
   damaged repository), it refuses too; `--skip-git-check` starts anyway, once you have checked that nothing in the folder
   is committed. `shapewall hosted claim`, `setup-link`, `move-origin` and `admin` refuse a solo engine's folder.
-- **What it refuses.** Anything that reaches beyond this machine: `--host`, `--lan`, `--tailscale`, `--tls-cert`, `--tls-key`,
+- **What it refuses.** Anything that reaches beyond this machine other than [team mode](#inviting-people-team-mode): `--host`, `--lan`, `--tailscale`, `--tls-cert`, `--tls-key`,
   `--allowed-host`, `--no-identity`, `--trust-proxy`, `--accounts`, `--accounts-origin`, `--buzz-bridge`, `--agent-acp`,
   `--allow-remote-agent`, `--no-remote-chat`, `--approve-on-host`. Connect agents with `shapewall agent connect --remote`
   instead of `--agent-acp`. A data folder that holds a team server's accounts is refused, and a solo data folder is refused
   as a team server's.
-- **Flags it takes.** `--port`, `--open`, `--print-owner-link`, `--skip-git-check`, `--read-only` (the board in the browser makes no changes; the
+- **Flags it takes.** `--port`, `--open`, `--print-owner-link`, `--team [on|off]` and `--team-port N`
+  ([team mode](#inviting-people-team-mode)), `--skip-git-check`, `--read-only` (the board in the browser makes no changes; the
   command line still pushes and replies, as on a local board), `--no-chat` (the board chat is off; connected agents still take
   comments), `--no-capture` (no captures from the board or from agents).
 - **Capturing.** "Capture now" on the board, and `recapture_pages` for an agent on the engine's `/mcp`, capture the pages
@@ -826,6 +827,52 @@ existing project's `.shapewall/` moves into it with [`shapewall migrate`](#movin
 - **Updates.** With `SHAPEWALL_UPDATE_RESTART=1` (set by a managed install), a finished update stops the engine with exit code
   75 so the service manager starts the new version. Stopping it (Ctrl+C) while an update is being applied waits for the update
   to finish first, and exits with 75 too when that update needs a restart.
+
+### Inviting people: team mode
+
+The engine starts with only you on this machine. To bring people in, turn on team mode: the same engine, the same data
+folder, with nothing copied and no second server. You stay its one owner.
+
+```sh
+shapewall serve --team            # start with team mode on (or switch it on while the engine runs)
+shapewall serve --team off        # back to this machine only
+shapewall serve --team --team-port 8443   # another HTTPS port on your tailnet (443 by default)
+```
+
+**Invite people** on the console's Members page does the same: it says what changes, asks you to type the workspace's name
+(the engine has no passkeys, so this is its step-up), and turns it on; **Stop sharing** turns it off. The setting is kept in
+`.shapewall/.engine/team.json` (0600), so the next `shapewall serve` starts the way it was left, and every start prints who
+can reach the board. While the engine runs, `shapewall serve --team` (or `--team off`) in the project folder switches it
+there, with this start's key from the data folder, from this machine and your own OS user only.
+
+- **How people reach it.** Team mode puts the board on your tailnet through `tailscale serve` with
+  [tailnet sign-in](#tailnet-sign-in), the same code and the same checks as a team server's `--tailscale --tailnet-sign-in`:
+  `https://<machine>.<tailnet>.ts.net` (on `--team-port` when set), never Funnel, never the public internet. This machine
+  needs Tailscale signed in with HTTPS certificates on. If anything about Tailscale is not right (not installed, not signed
+  in, the proof that requests came through `tailscale serve` fails), `serve --team` refuses to start and says why; a saved
+  setting that cannot come up only warns and starts the engine on this machine only.
+- **Who can reach it.** Devices your tailnet's access rules let reach this machine on that port. Of those, only a person
+  signed in to Tailscale whose login has an account on the engine sees the board; anyone else sees whom to ask, and shows
+  up for you under Members. Tagged devices and this machine itself are never signed in by the tailnet. The start, the
+  switch and Members print this, with the members and pending invites by name.
+- **Invites.** Only you invite, signed in on this machine, and every invite asks you to type the workspace's name first.
+  Invite by tailnet login (they join the next time they open the address) or send the link. Nobody is invited or promoted to
+  owner: the engine keeps one. Invites are refused while team mode is off, since nobody could use them.
+- **What members get.** The board through the team address, as on a team server, with the roles they were invited with.
+  They do not get anything that belongs to the engine's owner on this machine: the engine's settings, captures, checks
+  runs, journeys editing, batch fixes, updates, the terminal sign-in and this machine's tokens (`cli.token`, `watch.token`,
+  `agent.token`) all stay on your loopback address, which the tailnet never reaches. On the team address a request with
+  one of this machine's tokens is refused, a member cannot make or remove projects or workspaces, and a member cannot
+  invite anyone. The board's chat and Fix with run through the engine's agent, at the trust tier the member's role gets,
+  as on a team server.
+- **How it is built.** Team mode starts a second listener on 127.0.0.1 (a random port) for the same database and the same
+  live state (comments, chat, presence, the agent link), and `tailscale serve` forwards the tailnet to that port only.
+  Your own sign-in is on the engine's port, which keeps every rule above (this machine, your OS user, the engine's name):
+  a tailnet request never reaches it, and the terminal session's cookie counts for nothing on the team address. Turning it
+  off removes the `tailscale serve` entry, closes the listener and signs out every tailnet session; members and their
+  comments stay for the next time.
+- **The public internet** is not part of team mode. For a board on your own domain, run a team server with
+  [own domain deployment](#own-domain-deployment-mode-2) and its [checklist](#before-public-hosting).
 
 ### Moving a local project into the engine: `shapewall migrate`
 

@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Team mode on the solo engine** (2.0.0): `shapewall serve --team`, or **Invite people** on the console's Members page,
+  puts the same engine on your tailnet for the people you invite, through `tailscale serve` with tailnet sign-in, on the same
+  data with nothing copied; you stay its one owner. `shapewall serve --team off`, or **Stop sharing**, puts it back on this
+  machine only. The setting is kept in `.shapewall/.engine/team.json`, every start prints exactly who can reach the board,
+  and `serve --team [off]` switches a running engine. `--team-port N` picks the HTTPS port on the tailnet. See
+  [team mode](docs/hosted.md#inviting-people-team-mode).
 - `shapewall capture` and `links` write and read the solo engine's board folders (`.shapewall/.engine/files/`) once the
   engine holds the project, so a capture from the terminal (every environment) shows on the engine's board, with or without
   the engine running. `push` sends from there too, and `journeys`, `variant`, `checks`, `export --no-comments` and the
@@ -60,6 +66,17 @@ and the project uses [Semantic Versioning](https://semver.org/).
     restricted one). The config refuses each with that line.
   - `SHAPEWALL_USERCONTENT_ORIGIN`: rename it to `SHAPEWALL_HOSTED_USERCONTENT_ORIGIN`. A hosted server with only the old name
     stops at start with that line.
+
+### Security
+
+- Team mode serves members from a second listener on 127.0.0.1 for the same database, and `tailscale serve` forwards the
+  tailnet only to that port. The owner's terminal sign-in, the loopback and same-OS-user checks, this machine's tokens
+  (`cli.token`, `watch.token`, `agent.token`) and the owner-only engine features (settings, captures, checks, journeys
+  editing, batch fixes, updates) stay on the owner's port, which the tailnet never reaches; on the team address those
+  tokens are refused. Turning team mode on and every invite ask the owner, on this machine, to type the workspace's name;
+  members cannot invite, nobody becomes a second owner, and members cannot make or remove projects or workspaces there.
+  Turning it off removes the `tailscale serve` entry and signs out every tailnet session. Team mode never uses Funnel; a
+  board on the public internet still needs a team server on your own domain and its checklist.
 
 ## 1.5.0 - 2026-11-27
 

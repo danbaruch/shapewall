@@ -353,6 +353,57 @@ export async function startHosted({
     } else app.locals.presence.attach(server)
     holder.app = app
     cleanup.push(() => app.locals.close())
+    // The solo engine's team mode (shapewall serve --team, src/hosted/solo/team.js): a second listener for the
+    // people the owner invites, on the tailnet. Its own app, on this database, sharing the owner's live state; the
+    // owner's app above stays as it is (loopback, local sign-in). Closed before the owner's app at stop.
+    if (solo) {
+      const { createSoloTeam, readTeamSetting } = await import('./solo/team.js')
+      const options = solo.team || {}
+      const team = createSoloTeam({
+        db,
+        dataDir: dir,
+        ownerApp: app,
+        ownerOrigin: publicOrigin,
+        tailscale: { ...(options.run ? { run: options.run } : {}), ...(options.watchMs !== undefined ? { watchMs: options.watchMs } : {}) },
+        proof: options.proof || null,
+        facts: options.facts || null,
+        out,
+        makeApp: ({ origin: teamOrigin, tailnet, eventBus, presenceHub, shared }) =>
+          createHostedApp({
+            ...common,
+            origin: teamOrigin,
+            // tailscale serve on this machine forwards to it; live HTML from its own path (as hosted --tailscale).
+            trustProxy: true,
+            usercontentOrigin: null,
+            signup: 'invite',
+            tailnet,
+            tailnetPasskeys: false,
+            secondary: true,
+            shared,
+            eventBus,
+            presenceHub,
+            sweepEveryMs: 0,
+          }),
+      })
+      app.locals.soloTeam = team
+      cleanup.push(() => team.close())
+      const saved = readTeamSetting(dir)
+      if (saved.problem) out(`Team mode: off (${saved.problem}).`)
+      const want = typeof options.want === 'boolean' ? options.want : saved.on
+      const httpsPort = options.httpsPort ?? saved.httpsPort
+      if (options.want === false) await team.stop()
+      if (want) {
+        try {
+          await team.start({ httpsPort })
+          for (const line of team.lines()) out(line)
+        } catch (error) {
+          // Asked for now (serve --team): the engine does not start without it. Saved from before: the owner keeps
+          // working on this machine, and is told why nobody else can reach the board.
+          if (options.want === true) throw error
+          out(`${error.message} The board is on this machine only until this is fixed (shapewall serve --team off stops trying).`)
+        }
+      } else out(team.lines()[0])
+    }
     if (shareServer) {
       const { shareOnly } = await import('./tailscale.js')
       const shareApp = createHostedApp({

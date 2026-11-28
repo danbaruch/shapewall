@@ -56,6 +56,10 @@ export const MACHINE_TOKENS = {
   agent: { file: AGENT_TOKEN_FILE, name: 'Local agent', scopes: AGENT_LOGIN_SCOPES, kind: 'custom' },
 }
 
+// The token row ids of this engine's machine tokens ({ cli, watch, agent }; only ids, never values): what the team
+// listener refuses (src/hosted/solo/team.js), since those tokens are this machine's alone.
+export const machineTokenIds = (dir) => Object.values(readIds(dir)).filter((id) => typeof id === 'string')
+
 function readIds(dir) {
   try {
     const data = JSON.parse(fs.readFileSync(path.join(dir, IDS_FILE), 'utf8'))
