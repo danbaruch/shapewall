@@ -9,8 +9,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { ID_RE } from './config.js'
 import { acquireLock, isLockLive, readLock, releaseLock } from './lock.js'
+import { assertMigrationAllows, projectRoot } from './engine-folder.js'
 
-export const BOARD_JOB_KINDS = ['capture', 'checks', 'apply']
+export const BOARD_JOB_KINDS = ['capture', 'checks', 'apply', 'backup', 'push']
 
 export function boardJobFile(config, boardId) {
   if (!ID_RE.test(boardId)) throw new Error(`invalid board id ${boardId}`)
@@ -30,6 +31,8 @@ export function readBoardJob(config, boardId) {
 export function boardJobBusyMessage(kind, boardId = null) {
   const board = boardId ? ` of "${boardId}"` : ' of this board'
   if (kind === 'checks') return `Checks${boardId ? ` of "${boardId}"` : ' on this board'} are running. Try again when they finish.`
+  if (kind === 'push') return `A push${boardId ? ` of "${boardId}"` : ' of this board'} is being saved. Try again in a moment.`
+  if (kind === 'backup') return `A backup is reading${boardId ? ` "${boardId}"` : ' this board'}. Try again in a moment.`
   if (kind === 'apply') return `An agent Apply on${boardId ? ` "${boardId}"` : ' this board'} is running. Try again when it is done.`
   return `A capture${board} is already running.`
 }
@@ -40,7 +43,19 @@ export function acquireBoardJob(config, boardId, kind) {
   if (!BOARD_JOB_KINDS.includes(kind)) throw new Error(`unknown board job ${kind}`)
   const file = boardJobFile(config, boardId)
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  if (acquireLock(file, { kind })) return { ok: true, release: () => releaseLock(file) }
+  if (acquireLock(file, { kind })) {
+    // B-1: on the engine's board folders, checked again with the lock held.
+    // A migration that started before the lock was taken is refused here; one
+    // that starts after sees the lock (migrate's holders() scans the engine).
+    if (projectRoot(config.outputDir).engine)
+      try {
+        assertMigrationAllows(config)
+      } catch (error) {
+        releaseLock(file)
+        throw error
+      }
+    return { ok: true, release: () => releaseLock(file) }
+  }
   return { ok: false, holder: readBoardJob(config, boardId)?.kind || 'capture' }
 }
 

@@ -196,3 +196,71 @@ test('github on the engine: an unknown comment is refused before GitHub is asked
     assert.equal(gh.requests.length, 0, 'GitHub is not asked about a comment the board does not have')
   })
 })
+
+// The same two GitHub tools `shapewall mcp` has on a 1.x board, on the solo engine: this process asks the stand-in
+// with its own token, and the engine records the link. The engine's own /mcp never lists them.
+test('mcp on the solo engine: create_github_issue and link_pull_request record their links on the engine', async (t) => {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+  const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js')
+  const { createRemoteMcpServer } = await import('../src/remote/remote-mcp.js')
+  const { createRemote } = await import('../src/remote/remote.js')
+  const { pinSoloLoopback } = await import('../src/remote/loopback-pin.js')
+  const { serveEngine } = await import('../src/hosted/solo/serve.js')
+  const { startHosted } = await import('../src/hosted/server.js')
+  const { config } = await migratedProject('github-engine-mcp')
+  const gh = await standIn()
+  t.after(() => gh.server.close())
+  const handle = await serveEngine({ engine: 'hosted', config: config.file, port: 0, 'no-chat': true }, () => {}, {
+    env: ENV,
+    start: (options) => startHosted({ ...options, exitOnStop: false }),
+  })
+  t.after(() => handle.stop())
+  await pinSoloLoopback()
+  const target = engineTarget(config)
+  const env = { ...ENV, SHAPEWALL_GITHUB_TOKEN: GH_TOKEN, SHAPEWALL_GITHUB_API_URL: gh.url }
+  const connect = async (options) => {
+    const server = await createRemoteMcpServer({
+      remote: createRemote({ origin: target.origin, token: target.token, source: 'engine' }),
+      config,
+      env,
+      ...options,
+    })
+    const [a, b] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'github-engine', version: '1.0.0' })
+    await server.connect(a)
+    await client.connect(b)
+    t.after(() => client.close())
+    return client
+  }
+  const names = async (client) => (await client.listTools()).tools.map((tool) => tool.name)
+  // Not for a remote board reached another way (no localAuthor), nor read-only.
+  assert.ok(!(await names(await connect({}))).includes('create_github_issue'))
+  assert.ok(!(await names(await connect({ localAuthor: true, readOnly: true }))).includes('create_github_issue'))
+  const client = await connect({ localAuthor: true })
+  const tools = await names(client)
+  assert.ok(tools.includes('create_github_issue') && tools.includes('link_pull_request'), tools.join(', '))
+  const call = async (name, args) => {
+    const result = await client.callTool({ name, arguments: args })
+    assert.ok(!result.isError, result.content?.[0]?.text)
+    return JSON.parse(result.content[0].text)
+  }
+  const made = await call('create_github_issue', { id: 1 })
+  assert.equal(made.created, true)
+  assert.equal(made.issue.number, 41)
+  const linked = await call('link_pull_request', { id: 1, pr: '#5' })
+  assert.equal(linked.merged, true)
+  assert.equal(linked.status, 'resolved')
+  assert.ok(
+    gh.requests.every((request) => request.auth === `Bearer ${GH_TOKEN}`),
+    'the GitHub token went to GitHub only',
+  )
+  // Kept on the engine's comment.
+  const { comment } = await createRemote({ origin: target.origin, token: target.token, source: 'engine' }).comment('sample', 1, {
+    guests: true,
+  })
+  assert.equal(comment.github.issue.number, 41)
+  assert.deepEqual(
+    comment.github.pulls.map((pull) => [pull.number, pull.state, pull.via]),
+    [[5, 'merged', 'manual']],
+  )
+})

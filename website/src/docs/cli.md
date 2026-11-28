@@ -576,7 +576,7 @@ Private diagnostic reports are excluded unless `--include-checks` is explicitly 
 
 ```text
 shapewall migrate [--dry-run] [--board ID] [--json]
-shapewall migrate --rollback [--dry-run] [--json]
+shapewall migrate --rollback [--all] [--dry-run] [--json]
 ```
 
 Moves this project's `.shapewall/` into the [solo engine](/docs/hosted#the-solo-engine-experimental) (`.shapewall/.engine/`), so
@@ -584,7 +584,8 @@ Moves this project's `.shapewall/` into the [solo engine](/docs/hosted#the-solo-
 engine rows, and a `serve --accounts` owner with their passkeys. A hard-link backup goes to `.shapewall/backup-1x-<time>/` first,
 and a failed run puts the folder back. `--dry-run` prints the counts and every item that would not come along, and writes nothing.
 It refuses while `serve` (either engine), a capture, `watch` or an agent runs. After a migration the plain `serve` and `watch`
-refuse the boards that moved; `--rollback` restores them from the backup, checked byte for byte. Agent settings and keys stay
+refuse the boards that moved; `--rollback` restores them from the backup, checked byte for byte (after a run that was stopped
+midway, only that run; `--all` every run). Agent settings and keys stay
 on the machine; sign-in sessions and paired devices do not move. Exit code 0 when done or nothing to do, 1 when refused or failed.
 Details: [moving a local project into the engine](/docs/hosted#moving-a-local-project-into-the-engine-shapewall-migrate).
 
@@ -1045,7 +1046,9 @@ Commands
                             serve (either engine), capture, watch or an agent runs
       --dry-run             counts, and every item that would not come along; writes nothing
       --board ID            only this board (default: every board)
-      --rollback            put every migration back from its backup (checked byte for byte)
+      --rollback            put every migration back from its backup (checked byte for byte); after a run
+                            that was stopped midway, only that run
+      --all                 with --rollback: every run, also after a stopped one
       --json                machine-readable result
                             exit code: 0 done or nothing to do, 1 refused or failed (the folder is put back)
   buzz-bridge               run a private foreground gateway to existing Buzz agents (experimental)

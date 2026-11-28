@@ -13,6 +13,8 @@
 //   MIGRATING-TO-2  a run started and did not finish
 //   MIGRATED-TO-2   { version: 1, runs: [{ boards: { <id>: counts }, ... }] }:
 //                   the boards listed there live on the engine now
+//   ROLLING-BACK    a rollback started and did not finish: the backups it
+//                   restores, newest first (run it again to finish)
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -25,6 +27,7 @@ export const engineDir = (outputDir) => path.join(outputDir, ENGINE_DIR)
 export const MIGRATE_LOCK = 'migrate.lock'
 export const MIGRATING = 'MIGRATING-TO-2'
 export const MIGRATED = 'MIGRATED-TO-2'
+export const ROLLING_BACK = 'ROLLING-BACK'
 
 export class EngineFolderError extends Error {}
 
@@ -49,21 +52,43 @@ export function migrationState(outputDir) {
   return {
     running: Boolean(lock && isLockLive(lock)),
     stopped: fs.existsSync(path.join(outputDir, MIGRATING)),
+    // A rollback that started and did not finish (B-4): its journal.
+    rollingBack: fs.existsSync(path.join(outputDir, ROLLING_BACK)),
     migrated: migratedBoards(outputDir),
   }
 }
 
-// Throws when nothing may start in the folder now: a migration is running,
-// or one was stopped midway. `local` (the 1.x board server, watch): also
-// when any board of `boardIds` (default: every board of the config) was
-// moved to the engine; its comments live there now, and a local writer would
-// start a second copy. Returns the migrated board ids otherwise.
+// The project's own output folder for an outputDir that may be the engine's
+// project folder (<root>/.engine/files/<workspace>/<project>, what
+// src/cli/board-home.js points the board writers at): <root>. Any other
+// folder is its own. -> { root, engine }.
+export function projectRoot(outputDir) {
+  const dir = path.resolve(outputDir)
+  const files = path.dirname(path.dirname(dir))
+  if (path.basename(files) === 'files' && path.basename(path.dirname(files)) === ENGINE_DIR)
+    return { root: path.dirname(path.dirname(files)), engine: true }
+  return { root: dir, engine: false }
+}
+
+// Throws when nothing may start in the folder now: a migration (or a
+// rollback) is running, or one was stopped midway. Read from the project's
+// own output folder, also for a writer given the engine's folder (B-1).
+// `local` (the 1.x board server, watch, the 1.x writers): also when any
+// board of `boardIds` (default: every board of the config) was moved to the
+// engine; its comments live there now, and a local writer would start a
+// second copy. A writer in the engine's folder is the engine's board, never
+// that second copy. Returns the migrated board ids otherwise.
 export function assertMigrationAllows(config, { local = false, boardIds = null } = {}) {
-  const state = migrationState(config.outputDir)
+  const { root, engine } = projectRoot(config.outputDir)
+  const state = migrationState(root)
   if (state.running) throw new EngineFolderError('shapewall migrate is running for this project; wait for it to finish.')
+  if (state.rollingBack)
+    throw new EngineFolderError(
+      'An earlier shapewall migrate --rollback was stopped midway. Run shapewall migrate --rollback again to finish it.',
+    )
   if (state.stopped)
     throw new EngineFolderError('An earlier shapewall migrate was stopped midway. Run shapewall migrate --rollback, then migrate again.')
-  if (local) {
+  if (local && !engine) {
     const ids = boardIds || config.boards.map((board) => board.id)
     const moved = ids.filter((id) => state.migrated.has(id))
     if (moved.length)

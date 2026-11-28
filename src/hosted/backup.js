@@ -42,7 +42,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { openDatabase, quietSqliteWarning } from './db.js'
 import { ID_PATTERNS } from './crypto.js'
 import { ID_RE } from '../config.js'
-import { readBoardJob } from '../board-job.js'
+import { boardJobFile, readBoardJob } from '../board-job.js'
+import { acquireLock, releaseLock } from '../lock.js'
 
 export const BACKUP_FORMAT = 'shapewall-hosted-backup'
 const BACKUP_DIR_RE = /^shapewall-backup-\d{8}T\d{6}Z(?:-\d+)?$/
@@ -139,6 +140,9 @@ function pinTree(from, to, link = true) {
   }
   fs.mkdirSync(to, { recursive: true, mode: 0o700 })
   for (const entry of entries) {
+    // A board's job lock (the one the backup itself holds while pinning, B-7)
+    // is not a file of the board: a restored one would be a stale lock.
+    if (/^capture\.lock(\.|$)/.test(entry.name)) continue
     const source = path.join(from, entry.name)
     const target = path.join(to, entry.name)
     if (entry.isDirectory()) pinTree(source, target, link)
@@ -317,6 +321,30 @@ export async function backup({
           } finally {
             copy.close()
           }
+          // B-7: each board's job lock is held while it is pinned, so a short
+          // capture (another process) can neither start nor end inside the pin.
+          const held = []
+          let taken = null
+          for (const row of boards) {
+            if (!ID_PATTERNS.workspace.test(row.workspace_id) || !ID_PATTERNS.project.test(row.project_id) || !ID_RE.test(row.board_id))
+              continue
+            const outputDir = path.join(source, 'files', row.workspace_id, row.project_id)
+            if (!fs.existsSync(path.join(outputDir, row.board_id))) continue
+            const file = boardJobFile({ outputDir }, row.board_id)
+            if (!acquireLock(file, { kind: 'backup' })) {
+              taken = `${row.workspace_id}/${row.project_id}/${row.board_id}`
+              break
+            }
+            held.push(file)
+          }
+          const releaseAll = () => held.splice(0).forEach((file) => releaseLock(file))
+          if (taken) {
+            releaseAll()
+            conn.exec('ROLLBACK')
+            fs.rmSync(path.join(partial, 'shapewall.db'), { force: true })
+            await waitFor(taken)
+            continue
+          }
           const pinAll = () => {
             missing.length = 0
             for (const row of boards) {
@@ -340,6 +368,8 @@ export async function backup({
           } catch (error) {
             // A capture renaming files under the pin (ENOENT) is told apart below.
             pinError = error
+          } finally {
+            releaseAll()
           }
           const started = busyBoard(conn, source)
           if (!started) {

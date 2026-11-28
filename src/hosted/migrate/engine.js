@@ -73,9 +73,17 @@ export async function readEngineDb(outputDir) {
   // Even a read-only connection leaves -wal and -shm files beside a WAL
   // database, so a private copy is read instead (removed on close).
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shapewall-migrate-'))
-  for (const suffix of ['', '-wal']) if (fs.existsSync(file + suffix)) fs.copyFileSync(file + suffix, path.join(dir, ENGINE_DB + suffix))
-  const { DatabaseSync } = await import('node:sqlite')
-  const db = new DatabaseSync(path.join(dir, ENGINE_DB))
+  let db
+  try {
+    for (const suffix of ['', '-wal']) if (fs.existsSync(file + suffix)) fs.copyFileSync(file + suffix, path.join(dir, ENGINE_DB + suffix))
+    const { DatabaseSync } = await import('node:sqlite')
+    db = new DatabaseSync(path.join(dir, ENGINE_DB))
+  } catch (error) {
+    // B-9: a copy that failed (a full /tmp) or a database that does not open
+    // leaves no copy of the database behind.
+    fs.rmSync(dir, { recursive: true, force: true })
+    throw error
+  }
   const close = db.close.bind(db)
   db.close = () => {
     close()

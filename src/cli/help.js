@@ -343,7 +343,9 @@ export const SECTIONS = {
                             serve (either engine), capture, watch or an agent runs
       --dry-run             counts, and every item that would not come along; writes nothing
       --board ID            only this board (default: every board)
-      --rollback            put every migration back from its backup (checked byte for byte)
+      --rollback            put every migration back from its backup (checked byte for byte); after a run
+                            that was stopped midway, only that run
+      --all                 with --rollback: every run, also after a stopped one
       --json                machine-readable result
                             exit code: 0 done or nothing to do, 1 refused or failed (the folder is put back)`,
   'buzz-bridge': `  buzz-bridge               run a private foreground gateway to existing Buzz agents${EXPERIMENTAL}

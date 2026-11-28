@@ -37,6 +37,7 @@ import { mergeCheckEnvironments, validateCheckEnvironments } from '../checks/env
 import { projectDir } from './projects.js'
 import { readSoloBinding } from './solo/binding.js'
 import { boardJobBusyMessage, readBoardJob } from '../board-job.js'
+import { acquireLock, releaseLock } from '../lock.js'
 import { CHECKS_BUNDLE_MAX, validateChecksBundle } from '../checks/transport.js'
 import { listReports } from '../checks/store.js'
 import { REPORT_ID_RE, REPORTS_MAX, validateReport } from '../checks/schema.js'
@@ -710,6 +711,8 @@ export function createPushStore(
     const swap = { push: push.id, workspace: t.workspaceId, project: projectId, board: boardId, hadTarget: fs.existsSync(target) }
     writeSwap(dataDir, swap)
     let settled = false
+    // B-8: the board's job lock, held from the check through the swap.
+    let held = false
     try {
       transaction(db, () => {
         try {
@@ -742,6 +745,10 @@ export function createPushStore(
         }
       }
       throw error
+    } finally {
+      // Moved with the folder it is in: in the old one after a swap (which
+      // goes), back in place after a failed one. Only our own lock is removed.
+      if (held) for (const dir of [target, old]) releaseLock(path.join(dir, 'capture.lock'))
     }
     function commitInLock() {
       const at = now.toISOString()
@@ -754,8 +761,16 @@ export function createPushStore(
       }
       // In the write lock: a job that holds the board folder (the solo
       // engine's capture) keeps it until it finishes, however the push's
-      // route was spelled.
-      refuseBoardJob(projectId, boardId)
+      // route was spelled. Held, not only checked (B-8): a capture from the
+      // terminal (another process, no database lock) cannot take the board
+      // between this check and the swap.
+      if (fs.existsSync(target) && !fs.lstatSync(target).isSymbolicLink()) {
+        held = acquireLock(path.join(target, 'capture.lock'), { kind: 'push' })
+        if (!held) {
+          refuseBoardJob(projectId, boardId)
+          throw new PushError(409, 'board_busy', boardJobBusyMessage('capture'))
+        }
+      } else refuseBoardJob(projectId, boardId)
       prepare(at)
       t.run("UPDATE pushes SET status = 'committed', finished_at = :at WHERE workspace_id = :ws AND id = :id", { id: push.id, at })
       // Inside the transaction: if the swap fails, the rows roll back too.
@@ -922,6 +937,8 @@ export function createPushStore(
           // versions, checks (hard links where the file system allows).
           // Never through a symlink.
           copyBoard(target, staging, (relative) => {
+            // The board's job lock (the commit holds it, B-8) is not carried.
+            if (/^capture\.lock(\.|$)/.test(relative)) return false
             if (relative === path.join('captures', 'manifest.json')) return false
             if (path.dirname(relative) === 'captures') return !replaced.has(path.basename(relative).split('.').slice(0, 2).join('.'))
             return true
