@@ -147,7 +147,7 @@ for (const version of VERSIONS) {
     assert.equal(first.code, 0, first.text)
     assert.ok(fs.existsSync(path.join(p.out, MARKER)))
     // B-2: only the tombstone stays, so a 1.x Shapewall fails there instead of starting an empty board.
-    assert.deepEqual(fs.readdirSync(path.join(p.out, 'site')).sort(), ['chat', 'comments.json'], 'only the tombstone stays')
+    assert.deepEqual(fs.readdirSync(path.join(p.out, 'site')).sort(), ['chat', 'comments.json', 'status.json'], 'only the tombstone stays')
     assert.ok(fs.statSync(path.join(p.out, 'site', 'comments.json')).isDirectory())
     assert.ok(fs.statSync(path.join(p.out, 'site', 'chat')).isFile())
     assert.ok(fs.readdirSync(p.out).some((name) => name.startsWith('backup-1x-')))
@@ -781,7 +781,9 @@ test('N2: a journal whose run left nothing to put back is cleared by --rollback,
   fs.writeFileSync(path.join(p.out, JOURNAL), JSON.stringify({ version: 1, backup: name, stamp: 'x', pid: 1 }))
   const refused = await run(p)
   assert.equal(refused.code, 1)
-  assert.match(refused.text, /To give up on that run instead, delete \.shapewall\/MIGRATING-TO-2/)
+  // B-15: never "delete MIGRATING-TO-2"; --rollback puts back that run only.
+  assert.doesNotMatch(refused.text, /delete .*MIGRATING-TO-2/)
+  assert.match(refused.text, /shapewall migrate --rollback to put that run back \(only that run\)/)
   const back = await run(p, { rollback: true })
   assert.equal(back.code, 0)
   assert.match(back.text, /before it changed anything; nothing needs restoring and MIGRATING-TO-2 was removed/)
@@ -912,7 +914,7 @@ test('R2-2: a journal whose backup was deleted after the run changed the engine 
   assert.equal(back.code, 1, back.text)
   assert.doesNotMatch(back.text, /before it changed anything/)
   assert.match(back.text, /cannot be put back: its backup is gone, and the engine already has comments, chat or files of site/)
-  assert.match(back.text, /may be half moved: copy \.shapewall\/site aside first\. Then, to give up on that run/)
+  assert.match(back.text, /may be half moved: copy \.shapewall\/site aside first\. Then, .*run shapewall migrate --abandon/)
   assert.equal(fs.existsSync(path.join(p.out, JOURNAL)), true, 'the journal stays')
   const json = await run(p, { rollback: true, json: true })
   assert.equal(json.json.ok, false)

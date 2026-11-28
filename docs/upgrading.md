@@ -22,7 +22,8 @@ nothing. A project with no `.shapewall/` yet needs no migration: the engine star
 
 Anything that would stop the move stops `serve` with the reason, and nothing changes. That covers a 1.x `serve`, `watch`,
 capture or starter agent still running for the project, a migration that was stopped midway (`.shapewall/MIGRATING-TO-2` is
-left behind; run `shapewall migrate --rollback`), and a board the engine cannot take.
+left behind; run `shapewall migrate --rollback`, which puts back that run only; never delete the file by hand), and a
+board the engine cannot take.
 
 ## What moves
 
@@ -51,7 +52,10 @@ npx shapewall migrate --rollback             # put the 1.x board back
 before the run. Nothing is deleted on the way: what is there now, including anything made on the engine since the move, goes
 aside into `<backup>/replaced-<time>/`. After a migration that was stopped midway, `--rollback` puts back only that run (earlier
 finished runs stay on the engine); `--rollback --all` puts back every run. A rollback that is itself stopped midway leaves
-`.shapewall/ROLLING-BACK`, and nothing starts until `shapewall migrate --rollback` runs again and finishes it. A moved board's
+`.shapewall/ROLLING-BACK`, and nothing starts until `shapewall migrate --rollback` runs again and finishes it. If a backup
+keeps failing, the message names it: fix what it says and run `--rollback` again, or run `shapewall migrate --rollback
+--give-up` to end the rollback and keep the folder as it is now. If a stopped run's backup is gone, `--rollback` says so,
+and `shapewall migrate --abandon` keeps what the engine has of that run and records it as done. A moved board's
 1.x folder keeps only a note, so an older Shapewall started there stops with an error instead of opening an empty board.
 Rollback is part of the Apache 2.0 core and never needs the engine.
 
