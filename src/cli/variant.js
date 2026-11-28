@@ -6,6 +6,7 @@ import { captureVariant } from '../capture/capture.js'
 import { readVariants, removeVariant, saveVariant, variantsWithFiles } from '../store.js'
 import { suggestFlag } from './args.js'
 import { removed } from '../deprecation.js'
+import { assertMigrationAllows } from '../engine-folder.js'
 import { projectConfig } from './board-home.js'
 
 function slugify(textValue) {
@@ -40,11 +41,13 @@ export async function variant(positional, flags, out) {
   if (action === 'remove') {
     const id = positional[1]
     if (!id) throw new Error('usage: shapewall variant remove ID')
+    assertMigrationAllows(config, { local: true, boardIds: [board.id] })
     if (!(await removeVariant(config, board.id, id))) throw new Error(`No variant "${id}"`)
     out(`Removed ${id}`)
     return
   }
   if (action === 'add') {
+    assertMigrationAllows(config, { local: true, boardIds: [board.id] })
     const pageId = positional[1]
     if (!pageId) throw new Error(`usage: shapewall variant add PAGE --url URL --title TEXT (PAGE is a page id on "${board.id}")`)
     const page = board.pages.find((item) => item.id === pageId)

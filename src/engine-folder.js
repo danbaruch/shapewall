@@ -46,12 +46,25 @@ export function migratedBoards(outputDir) {
   return ids
 }
 
-// { running, stopped, migrated } for the project's output directory.
+function isFinishedJournal(outputDir) {
+  try {
+    const journal = JSON.parse(fs.readFileSync(path.join(outputDir, MIGRATING), 'utf8'))
+    if (!journal?.backup) return false
+    const marker = JSON.parse(fs.readFileSync(path.join(outputDir, MIGRATED), 'utf8'))
+    return marker?.version === 1 && Array.isArray(marker.runs) && marker.runs.some((run) => run?.backup === journal.backup)
+  } catch {
+    return false
+  }
+}
+
+// { running, stopped, finishedJournal, rollingBack, migrated } for the project's output directory.
 export function migrationState(outputDir) {
   const lock = readLock(path.join(outputDir, MIGRATE_LOCK))
+  const stopped = fs.existsSync(path.join(outputDir, MIGRATING))
   return {
     running: Boolean(lock && isLockLive(lock)),
-    stopped: fs.existsSync(path.join(outputDir, MIGRATING)),
+    stopped,
+    finishedJournal: stopped && isFinishedJournal(outputDir),
     // A rollback that started and did not finish (B-4): its journal.
     rollingBack: fs.existsSync(path.join(outputDir, ROLLING_BACK)),
     migrated: migratedBoards(outputDir),
@@ -85,6 +98,10 @@ export function assertMigrationAllows(config, { local = false, boardIds = null }
   if (state.rollingBack)
     throw new EngineFolderError(
       'An earlier shapewall migrate --rollback was stopped midway. Run shapewall migrate --rollback again to finish it.',
+    )
+  if (state.finishedJournal)
+    throw new EngineFolderError(
+      `An earlier shapewall migrate finished (${MIGRATED} lists it) but left ${MIGRATING} behind. Run shapewall migrate to clear ${MIGRATING}.`,
     )
   if (state.stopped)
     throw new EngineFolderError('An earlier shapewall migrate was stopped midway. Run shapewall migrate --rollback, then migrate again.')

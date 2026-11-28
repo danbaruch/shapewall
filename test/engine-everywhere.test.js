@@ -267,3 +267,174 @@ test('F5: export excludes share-link guest comments and images by default; --inc
   assert.deepEqual(guestComments.map((comment) => comment.body).sort(), ['Bigger logo', 'Untrusted guest note'])
   assert.equal(fs.existsSync(path.join(outWithGuests, 'data', 'boards', 'sample', 'comment-files', guestImgFile)), true)
 })
+
+test('F7: shapewall open works on a 2.0 solo engine (running and stopped headless)', async (t) => {
+  const { serveEngine } = await import('../src/hosted/solo/serve.js')
+  const { startHosted } = await import('../src/hosted/server.js')
+  const { config, file } = await migratedProject('everywhere-open')
+
+  // Stopped engine: resolves comment #1 via headless start, reports running: false on default port, and cleans up.
+  const stopped = await cli(['open', '--comment', '1', '--json', '--config', file])
+  assert.equal(stopped.code, 0, stopped.err)
+  const stoppedJson = JSON.parse(stopped.out)
+  assert.equal(stoppedJson.running, false)
+  assert.equal(stoppedJson.comment, 1)
+  assert.equal(stoppedJson.viewport, 'desktop')
+  assert.match(
+    stoppedJson.url,
+    /^http:\/\/[a-z0-9-]+\.shapewall\.localhost:4600\/w\/[^/]+\/p\/[^/]+\/\?board=sample&c=1&filter=all&vp=desktop$/,
+  )
+  assert.equal(engineTarget(config), null, 'headless engine stopped cleanly after open')
+
+  // Running full serve: returns live *.shapewall.localhost:<port> URL with running: true.
+  const handle = await serveEngine({ engine: 'hosted', config: file, port: 0, 'no-chat': true }, () => {}, {
+    env: ENV,
+    start: (options) => startHosted({ ...options, exitOnStop: false, handleSignals: false }),
+  })
+  t.after(() => handle.stop())
+  const live = await cli(['open', '--comment', '1', '--json', '--config', file])
+  assert.equal(live.code, 0, live.err)
+  const liveJson = JSON.parse(live.out)
+  assert.equal(liveJson.running, true)
+  assert.equal(liveJson.comment, 1)
+  assert.equal(liveJson.viewport, 'desktop')
+  assert.ok(liveJson.url.startsWith(handle.origin), `expected ${liveJson.url} to start with ${handle.origin}`)
+  assert.match(liveJson.url, /\?board=sample&c=1&filter=all&vp=desktop$/)
+})
+
+test('F9: headless shapewall mcp cleans up serve.lock on SIGINT', async () => {
+  const { spawn } = await import('node:child_process')
+  const { engineDir } = await import('../src/engine-folder.js')
+  const { config, file } = await migratedProject('everywhere-mcp-sigint')
+  const lockPath = path.join(engineDir(config.outputDir), 'serve.lock')
+  const child = spawn(process.execPath, [CLI, 'mcp', '--config', file], {
+    cwd: config.dir,
+    env: { ...process.env, ...ENV },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+  // Send an MCP initialize request and wait for the JSON-RPC response so we know runRemoteMcp is live.
+  const ready = new Promise((resolve, reject) => {
+    let buf = ''
+    child.stdout.on('data', (chunk) => {
+      buf += String(chunk)
+      if (buf.includes('"id":1')) resolve()
+    })
+    child.once('exit', (code, signal) => reject(new Error(`mcp exited before ready (${code}, ${signal})`)))
+  })
+  child.stdin.write(
+    `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1.0.0' } } })}\n`,
+  )
+  await Promise.race([ready, new Promise((_, reject) => setTimeout(() => reject(new Error('mcp did not initialize')), 15000))])
+  assert.ok(fs.existsSync(lockPath), 'headless mcp holds serve.lock')
+  const exited = new Promise((resolve) => child.once('exit', (code, signal) => resolve({ code, signal })))
+  child.kill('SIGINT')
+  const status = await Promise.race([
+    exited,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('mcp hung after SIGINT')), 10000)),
+  ])
+  assert.equal(status.code, 0, `expected clean exit 0, got ${JSON.stringify(status)}`)
+  assert.equal(fs.existsSync(lockPath), false, 'serve.lock removed on SIGINT')
+  assert.equal(engineTarget(config), null)
+})
+
+test('F10: concurrent headless CLI commands serialize cleanly and serve --open refuses headless', async () => {
+  const { execFile } = await import('node:child_process')
+  const { promisify } = await import('node:util')
+  const { serveEngine } = await import('../src/hosted/solo/serve.js')
+  const execFileAsync = promisify(execFile)
+  const { config, file } = await migratedProject('everywhere-concurrent')
+  const runChild = () =>
+    execFileAsync(process.execPath, [CLI, 'comments', 'list', '--config', file, '--json'], {
+      cwd: config.dir,
+      env: { ...process.env, ...ENV },
+      timeout: 25000,
+    })
+  const results = await Promise.all([runChild(), runChild(), runChild()])
+  for (const res of results) {
+    assert.deepEqual(
+      JSON.parse(res.stdout).comments.map((item) => item.body),
+      ['Bigger logo'],
+    )
+  }
+  assert.equal(engineTarget(config), null, 'no leaked lock after concurrent headless calls')
+
+  // Interactive serve --open refuses to attach to a long-lived headless engine.
+  const headless = await startEngineHeadless(config, { env: ENV })
+  try {
+    await assert.rejects(
+      serveEngine({ engine: 'hosted', config: file, open: true }, () => {}, { env: ENV }),
+      /A headless solo engine is running for this project/,
+    )
+  } finally {
+    await headless.stop()
+  }
+})
+
+test('F11, F13d & F15: SHAPEWALL_REMOTE does not break export, SHAPEWALL_NO_ENGINE blocks 1.x fallback on fresh engine, export --no-comments works under NO_ENGINE, and --since filters engine comments', async (t) => {
+  const { serveEngine } = await import('../src/hosted/solo/serve.js')
+  const { startHosted } = await import('../src/hosted/server.js')
+  const { config, file } = await migratedProject('everywhere-env-since')
+
+  // F15: --since filters solo engine comments.
+  const none = await cli(['comments', 'list', '--since', '2099-01-01', '--json', '--config', file])
+  assert.equal(none.code, 0, none.err)
+  assert.equal(JSON.parse(none.out).count, 0)
+  assert.deepEqual(JSON.parse(none.out).comments, [])
+  const some = await cli(['comments', 'list', '--since', '2020-01-01', '--json', '--config', file])
+  assert.equal(some.code, 0, some.err)
+  assert.equal(JSON.parse(some.out).count, 1)
+
+  // F11: SHAPEWALL_REMOTE in env does not bypass engineMode for export.
+  const savedRemote = process.env.SHAPEWALL_REMOTE
+  process.env.SHAPEWALL_REMOTE = 'http://127.0.0.1:9'
+  try {
+    const outDir = path.join(config.dir, 'exported-with-env-remote')
+    const exported = await cli(['export', '--config', file, '--out', outDir])
+    assert.equal(exported.code, 0, exported.err)
+    const rows = JSON.parse(fs.readFileSync(path.join(outDir, 'data', 'boards', 'sample', 'comments.json'), 'utf8')).comments
+    assert.deepEqual(
+      rows.map((comment) => comment.body),
+      ['Bigger logo'],
+    )
+  } finally {
+    if (savedRemote === undefined) delete process.env.SHAPEWALL_REMOTE
+    else process.env.SHAPEWALL_REMOTE = savedRemote
+  }
+
+  // F13d: export --no-comments succeeds even when serve is running AND SHAPEWALL_NO_ENGINE=1.
+  const handle = await serveEngine({ engine: 'hosted', config: file, port: 0, 'no-chat': true }, () => {}, {
+    env: ENV,
+    start: (options) => startHosted({ ...options, exitOnStop: false, handleSignals: false }),
+  })
+  t.after(() => handle.stop())
+  const savedNoEngine = process.env.SHAPEWALL_NO_ENGINE
+  process.env.SHAPEWALL_NO_ENGINE = '1'
+  try {
+    const bareOut = path.join(config.dir, 'exported-no-comments-agent')
+    const bare = await cli(['export', '--no-comments', '--config', file, '--out', bareOut])
+    assert.equal(bare.code, 0, bare.err)
+  } finally {
+    if (savedNoEngine === undefined) delete process.env.SHAPEWALL_NO_ENGINE
+    else process.env.SHAPEWALL_NO_ENGINE = savedNoEngine
+  }
+
+  // F11: fresh 2.0 solo engine project (no MIGRATED-TO-2) refuses 1.x fallback under SHAPEWALL_NO_ENGINE=1.
+  const freshDir = tempDir('everywhere-fresh-no-fallback')
+  const freshFile = path.join(freshDir, 'shapewall.config.json')
+  fs.writeFileSync(freshFile, JSON.stringify({ ...structuredClone(SAMPLE), title: 'Fresh Solo' }, null, 2))
+  const freshConfig = loadConfig(freshFile)
+  const freshHandle = await serveEngine({ engine: 'hosted', config: freshFile, port: 0, 'no-chat': true }, () => {}, {
+    env: ENV,
+    start: (options) => startHosted({ ...options, exitOnStop: false, handleSignals: false }),
+  })
+  await freshHandle.stop()
+  process.env.SHAPEWALL_NO_ENGINE = '1'
+  try {
+    const blocked = await cli(['comments', 'add', '--page', 'home', '--body', 'No split brain', '--config', freshFile])
+    assert.notEqual(blocked.code, 0)
+    assert.equal(fs.existsSync(path.join(freshConfig.outputDir, 'sample', 'comments.json')), false)
+  } finally {
+    if (savedNoEngine === undefined) delete process.env.SHAPEWALL_NO_ENGINE
+    else process.env.SHAPEWALL_NO_ENGINE = savedNoEngine
+  }
+})

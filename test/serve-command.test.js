@@ -195,3 +195,35 @@ test('share --remote stops on a board the engine holds instead of sending a stal
     /lives in the solo engine now .*shapewall serve --team .*migrate --rollback/,
   )
 })
+
+test('F13a: autoMigrate refuses when plan.boards is empty but plan.problems has errors (respecting skipGitCheck)', async () => {
+  const config = project('auto-migrate-problems')
+  fs.mkdirSync(config.outputDir, { recursive: true })
+  const lines = []
+  await assert.rejects(
+    autoMigrate(config, (line) => lines.push(line), {
+      env: ENV,
+      migrate: {
+        pendingMigration: async () => ({
+          boards: [],
+          problems: ['board sample: orphaned tombstone without MIGRATED-TO-2'],
+        }),
+      },
+    }),
+    AutoMigrateError,
+  )
+  assert.ok(lines.some((line) => /orphaned tombstone/.test(line)))
+
+  // git-tracked problem is skipped when skipGitCheck is true.
+  const skipped = await autoMigrate(config, () => {}, {
+    env: ENV,
+    skipGitCheck: true,
+    migrate: {
+      pendingMigration: async () => ({
+        boards: [],
+        problems: ['git tracks files in .shapewall/.engine (shapewall.db)'],
+      }),
+    },
+  })
+  assert.deepEqual(skipped, { migrated: false, boards: [] })
+})

@@ -15,15 +15,17 @@ import {
 } from '../feedback.js'
 import { AGENT_STATUSES, addReply, deleteComment, getComment, setAgentStatus, updateComment } from '../store.js'
 import { mentionFlag, withNotifications } from './notify.js'
+import { assertNotEngineBoard } from './board-home.js'
 import { runByAgent } from '../agent-run.js'
 
 // Changes (resolve, reply, ...) send their notifications before the command exits.
 export async function comments(positional, flags, out, err) {
-  if (flags.remote !== undefined) {
+  if (flags.remote !== undefined || Boolean(process.env.SHAPEWALL_REMOTE)) {
     const { remoteComments } = await import('../remote/cli.js')
     return remoteComments(positional, flags, out, err)
   }
   const config = loadConfig(flags.config)
+  await assertNotEngineBoard(config, 'shapewall comments', 'Run it without SHAPEWALL_NO_ENGINE, or start shapewall serve.')
   if (['list', 'get', 'show', 'selectors'].includes(positional[0] || 'list')) return commentAction(config, positional, flags, out, err)
   return withNotifications(config, err, () => commentAction(config, positional, flags, out, err))
 }

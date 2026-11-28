@@ -940,21 +940,49 @@ export async function createRemoteMcpServer({
 }
 
 export async function runRemoteMcp({ remote, readOnly = false, board = null, config = null, allowCapture = true, localAuthor = false }) {
-  const server = await createRemoteMcpServer({
-    remote,
-    readOnly,
-    board,
-    config,
-    allowCapture,
-    localAuthor,
-    // stdout is the protocol; progress goes to stderr, cleaned (push lines hold the server's URL).
-    log: (line) => process.stderr.write(`${terminalSafe(line)}\n`),
-  })
-  const transport = new StdioServerTransport()
-  await server.connect(transport)
-  await new Promise((resolve) => {
-    server.server.onclose = resolve
-    process.stdin.once('end', resolve)
-  })
-  server.stopHeartbeat()
+  let interrupted = false
+  let wake = null
+  const onSignal = () => {
+    interrupted = true
+    wake?.()
+  }
+  process.once('SIGINT', onSignal)
+  process.once('SIGTERM', onSignal)
+  let server = null
+  let transport = null
+  try {
+    server = await createRemoteMcpServer({
+      remote,
+      readOnly,
+      board,
+      config,
+      allowCapture,
+      localAuthor,
+      // stdout is the protocol; progress goes to stderr, cleaned (push lines hold the server's URL).
+      log: (line) => process.stderr.write(`${terminalSafe(line)}\n`),
+    })
+    if (interrupted) return
+    transport = new StdioServerTransport()
+    await server.connect(transport)
+    if (!interrupted) {
+      await new Promise((resolve) => {
+        let settled = false
+        const done = () => {
+          if (settled) return
+          settled = true
+          process.stdin.off('end', done)
+          resolve()
+        }
+        wake = done
+        server.server.onclose = done
+        process.stdin.once('end', done)
+      })
+    }
+  } finally {
+    process.off('SIGINT', onSignal)
+    process.off('SIGTERM', onSignal)
+    server?.stopHeartbeat()
+    await transport?.close?.().catch(() => {})
+    process.stdin.pause()
+  }
 }

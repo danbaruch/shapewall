@@ -221,7 +221,26 @@ export async function serveEngine(flags, out, options = {}) {
   const dir = prepareEngineFolder(config, { skipGitCheck: Boolean(flags['skip-git-check']) })
 
   // Already running for this project: --open signs a browser in there, and nothing starts twice.
-  const running = runningEngine(dir)
+  // Never attach interactive `serve` (--open or --team) to an ephemeral/headless CLI engine: wait briefly for an
+  // ephemeral one to exit, and refuse if a long-lived headless engine (mcp/watch) holds the folder.
+  let running = runningEngine(dir)
+  if (running?.headless && !options.headless) {
+    if (running.ephemeral) {
+      const until = Date.now() + 5000
+      while (Date.now() < until) {
+        const lock = readLock(lockFile(dir))
+        if (!lock || !isLockLive(lock)) break
+        running = runningEngine(dir)
+        if (running && !running.headless) break
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      running = runningEngine(dir)
+    }
+    if (running?.headless)
+      throw new Error(
+        `A headless solo engine is running for this project (pid ${running.pid}, started by a command such as mcp or watch). Stop it first, then run shapewall serve.`,
+      )
+  }
   const team = teamWanted(flags)
   const teamPort = flags['team-port'] === undefined ? null : Number(flags['team-port'])
   if (running && team !== null) {
@@ -245,6 +264,14 @@ export async function serveEngine(flags, out, options = {}) {
     fs.rmSync(stateFile(dir), { force: true })
   }
   process.once('exit', release)
+  // Re-check migration state under serve.lock so a migration that started after the pre-lock check cannot race us.
+  try {
+    assertMigrationAllows(config)
+  } catch (error) {
+    release()
+    process.off('exit', release)
+    throw error
+  }
 
   // <project>-<random>.shapewall.localhost: the random part (host.key in the data folder) keeps the name, and so the
   // owner's cookie, away from every other server on this machine (src/hosted/solo/signin.js).
@@ -341,6 +368,8 @@ export async function serveEngine(flags, out, options = {}) {
         start: processStartTime(process.pid),
         tokens: Object.fromEntries(Object.entries(tokenFiles).map(([which, file]) => [which, path.basename(file)])),
         proof: proofKey,
+        ...(options.headless ? { headless: true } : {}),
+        ...(options.ephemeral ? { ephemeral: true } : {}),
       })}\n`,
       { mode: 0o600 },
     )

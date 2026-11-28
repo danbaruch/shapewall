@@ -264,3 +264,59 @@ test('mcp on the solo engine: create_github_issue and link_pull_request record t
     [[5, 'merged', 'manual']],
   )
 })
+
+test('F14: github sync caps lastSyncAt on transient claim_owner skip so a merged PR resolves once the claim clears', async () => {
+  const { CommentError } = await import('../src/store.js')
+  const { syncGithub } = await import('../src/github.js')
+  const { config, home } = await migratedProject('github-sync-transient')
+  const prUpdatedAt = '2026-11-28T10:00:00.000Z'
+  const syncNow = new Date('2026-11-28T10:15:00.000Z')
+  const syncFile = path.join(home.outputDir, 'github-sync.json')
+  let claimed = true
+  let resolved = false
+  const store = {
+    key: 'engine',
+    syncFile,
+    comments: async () => [{ id: 1, status: 'open', github: null }],
+    recordPull: async () => {
+      if (claimed) throw new CommentError(409, 'claim_owner', 'claimed by an active agent')
+      resolved = true
+      return { changed: true, merged: true }
+    },
+  }
+  const pulls = [
+    {
+      number: 42,
+      title: 'Fix logo',
+      body: 'Fixes shapewall:sample/1',
+      state: 'closed',
+      merged_at: prUpdatedAt,
+      updated_at: prUpdatedAt,
+      html_url: 'https://github.com/acme/site/pull/42',
+    },
+  ]
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: () => 'application/json' },
+    json: async () => pulls,
+    text: async () => JSON.stringify(pulls),
+  })
+  const env = { ...ENV, SHAPEWALL_GITHUB_TOKEN: GH_TOKEN }
+
+  const first = await syncGithub(config, { env, fetchImpl, now: syncNow, store })
+  assert.equal(first.merged.length, 0)
+  assert.equal(first.skipped.length, 1)
+  assert.equal(first.skipped[0].transient, true)
+  const savedAfterFirst = JSON.parse(fs.readFileSync(syncFile, 'utf8'))
+  assert.ok(
+    Date.parse(savedAfterFirst.lastSyncAt) < Date.parse(prUpdatedAt),
+    `lastSyncAt ${savedAfterFirst.lastSyncAt} must be before ${prUpdatedAt}`,
+  )
+
+  claimed = false
+  const second = await syncGithub(config, { env, fetchImpl, now: new Date('2026-11-28T10:30:00.000Z'), store })
+  assert.equal(resolved, true)
+  assert.equal(second.merged.length, 1)
+  assert.equal(second.merged[0].comment, 1)
+})

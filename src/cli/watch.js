@@ -4,13 +4,18 @@ import fs from 'node:fs'
 import { findConfigFile, loadConfig } from '../config.js'
 import { assertMigrationAllows } from '../engine-folder.js'
 import { ENGINE_TARGET } from '../engine-target.js'
+import { assertNotEngineBoard } from './board-home.js'
 import { mentionFlag, startNotifier } from './notify.js'
 import { durationFlag } from './duration.js'
 
 export async function watch(flags, out, err) {
-  const config = flags.remote === undefined ? loadConfig(flags.config) : null
-  // A local watch writes the local store: not during or after a migration of its boards to the solo engine.
-  if (config) assertMigrationAllows(config, { local: true, boardIds: typeof flags.board === 'string' ? [flags.board] : null })
+  const isRemote = flags.remote !== undefined || Boolean(process.env.SHAPEWALL_REMOTE)
+  const config = isRemote ? null : loadConfig(flags.config)
+  // A local watch writes the local store: not on an engine project, and not during or after a migration.
+  if (config) {
+    await assertNotEngineBoard(config, 'shapewall watch', 'Run it without SHAPEWALL_NO_ENGINE, or start shapewall serve.')
+    assertMigrationAllows(config, { local: true, boardIds: typeof flags.board === 'string' ? [flags.board] : null })
+  }
   const { watchComments } = await import('../watch.js')
   const number = (name, fallback) => {
     if (flags[name] === undefined) return fallback
@@ -27,7 +32,7 @@ export async function watch(flags, out, err) {
   process.once('SIGTERM', stop)
   const notifier = config ? await startNotifier(config, err) : null
   try {
-    if (flags.remote !== undefined) {
+    if (isRemote) {
       if (flags.recapture) throw new Error('--recapture works with local --exec only')
       // This project's solo engine (engine-mode.js set the remote): --no-claim looks there as on a 1.x board.
       const engine = Boolean(flags[ENGINE_TARGET])

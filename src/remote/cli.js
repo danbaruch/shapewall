@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { portableChecks } from '../checks/transport.js'
 import { getBoard, loadConfig, noPageMessage } from '../config.js'
-import { listSelectors, selectorPinOnBoard } from '../comments-cli.js'
+import { listSelectors, selectorPinOnBoard, sinceFilter } from '../comments-cli.js'
 import {
   formatFeedback,
   formatFeedbackForAgent,
@@ -229,12 +229,17 @@ export async function remoteComments(positional, flags, print, err = () => {}) {
   const author = engine && typeof flags.author === 'string' && flags.author.trim() ? flags.author : undefined
   if (action === 'list') {
     const status = flags.all ? 'all' : flags.resolved ? 'resolved' : 'open'
+    const since = sinceFilter(flags.since)
     const report = await remote.comments(boardId, {
       status,
       page: flags.page || null,
       mention: mentionOf(flags.mention),
       guests: Boolean(flags['include-guests']),
     })
+    if (since) {
+      report.comments = (report.comments || []).filter(since)
+      report.count = report.comments.length
+    }
     out(
       flags['for-agent']
         ? formatFeedbackForAgent(report)

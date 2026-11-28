@@ -110,6 +110,9 @@ export async function startHosted({
   env = process.env,
   out = console.log,
   exitOnStop = true,
+  // Register process SIGINT/SIGTERM handlers. Headless CLI starts pass false so the owning command
+  // (`mcp`, `watch`) handles signals itself and shuts down the engine in its own finally block.
+  handleSignals = exitOnStop,
   // How stop() ends the process, and how long it waits before forcing that
   // once nothing is left to wait for (tests pass their own).
   exit = (code) => process.exit(code),
@@ -513,8 +516,10 @@ export async function startHosted({
       return stopping
     }
     const onSignal = () => stop(0)
-    process.once('SIGINT', onSignal)
-    process.once('SIGTERM', onSignal)
+    if (handleSignals) {
+      process.once('SIGINT', onSignal)
+      process.once('SIGTERM', onSignal)
+    }
     return { server, shareServer, app, db, origin: publicOrigin, shareOrigin, stop, tailnet: gate, tailnetWatch }
   } catch (error) {
     await stopAll().catch(() => {})
