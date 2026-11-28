@@ -368,10 +368,16 @@ export async function startHosted({
         proof: options.proof || null,
         facts: options.facts || null,
         out,
-        makeApp: ({ origin: teamOrigin, tailnet, eventBus, presenceHub, shared }) =>
+        // Started for one command (comments, watch, mcp): team mode never turns on, the setting stays (A-3).
+        headless: options.headless === true,
+        makeApp: ({ origin: teamOrigin, tailnet, teamGuard, eventBus, presenceHub, shared }) =>
           createHostedApp({
             ...common,
             origin: teamOrigin,
+            // What the team listener refuses (team.js teamGuard), and the serve flags (--read-only, --no-chat) as on
+            // the owner's app (A-2).
+            teamGuard,
+            soloFlags: { readOnly: solo.readOnly === true, chat: solo.chat !== false },
             // tailscale serve on this machine forwards to it; live HTML from its own path (as hosted --tailscale).
             trustProxy: true,
             usercontentOrigin: null,
@@ -388,11 +394,19 @@ export async function startHosted({
       app.locals.soloTeam = team
       cleanup.push(() => team.close())
       const saved = readTeamSetting(dir)
-      if (saved.problem) out(`Team mode: off (${saved.problem}).`)
-      const want = typeof options.want === 'boolean' ? options.want : saved.on
+      // An engine for one command: no tailscale call, no listener, the saved setting untouched (A-3).
+      const want = team.headless ? false : typeof options.want === 'boolean' ? options.want : saved.on
       const httpsPort = options.httpsPort ?? saved.httpsPort
-      if (options.want === false) await team.stop()
-      if (want) {
+      if (!team.headless) {
+        // A serve entry a crashed start left behind, pointing at a port nobody here holds, goes first (A-4).
+        const stale = await team.sweep()
+        if (stale) out(stale)
+        if (saved.problem) out(`Team mode: off (${saved.problem}).`)
+        if (options.want === false) await team.stop()
+      }
+      if (team.headless) {
+        // Nothing to say: this engine's output is not the owner's terminal.
+      } else if (want) {
         try {
           await team.start({ httpsPort })
           for (const line of team.lines()) out(line)

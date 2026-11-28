@@ -1,5 +1,6 @@
 // `serve` flags on the solo engine (gap G20), enforced before the board
-// routes (src/hosted/app.js mounts this early, solo only):
+// routes (src/hosted/app.js mounts this early, on the owner's app and on its
+// team listener). Matched case-insensitively, as Express routes are (A-2):
 //
 //   --read-only   the board in the browser makes no changes: every write on
 //                 the members' board API answers 403 read_only, and the
@@ -12,8 +13,8 @@
 //                 capture from the board, no recapture_pages on /mcp).
 //
 // solo: { readOnly, chat } from src/hosted/solo/serve.js.
-const BOARD_API = /^\/w\/[^/]+\/p\/[^/]+\/api(\/.*)?$/
-const CHAT = /^\/boards\/[^/]+\/(?:threads|permissions)(?:\/|$)/
+const BOARD_API = /^\/w\/[^/]+\/p\/[^/]+\/api(\/.*)?$/i
+const CHAT = /^\/boards\/[^/]+\/(?:threads|permissions)(?:\/|$)/i
 
 export function soloFlagGate(solo = {}) {
   const readOnly = solo.readOnly === true
@@ -28,7 +29,7 @@ export function soloFlagGate(solo = {}) {
     if (!readOnly) return next()
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method))
       return res.status(403).json({ error: { code: 'read_only', message: 'This board is read-only (shapewall serve --read-only).' } })
-    if (rest === '/info') {
+    if (/^\/info\/?$/i.test(rest)) {
       const json = res.json.bind(res)
       res.json = (body) => json(res.statusCode === 200 && body && typeof body === 'object' ? { ...body, readOnly: true } : body)
     }

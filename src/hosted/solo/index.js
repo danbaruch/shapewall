@@ -105,6 +105,9 @@ function mountOwner(app, deps, closers) {
   // challenge under this start's key, which only serve.json (0600) and this process hold. No session, no token.
   if (typeof solo.proofKey === 'string')
     app.post('/solo/whoami', (req, res) => {
+      // Addressed to the engine (its name or a loopback address on its port), from this machine, no proxy (A-10): a
+      // page another site's DNS points here gets no answer to read.
+      if (deps.localGate && !deps.localGate.admitsMachine(req)) return res.status(403).json({ error: { code: 'not_this_machine' } })
       const challenge = String(req.headers['x-shapewall-challenge'] || '')
       if (!/^[A-Za-z0-9_-]{16,64}$/.test(challenge)) return res.status(400).json({ error: { code: 'bad_challenge' } })
       res.set('Cache-Control', 'no-store').json({ proof: engineProof(solo.proofKey, challenge) })

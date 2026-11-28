@@ -164,10 +164,17 @@ export function createHostedApp({
   // background jobs (sweeps, turn and claim timers), so this one runs none. Never with `solo`.
   secondary = false,
   shared = null,
+  // The team listener's own refusals (src/hosted/solo/team.js teamGuard): an Express router mounted before every
+  // other route, so it matches as they do. Secondary apps only.
+  teamGuard = null,
+  // The solo engine's serve flags for its team listener ({ readOnly, chat }, src/hosted/solo/flags.js): members get
+  // the board the owner started (A-2). Secondary apps only; the owner's app reads them from `solo`.
+  soloFlags: teamSoloFlags = null,
 }) {
   if (guestOnly) tailnet = null
   if (secondary && (solo || guestOnly)) throw new Error('secondary: a team listener is neither the solo app nor a share listener')
   if (shared && !secondary) throw new Error('shared: only a secondary app shares the live state of another')
+  if ((teamGuard || teamSoloFlags) && !secondary) throw new Error('teamGuard, soloFlags: for a team listener only')
   // No background jobs here: the app whose state this one shares runs them.
   const background = !guestOnly && !secondary
   const base = new URL(origin)
@@ -353,6 +360,8 @@ export function createHostedApp({
     if (secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000')
     next()
   })
+  // The team listener: what it refuses, before anything else answers.
+  if (teamGuard) app.use(teamGuard)
   app.use(usercontent.gate)
   // While moving: which origin a request is for; the old one serves only the move.
   app.use(previousHostGate(sites))
@@ -361,7 +370,7 @@ export function createHostedApp({
   // The fixed core: what always asks for a fresh passkey check (one table, src/hosted/step-up.js).
   app.use(fixedCore)
   // The solo engine's serve flags (--read-only, --no-chat: src/hosted/solo/flags.js), before every board route.
-  const soloFlags = solo ? soloFlagGate(solo) : null
+  const soloFlags = solo ? soloFlagGate(solo) : teamSoloFlags ? soloFlagGate(teamSoloFlags) : null
   if (soloFlags) app.use(soloFlags)
 
   const { publicUser, createWorkspace, acceptInvite, revokeGrantsOf, ownerCount } = createMembership({
@@ -545,7 +554,7 @@ export function createHostedApp({
   mountShareAdmin(consoleApi, deps)
   mountPublicAdmin(consoleApi, deps)
 
-  const { approvalApi, soloBoardApi } = mountBoardRoutes(app, {
+  const { approvalApi, soloBoardApi, stopTurnsOf } = mountBoardRoutes(app, {
     agentPresence,
     db,
     dataDir,
@@ -772,7 +781,8 @@ export function createHostedApp({
   app.locals.events = events
   app.locals.agentPresence = agentPresence
   app.locals.agentsFor = agentsFor
-  app.locals.chat = { hub: turnHub, links, service: chat, storeFor: chatFor }
+  // stopTurnsOf(workspaceId, shouldStop(userId)): ends the running turns of people who lost access (C-5).
+  app.locals.chat = { hub: turnHub, links, service: chat, storeFor: chatFor, stopTurnsOf }
   app.locals.sweep = sweep
   // The solo profile's board router (src/hosted/solo/index.js); null on a team server.
   app.locals.soloBoardApi = soloBoardApi

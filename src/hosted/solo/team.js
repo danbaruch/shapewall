@@ -24,7 +24,7 @@
 // and SameSite=Strict, so a browser never sends it to the team address, and
 // a session row read there would not count anyway.
 //
-// What the team listener refuses on top of a team server (teamFilter below),
+// What the team listener refuses on top of a team server (teamGuard below),
 // so the owner keeps the engine:
 //   - invites: only the owner invites, from this machine, with the fixed
 //     core's check (team-routes.js);
@@ -45,6 +45,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
+import express from 'express'
 import { randomBytes } from 'node:crypto'
 import { sha256 } from '../../shared/account-tokens.js'
 import { readSoloBinding } from './binding.js'
@@ -101,29 +102,17 @@ export function teamPortProblem(value) {
 }
 
 // ---- What the team listener refuses (on top of a team server) ----
+//
+// An Express router mounted first in the team app (createHostedApp `teamGuard`), so every refusal is matched the
+// way the routes it guards are: case-insensitive, an optional trailing slash, the same parameters (rev 2.0 final
+// review A-1: a hand-written match on the raw path let /API/... through to the console's routes).
 
-const WS = '[^/]+'
-const REFUSED = [
-  [
-    'POST',
-    new RegExp(`^/api/workspaces/${WS}/invites/?$`),
-    'owner_invites',
-    'Only the owner invites people to this board, from the machine that runs it (the console there, Invite people).',
-  ],
-  ['POST', /^\/api\/workspaces\/?$/, 'one_project', 'This board serves one project of its owner; it makes no new workspaces.'],
-  [
-    'POST',
-    new RegExp(`^/api/workspaces/${WS}/projects/?$`),
-    'one_project',
-    'This board serves one project of its owner; it makes no new projects.',
-  ],
-  [
-    'DELETE',
-    new RegExp(`^/api/workspaces/${WS}/projects/${WS}(?:/boards/${WS})?/?$`),
-    'one_project',
-    'The project and its boards come from the owner’s config file; they are not deleted from here.',
-  ],
-]
+const ONLY_OWNER_INVITES =
+  'Only the owner invites people to this board, from the machine that runs it (the console there, Invite people).'
+const ONLY_OWNER_SHARES =
+  'Only the owner opens this board to people outside it (share links), from the machine that runs it.'
+const ONLY_OWNER_AGENTS =
+  'The agents of the machine that runs this board are its owner\u2019s: they are managed from that machine only.'
 
 const refuse = (res, status, code, message) => {
   res.writeHead(status, {
@@ -133,30 +122,56 @@ const refuse = (res, status, code, message) => {
   })
   res.end(JSON.stringify({ error: { code, message } }))
 }
+const refuseWith = (code, message) => (req, res) => refuse(res, 403, code, message)
 
-// (app, { db, dataDir }) -> a request handler for the team listener.
-export function teamFilter(app, { db, dataDir }) {
-  return (req, res) => {
-    const pathname = String(req.url || '/').split('?')[0]
-    for (const [method, pattern, code, message] of REFUSED)
-      if (req.method === method && pattern.test(pathname)) return refuse(res, 403, code, message)
-    // This machine's own tokens: cli.token, watch.token and agent.token stay on this machine.
-    if (/^\/(?:api\/v1|mcp)(?:\/|$)/.test(pathname)) {
-      const match = /^Bearer (\S+)$/.exec(String(req.headers.authorization || ''))
-      if (match) {
-        const ids = machineTokenIds(dataDir)
-        const row = ids.length ? db.prepare('SELECT id FROM api_tokens WHERE token_hash = ?').get(sha256(match[1])) : null
-        if (row && ids.includes(row.id))
-          return refuse(
-            res,
-            403,
-            'machine_token',
-            'This token is for the machine that runs the engine; it does not work through the tailnet.',
-          )
-      }
-    }
-    return app(req, res)
+// ({ db, dataDir }) -> an Express router for the team app, mounted before every other route.
+export function teamGuard({ db, dataDir }) {
+  const guard = express.Router()
+  const ws = '/api/workspaces/:ws'
+  guard.post(ws + `/invites`, refuseWith('owner_invites', ONLY_OWNER_INVITES))
+  guard.post('/api/workspaces', refuseWith('one_project', 'This board serves one project of its owner; it makes no new workspaces.'))
+  guard.post(ws + `/projects`, refuseWith('one_project', 'This board serves one project of its owner; it makes no new projects.'))
+  guard.delete(
+    [ws + `/projects/:pid`, ws + `/projects/:pid/boards/:bid`],
+    refuseWith('one_project', 'The project and its boards come from the owner\u2019s config file; they are not deleted from here.'),
+  )
+  // Share links let people in who have no account here (A-8): only the owner, on the owner's app.
+  guard.post(ws + `/projects/:pid/shares`, refuseWith('owner_shares', ONLY_OWNER_SHARES))
+  guard.patch(ws + `/settings`, express.json({ limit: '64kb' }), (req, res, next) =>
+    req.body?.shareLinks === true ? refuse(res, 403, 'owner_shares', ONLY_OWNER_SHARES) : next(),
+  )
+  // The engine's own agents run on the owner's machine (C-2): who may send them work, their approval rule and
+  // identity, and the project's default agent are the owner's, from that machine.
+  const machineAgent = (req) => {
+    const ids = machineTokenIds(dataDir)
+    if (!ids.length) return false
+    const row = db.prepare('SELECT token_id FROM agents WHERE id = ?').get(String(req.params.aid || ''))
+    return Boolean(row && ids.includes(row.token_id))
   }
+  const agentPaths = [ws + `/projects/:pid/agents/:aid`, ws + `/projects/:pid/agents/:aid/audience`, ws + `/projects/:pid/agents/:aid/approval`]
+  const refuseMachineAgent = (req, res, next) =>
+    machineAgent(req) ? refuse(res, 403, 'owner_agents', ONLY_OWNER_AGENTS) : next()
+  guard.patch(agentPaths, refuseMachineAgent)
+  guard.put(agentPaths, refuseMachineAgent)
+  guard.delete(agentPaths, refuseMachineAgent)
+  guard.put(ws + `/projects/:pid/default-agent`, refuseWith('owner_agents', ONLY_OWNER_AGENTS))
+  // This machine's own tokens: cli.token, watch.token and agent.token stay on this machine.
+  guard.use(['/api/v1', '/mcp'], (req, res, next) => {
+    const match = /^Bearer (\S+)$/.exec(String(req.headers.authorization || ''))
+    if (match) {
+      const ids = machineTokenIds(dataDir)
+      const row = ids.length ? db.prepare('SELECT id FROM api_tokens WHERE token_hash = ?').get(sha256(match[1])) : null
+      if (row && ids.includes(row.id))
+        return refuse(
+          res,
+          403,
+          'machine_token',
+          'This token is for the machine that runs the engine; it does not work through the tailnet.',
+        )
+    }
+    next()
+  })
+  return guard
 }
 
 // ---- Who can reach it ----
@@ -223,12 +238,84 @@ function listen(handler) {
   })
 }
 
+// ---- The serve entry this folder added (A-4) ----
+//
+// `tailscale serve --bg` outlives the process that added it. Before the entry is added, <data>/team-serve.json
+// (0600) records the HTTPS port and the loopback port it will point at; once the entry is removed, the record goes.
+// A record that is still there at the next start, or after a stop that could not remove the entry, names an entry
+// that points at a port this engine no longer holds: it is removed then (only if it still is exactly that entry, a
+// serve target on 127.0.0.1 at that port, under the secret prefix, with no Funnel). What stays (docs/solo-engine.md,
+// Team mode): after a crash or a kill -9, until the next `shapewall serve` in this folder, the entry points at a dead
+// port that another user of this machine could listen on.
+export const TEAM_SERVE_FILE = 'team-serve.json'
+
+export function readServeRecord(dataDir) {
+  try {
+    const value = JSON.parse(fs.readFileSync(path.join(dataDir, TEAM_SERVE_FILE), 'utf8'))
+    const port = (n) => Number.isInteger(n) && n > 0 && n < 65536
+    return value && port(value.httpsPort) && port(value.localPort) ? { httpsPort: value.httpsPort, localPort: value.localPort } : null
+  } catch {
+    return null
+  }
+}
+
+function writeServeRecord(dataDir, record) {
+  const file = path.join(dataDir, TEAM_SERVE_FILE)
+  const temp = file + '.' + process.pid + '.' + randomBytes(6).toString('hex') + '.tmp'
+  try {
+    fs.writeFileSync(temp, JSON.stringify({ version: 1, ...record }) + '\n', { mode: 0o600, flag: 'wx' })
+    fs.renameSync(temp, file)
+  } catch {
+    fs.rmSync(temp, { force: true })
+  }
+}
+
+const dropServeRecord = (dataDir) => fs.rmSync(path.join(dataDir, TEAM_SERVE_FILE), { force: true })
+
+// Removes the entry a record names when it still points at that dead port. -> null (nothing left behind), or a line.
+export async function sweepStaleServe(dataDir, { run, ownPort = null } = {}) {
+  const record = readServeRecord(dataDir)
+  if (!record) return null
+  if (ownPort && record.localPort === ownPort) return null
+  const ts = await import('../tailscale.js')
+  const { SECRET_PREFIX } = await import('../../tailnet-proof.js')
+  const opts = run ? { run } : {}
+  let current
+  try {
+    current = await ts.servedOn(record.httpsPort, opts)
+  } catch (error) {
+    return 'Could not check for a tailscale serve entry team mode left behind (' + error.message + '); check tailscale serve status.'
+  }
+  const ours =
+    current &&
+    !current.funnel &&
+    current.targets.length === 1 &&
+    String(current.targets[0]).startsWith('http://127.0.0.1:' + record.localPort + SECRET_PREFIX)
+  if (!current || !ours) {
+    // Gone already, or another service's now: never touched.
+    dropServeRecord(dataDir)
+    return null
+  }
+  const off = await (run || ts.runCommand)('tailscale', ['serve', '--https=' + record.httpsPort, 'off']).catch(() => ({ code: 1 }))
+  if (off.code === 0) {
+    dropServeRecord(dataDir)
+    return 'Removed a tailscale serve entry team mode left behind on port ' + record.httpsPort + ' (it pointed at a port this engine no longer holds).'
+  }
+  return (
+    'A tailscale serve entry team mode left behind still points at a port this engine no longer holds. Remove it: tailscale serve --https=' +
+    record.httpsPort +
+    ' off'
+  )
+}
+
 // createSoloTeam(options) -> { start({ httpsPort, save }), stop({ save }), status(), lines(), close() }
 //   ownerApp   the owner's app (its live state is shared: events, presence, turns, agent links)
-//   makeApp({ origin, tailnet, shared, eventBus, presenceHub }) -> the team app (server.js: createHostedApp with
+//   makeApp({ origin, tailnet, teamGuard, shared, eventBus, presenceHub }) -> the team app (server.js: createHostedApp with
 //              the server's common options, `secondary: true`, trustProxy, signup invite, no passkeys)
 //   tailscale  { run, watchMs } (tests: a fake `tailscale` command); proof, facts: as startHosted's tailnetProof/Facts
 //   ownerOrigin  the owner's address (for the lines)
+//   headless   an engine started for one command (comments, watch, mcp: ops-cli.js startEngineHeadless): team
+//              mode never turns on there and tailscale is never run (A-3); the saved setting is left as it is.
 export function createSoloTeam({
   db,
   dataDir,
@@ -240,9 +327,16 @@ export function createSoloTeam({
   facts = null,
   out = () => {},
   now = () => new Date(),
+  headless = false,
 }) {
   let state = null // { server, served, gate, app, timer, httpsPort, origin }
-  let busy = null
+  // Every start and stop runs after the one before it has finished (A-5).
+  let chain = Promise.resolve()
+  const serial = (work) => {
+    const run = chain.then(work, work)
+    chain = run.catch(() => {})
+    return run
+  }
   let problem = null
   let saved = readTeamSetting(dataDir).on
 
@@ -279,6 +373,8 @@ export function createSoloTeam({
       const refused = proof.problem?.() || (await proofModule.proofSelfTest(server, proof))
       if (refused) throw new SoloTeamError(`Team mode stays off: ${refused}`)
       const secret = proofModule.newServeSecret()
+      // Recorded before the entry exists, so a crash at any point after leaves a record the next start acts on.
+      writeServeRecord(dataDir, { httpsPort, localPort: server.address().port })
       const served = await ts
         .startTailscale({
           localPort: server.address().port,
@@ -288,11 +384,14 @@ export function createSoloTeam({
           ...(facts ? { facts } : {}),
         })
         .catch((error) => {
+          // Nothing was left on the tailnet (startTailscale removes what it added when it fails).
+          dropServeRecord(dataDir)
           throw new SoloTeamError(`Team mode stays off: ${error.message}`, { cause: error })
         })
       undo.push(async () => {
         const ok = await served.stop()
-        if (!ok) out('Could not remove the tailscale serve entry team mode added; check tailscale serve status.')
+        if (ok) dropServeRecord(dataDir)
+        else out('Could not remove the tailscale serve entry team mode added; check tailscale serve status.')
       })
       const first = await served.verify()
       if (first) throw new SoloTeamError(`Team mode stays off: ${first}.`)
@@ -301,6 +400,7 @@ export function createSoloTeam({
       const app = makeApp({
         origin: served.origin,
         tailnet: gate,
+        teamGuard: teamGuard({ db, dataDir }),
         eventBus: ownerApp.locals.events,
         presenceHub: ownerApp.locals.presence.hub,
         shared: {
@@ -319,7 +419,7 @@ export function createSoloTeam({
           () => socket.destroy(),
         )
       })
-      holder.handler = teamFilter(app, { db, dataDir })
+      holder.handler = app
       // The serve entry must stay the only way in, and tailscaled one whose connections can be believed: checked
       // again every half minute, and nobody is believed while it is not so.
       const watch = async () => {
@@ -346,11 +446,40 @@ export function createSoloTeam({
     }
   }
 
+  // The bound workspace's people who are not its owners (their running turns end when they lose access, C-5).
+  const ownerIds = () => {
+    try {
+      const bound = readSoloBinding(db)
+      if (!bound) return null
+      return new Set(
+        db
+          .prepare("SELECT user_id FROM memberships WHERE workspace_id = ? AND role = 'owner'")
+          .all(bound.workspaceId)
+          .map((row) => row.user_id),
+      )
+    } catch {
+      return null
+    }
+  }
+  const stopMemberTurns = () => {
+    const owners = ownerIds()
+    const bound = owners && readSoloBinding(db)
+    if (!bound) return
+    try {
+      ownerApp.locals.chat?.stopTurnsOf?.(bound.workspaceId, (userId) => !owners.has(userId))
+    } catch {
+      /* the turns end with their machine's own timeouts */
+    }
+  }
+
   // Turns team mode on; `save` keeps it for the next start. -> status().
-  async function start({ httpsPort = readTeamSetting(dataDir).httpsPort, save = true } = {}) {
-    await busy
-    if (state) return status()
-    busy = (async () => {
+  function start({ httpsPort = readTeamSetting(dataDir).httpsPort, save = true } = {}) {
+    return serial(async () => {
+      if (state) return status()
+      if (headless)
+        throw new SoloTeamError(
+          'Team mode stays off: this engine was started for one command (comments, watch or mcp). Start the board with shapewall serve to share it.',
+        )
       const portProblem = teamPortProblem(httpsPort)
       if (portProblem) throw new SoloTeamError(portProblem)
       try {
@@ -361,48 +490,58 @@ export function createSoloTeam({
         throw error
       }
       if (save) {
-        writeTeamSetting(dataDir, { on: true, httpsPort, now })
+        try {
+          writeTeamSetting(dataDir, { on: true, httpsPort, now })
+        } catch (error) {
+          // Not kept, so not on either: the exposure goes again (A-5).
+          const was = state
+          state = null
+          await was.unwind()
+          problem = 'Team mode stays off: its setting could not be saved (' + error.message + ').'
+          throw new SoloTeamError(problem, { cause: error })
+        }
         saved = true
       }
-    })()
-    try {
-      await busy
-    } finally {
-      busy = null
-    }
-    return status()
+      return status()
+    })
   }
 
   // Back to this machine only; `save` keeps it off for the next start. -> status().
-  async function stop({ save = true } = {}) {
-    await busy
-    busy = (async () => {
+  function stop({ save = true } = {}) {
+    return serial(async () => {
       const was = state
       state = null
       problem = null
       if (was) {
-        // What a member still has open (live streams) ends now.
+        // What a member still has open (live streams) ends now, and so do the turns they started (C-5).
         was.app.locals.cutTailnetSessions?.()
+        stopMemberTurns()
         await was.unwind()
+      }
+      // An entry that still points at a port this engine no longer holds goes too (A-4).
+      if (!headless) {
+        const line = await sweepStaleServe(dataDir, tailscale.run ? { run: tailscale.run } : {})
+        if (line) out(line)
       }
       if (save) {
         writeTeamSetting(dataDir, { on: false, httpsPort: was?.httpsPort || readTeamSetting(dataDir).httpsPort, now })
         saved = false
       }
-    })()
-    try {
-      await busy
-    } finally {
-      busy = null
-    }
-    return status()
+      return status()
+    })
   }
+
+  // Engine start: an entry a crashed start left behind goes before anything else (A-4). -> null or a line.
+  const sweep = () =>
+    serial(async () => (headless || state ? null : sweepStaleServe(dataDir, tailscale.run ? { run: tailscale.run } : {})))
 
   return {
     start,
     stop,
     status,
     lines,
+    sweep,
+    headless,
     // For tests: the team listener's local port, and one watch round.
     localPort: () => state?.server.address().port || null,
     watch: () => state?.watch(),

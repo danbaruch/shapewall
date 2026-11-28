@@ -704,5 +704,5 @@ export function mountBoardRoutes(
     router.use((req, res) => fail(res, 404, 'not_found', 'No such API route.'))
   }
 
-  return { approvalApi, soloBoardApi }
+  return { approvalApi, soloBoardApi, stopTurnsOf: chatApi?.stopTurnsOf || null }
 }

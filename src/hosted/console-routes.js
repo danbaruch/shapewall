@@ -20,6 +20,7 @@ import { projectPublic } from './public.js'
 import { LIMITS } from './ratelimit.js'
 import { SHARE_DAYS } from './shares.js'
 import { createViews } from './usage.js'
+import { SOLO_BOUND_DELETE_MESSAGE, deletesSoloBinding } from './solo/binding.js'
 import { ROLES, findInviteByHash, inviteUsable, roleAtLeast, roleIn, tenant, workspacesForUser } from './tenancy.js'
 
 export const INVITE_DAYS = [1, 3, 7, 14, 30]
@@ -283,6 +284,8 @@ export function mountConsoleRoutes(consoleApi, deps) {
         const keepTokens = req.body?.revokeTokens === false && roleAtLeast(req.role, NEEDS.tokens)
         revoked = revokeGrantsOf(req, userId, null, { revokeTokens: !keepTokens })
       })
+      // What they asked an agent and is still running ends now (C-5).
+      req.app.locals.chat?.stopTurnsOf?.(req.t.workspaceId, (id) => id === userId)
       res.json({ ok: true, revoked })
     }),
   )
@@ -413,6 +416,10 @@ export function mountConsoleRoutes(consoleApi, deps) {
     stepUp('data'),
     inProject,
     handle(async (req, res) => {
+      // The solo engine's own project stays (2.0 final review A-6): its binding goes with it, and the engine would
+      // not start on its folder again.
+      if (deletesSoloBinding(db, { projectId: req.project.id }))
+        throw new HttpError(409, 'solo_project', SOLO_BOUND_DELETE_MESSAGE.project)
       await req.app.locals.soloCapture?.cancel(req.project.id)
       await req.app.locals.soloChecks?.cancel(req.project.id)
       req.projects.remove(req.project.id)

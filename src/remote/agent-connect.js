@@ -368,14 +368,19 @@ const isEngineChild = (slug, env) => slug === 'local' && /^[1-9]\d*$/.test(Strin
 // The solo engine's own coding agent with branch mode on (G13): approvals "owner" for as long as nothing is saved
 // for that key, read in memory each time and never written, so turning branch mode off in the config takes it away
 // (rev57 R57-5). `shapewall agent set --as local --approvals none` (a saved key) always wins. -> defaults or null.
+//
+// And always (2.0 final review C-2): audience "owner", so the engine's own agent, which runs on the owner's machine,
+// takes work from its owner only, whatever a workspace admin sets on the server, until the owner saves another
+// (shapewall agent set --as local --audience server).
 export function localAgentDefaults(config, env = process.env) {
-  if (!branchModeSettings(config, env).enabled) return null
+  const owner = { audience: 'owner' }
+  if (!branchModeSettings(config, env).enabled) return owner
   try {
     fixRoot(config.dir, env)
   } catch {
-    return null
+    return owner
   }
-  return { approvals: 'owner' }
+  return { ...owner, approvals: 'owner' }
 }
 
 // Stops `stop` when the engine that started this child goes: its stdin (a pipe the engine holds) ends, or this
@@ -430,7 +435,7 @@ export async function agentConnect(
   const label = terminalSafe(settings.label || (endpoint ? 'Model endpoint' : 'Agent'))
   // Checked before anything is asked of anyone: a wrong flag changes nothing.
   // A value in the file that is not understood reads as the narrowest setting, and is said.
-  const defaults = !endpoint && isEngineChild(slug, env) ? localAgentDefaults(config, env) : null
+  const defaults = isEngineChild(slug, env) ? (endpoint ? { audience: 'owner' } : localAgentDefaults(config, env)) : null
   const policyNow = readMachinePolicy(origin, slug, env, {
     warn: (text) => log(`Not understood, so read as the narrowest setting: ${text}`),
     defaults,

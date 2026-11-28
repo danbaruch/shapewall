@@ -107,7 +107,7 @@ function branchModeLine(origin, plan, config, env) {
   } catch (error) {
     return `branch mode is on, but fixes cannot be made here: ${error.message}`
   }
-  return localAgentDefaults(config, env)
+  return localAgentDefaults(config, env).approvals
     ? 'branch mode is on: it may ask the owner on the board to edit files, each edit on a branch in a copy outside the project (shapewall agent set --as local --approvals none to turn that off).'
     : null
 }

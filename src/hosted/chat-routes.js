@@ -1022,6 +1022,26 @@ export function mountChatRoutes(
     return row
   }
 
+  // Stops every running turn of a workspace whose asker `shouldStop(userId)` names (C-5: a member removed, or team
+  // mode off on the solo engine): the same stop as the Stop button, with no request. -> how many were stopped.
+  function stopTurnsOf(workspaceId, shouldStop) {
+    const t = tenant(db, workspaceId)
+    let stopped = 0
+    for (const live of hub.list()) {
+      if (live.workspaceId !== workspaceId || live.cancel || !live.startedBy || !shouldStop(live.startedBy)) continue
+      const row = chatFor(t).turn(live.id)
+      const agent = agentsFor(t).get(live.projectId, live.agentId)
+      live.cancel = true
+      live.cancelAt = Date.now()
+      hub.push(live, 'status', { text: 'Stopping' })
+      if (row) transaction(db, () => chat.cancelCards(t, row, live))
+      if (!links.send(workspaceId, live.agentId, 'cancel', { turn: live.id }) && row)
+        chat.interrupt(t, row, { state: 'stopped', agentName: agent?.name || null })
+      stopped += 1
+    }
+    return stopped
+  }
+
   // ---- A thread's agent, name and removal ----
 
   router.post(
@@ -1311,7 +1331,8 @@ export function mountChatRoutes(
       projects: owner.projects,
       auth: { ...owner.auth, session: { ...owner.auth.session, ...session }, user: person },
       params: { bid: owner.boardId, thread: 'comment-' + commentId },
-      body: { fix: true },
+      // Pinned to the agent the owner confirmed (C-2): a default changed meanwhile never takes the rest of the batch.
+      body: { fix: true, ...(owner.agentId ? { agentId: owner.agentId } : {}) },
       query: {},
     }
     return batchGate?.owner(req, { request: false }) ? req : null
@@ -1344,8 +1365,16 @@ export function mountChatRoutes(
             if (hub.get(live.id)) stopTurn(req, at, live)
           }
           if (cancelled) stop()
-          const unsubscribe = hub.subscribe(live, 0, (event) => {
-            if (event.name === 'end') return resolve()
+          // The item lets go of the turn when it ends (C-6), even when it ends while the subscription replays.
+          let ended = false
+          let unsubscribe = null
+          const finish = () => {
+            ended = true
+            unsubscribe?.()
+            resolve()
+          }
+          unsubscribe = hub.subscribe(live, 0, (event) => {
+            if (event.name === 'end') return finish()
             if (event.name !== 'tool' || event.data?.kind !== 'permission' || !event.data.id) return
             cards.set(event.data.id, event.data)
             const pending = [...cards.values()].find((card) => card.state === 'pending' && card.answerable)
@@ -1372,7 +1401,8 @@ export function mountChatRoutes(
               resolve()
             }, 500)
             timer.unref?.()
-          } else if (!hub.get(live.id)) resolve()
+          } else if (ended) unsubscribe()
+          else if (!hub.get(live.id)) finish()
         })
       const done = (async () => {
         for (let attempt = 0; ; attempt++) {
@@ -1465,6 +1495,7 @@ export function mountChatRoutes(
         session,
         auth: { session: req.auth.session, user: req.user },
         base: batchRequestBase(req),
+        agentId: agent.id,
       }
       let batch
       try {
@@ -1518,5 +1549,5 @@ export function mountChatRoutes(
   router.use((req, res) => fail(res, 404, 'not_found', 'Not on a hosted board.'))
 
   boardApi.use('/agent', router)
-  return { chatAgents, defaultOf, agentInfo, batchFixes }
+  return { chatAgents, defaultOf, agentInfo, batchFixes, stopTurnsOf }
 }
