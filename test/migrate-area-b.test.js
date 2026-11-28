@@ -474,3 +474,117 @@ test('B-19: the tombstone stops a 1.x capture before it writes anything (status.
   assert.throws(() => writeJsonAtomic(status, { state: 'running' }))
   assert.equal(fs.existsSync(path.join(p.out, 'site', 'captures')), false)
 })
+
+// IC4 B3: the real run holds a lock on each chat thread; those lock files
+// are its own, not the board's, so it lists what the dry run listed.
+test('IC4 B3: the real run lists the same not-carried items as the dry run (no chat locks)', async () => {
+  const p = project()
+  await withEnvironmentColumn(p.out)
+  const carried = (text) => text.split('\n').filter((line) => /not carried/.test(line) || /^\s{4}- /.test(line))
+  const dry = await run(p, { 'dry-run': true })
+  assert.equal(dry.code, 0, dry.text)
+  const real = await run(p)
+  assert.equal(real.code, 0, real.text)
+  assert.doesNotMatch(real.text, /\.json\.lock/)
+  assert.deepEqual(carried(real.text), carried(dry.text))
+})
+
+// IC4 B6: the rollback dry run says what the real rollback does with the
+// journal of a run stopped while it wrote its backup, and writes nothing.
+test('IC4 B6: --rollback --dry-run after a run stopped during its backup says the journal would be removed', async () => {
+  const p = project()
+  await withEnvironmentColumn(p.out)
+  const journal = path.join(p.out, JOURNAL)
+  fs.writeFileSync(journal, JSON.stringify({ version: 1, backup: 'backup-1x-20000101T000000Z', pid: 1, boards: ['site'] }))
+  const before = treeDigest(p.out)
+  const dry = await run(p, { rollback: true, 'dry-run': true })
+  assert.equal(dry.code, 0, dry.text)
+  assert.doesNotMatch(dry.text, /Nothing to roll back/)
+  assert.match(
+    dry.text,
+    /stopped while writing its backup, before it changed anything; nothing needs restoring and MIGRATING-TO-2 would be removed/,
+  )
+  const json = await run(p, { rollback: true, 'dry-run': true, json: true })
+  assert.equal(json.json.ok, true)
+  assert.match(json.json.wouldClear, /would be removed/)
+  assert.deepEqual(treeDigest(p.out), before, 'the dry run writes nothing')
+  const real = await run(p, { rollback: true })
+  assert.equal(real.code, 0, real.text)
+  assert.match(real.text, /MIGRATING-TO-2 was removed/)
+  assert.equal(fs.existsSync(journal), false)
+  // A run that changed the engine and lost its backup: the dry run reports the same problem as the real one.
+  const q = project()
+  await withEnvironmentColumn(q.out)
+  const done = await run(q, { json: true })
+  assert.equal(done.code, 0)
+  fs.writeFileSync(path.join(q.out, JOURNAL), JSON.stringify({ version: 1, backup: done.json.backup, pid: 1, boards: ['site'] }))
+  fs.rmSync(path.join(q.out, MARKER))
+  fs.rmSync(path.join(q.out, done.json.backup), { recursive: true, force: true })
+  const stuck = await run(q, { rollback: true, 'dry-run': true, json: true })
+  assert.equal(stuck.json.ok, false)
+  assert.match(stuck.json.problems[0], /cannot be put back: its backup is gone/)
+})
+
+// IC4 B5: lines the engine added to events.jsonl after the backup name
+// comments 1.x no longer has (and whose ids it hands out again): a rollback
+// moves them into the backup's replaced folder and the log is as it was.
+test('IC4 B5: rollback takes the engine-period lines out of events.jsonl into the replaced folder', async () => {
+  const p = project()
+  await withEnvironmentColumn(p.out)
+  const log = path.join(p.out, 'events.jsonl')
+  const before = fs.readFileSync(log)
+  const done = await run(p, { json: true })
+  assert.equal(done.code, 0)
+  const engineLines = '{"type":"comment.created","commentId":6}\n{"type":"comment.resolved","commentId":6}\n'
+  fs.appendFileSync(log, engineLines)
+  const back = await run(p, { rollback: true })
+  assert.equal(back.code, 0, back.text)
+  assert.match(back.text, /events\.jsonl: the lines the engine added since moved into/)
+  assert.deepEqual(fs.readFileSync(log), before)
+  const backup = path.join(p.out, done.json.backup)
+  const [replaced] = fs.readdirSync(backup).filter((name) => name.startsWith('replaced-'))
+  assert.equal(fs.readFileSync(path.join(backup, replaced, 'events.jsonl'), 'utf8'), engineLines)
+
+  // A log that no longer starts as it did (rotated, edited) stays as it is, and the rollback says so.
+  const q = project()
+  await withEnvironmentColumn(q.out)
+  assert.equal((await run(q)).code, 0)
+  const qlog = path.join(q.out, 'events.jsonl')
+  fs.writeFileSync(qlog, '{"type":"comment.created","commentId":1}\n'.repeat(50))
+  const kept = await run(q, { rollback: true })
+  assert.equal(kept.code, 0, kept.text)
+  assert.match(kept.text, /events\.jsonl changed in a way the rollback cannot split/)
+  assert.equal(fs.readFileSync(qlog, 'utf8'), '{"type":"comment.created","commentId":1}\n'.repeat(50))
+})
+
+// IC4 B4: `watch` on the engine makes remote/<engine project>/<board>/agent/;
+// a rollback that sets the engine aside removes the empty ones only.
+test('IC4 B4: rollback removes the empty remote/<engine project>/<board>/agent folders the engine made', async () => {
+  const p = project()
+  await withEnvironmentColumn(p.out)
+  const before = digest(p.out)
+  assert.equal((await run(p)).code, 0)
+  const db = await openDatabase(engineDbFile(p.out))
+  const [{ id: projectId }] = db.prepare('SELECT id FROM projects').all()
+  db.close()
+  const remote = path.join(p.out, 'remote', projectId)
+  fs.mkdirSync(path.join(remote, 'site', 'agent'), { recursive: true })
+  const back = await run(p, { rollback: true })
+  assert.equal(back.code, 0, back.text)
+  assert.equal(fs.existsSync(path.join(p.out, 'remote')), false)
+  assert.deepEqual(digest(p.out), before)
+
+  // A folder with something in it stays; so does another project's.
+  const q = project()
+  await withEnvironmentColumn(q.out)
+  assert.equal((await run(q)).code, 0)
+  const qdb = await openDatabase(engineDbFile(q.out))
+  const [{ id: qid }] = qdb.prepare('SELECT id FROM projects').all()
+  qdb.close()
+  fs.mkdirSync(path.join(q.out, 'remote', qid, 'site', 'agent'), { recursive: true })
+  fs.writeFileSync(path.join(q.out, 'remote', qid, 'site', 'agent', 'state.json'), '{}')
+  fs.mkdirSync(path.join(q.out, 'remote', PR, 'site', 'agent'), { recursive: true })
+  assert.equal((await run(q, { rollback: true })).code, 0)
+  assert.equal(fs.existsSync(path.join(q.out, 'remote', qid, 'site', 'agent', 'state.json')), true)
+  assert.equal(fs.existsSync(path.join(q.out, 'remote', PR, 'site', 'agent')), true)
+})
