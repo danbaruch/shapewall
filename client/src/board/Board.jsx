@@ -39,6 +39,7 @@ import { TryThis, useTryThis } from './TryThis'
 
 import {
   FIT_OPTIONS,
+  FOLLOW_ROOM,
   MAX_ZOOM,
   MIN_ZOOM,
   TIP_ROOM,
@@ -691,6 +692,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // until placed, so it never flashes at 100%.
   // A link to a journey step flies to that step instead (useJourneyActions).
   const startPending = useRef(!initialCamera.current && !selectedCommentId && !params.get('j'))
+  // Where the Follow bar can show for a hosted member (followEnabled below, once its agents are online).
+  const followRow = Boolean(info?.hosted && !DEMO && !STATIC && !info?.guest && info?.role && boardId)
   const fitOnMount = useRef(!initialCamera.current && Boolean(selectedCommentId))
   const [startShown, setStartShown] = useState(() => !wide || !startPending.current)
   useEffect(() => {
@@ -722,7 +725,9 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     const box = canvasRef.current?.getBoundingClientRect()
     // The first-run tip shows at the top of the canvas (CanvasNotes.jsx; the demo's Try this card replaces it): room for
     // it above the board, so it does not cover the first section's name.
-    const room = tipOpen && !tryOpen ? TIP_ROOM : 0
+    // A hosted member's board (the solo engine's among them) can show the Follow bar under the tip once its agents
+    // answer, which may be after this first view: room for that row up front, so it never covers the name either.
+    const room = followRow ? FOLLOW_ROOM : tipOpen && !tryOpen ? TIP_ROOM : 0
     // A small board: the whole of it, from the top (camera.js fitWholeViewport).
     const view =
       startViewport(layout.nodes, box, undefined, { top: room }) ||
@@ -732,7 +737,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     // placed, or the frame in between paints it at 100%.
     const placed = view ? flow.setViewport(view) : flow.fitView(fitOptionsWithRoom(room, box?.height))
     Promise.resolve(placed).finally(() => setStartShown(true))
-  }, [comparePair, flow, layout.nodes, layout.targets, nodesReady, panelStart, setSettledZoom, shapeKey, tipOpen, tryOpen, wide])
+  }, [comparePair, flow, followRow, layout.nodes, layout.targets, nodesReady, panelStart, setSettledZoom, shapeKey, tipOpen, tryOpen, wide])
 
   // After a pick from a toolbar list, focus goes back to the canvas (not the
   // trigger), so the next shortcut (C, the arrows) reaches the board.

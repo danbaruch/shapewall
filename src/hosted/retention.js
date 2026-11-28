@@ -22,18 +22,35 @@
 //
 // A later push brings back the versions the pushing machine still keeps; the
 // next run trims them again.
+//
+// The solo engine (shapewall serve) keeps what 1.x kept: per board, the
+// project's own `keepVersions` (shapewall.config.json, 5 by default; 0 keeps
+// every version there is, as 1.x never pruned with it), not the team default
+// above. Its first start (the one right after a migration, since every
+// migration makes a new engine) prunes nothing, so version history moved from
+// 1.x is never trimmed on arrival; later runs trim to `keepVersions`, as the
+// next 1.x capture would have.
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { ID_RE } from '../config.js'
+import { ID_RE, VERSIONS_DEFAULT } from '../config.js'
 import { listVersions } from '../store.js'
 import { transaction } from './db.js'
 import { boardConfig } from './projects.js'
+import { getState, setState } from './rebind.js'
 import { allWorkspaces, tenant } from './tenancy.js'
 import { USAGE_RETENTION_DAYS, createUsage } from './usage.js'
 
 export const RETENTION_DEFAULT = 2
 export const RETENTION_EVERY_HOURS = 6
+const SOLO_STATE = 'solo_retention'
+
+// The solo engine's keep for one board: its config's keepVersions (the board
+// row's definition follows shapewall.config.json), null for "keep them all".
+export function soloKeep(config) {
+  const keep = Number.isInteger(config?.versions) && config.versions >= 0 ? config.versions : VERSIONS_DEFAULT
+  return keep > 0 ? keep : null
+}
 
 // Which version files of one board to remove. `versions` is listVersions()
 // output; `referenced` a Set of "page\0viewport\0version".
@@ -59,6 +76,8 @@ export function runRetention({
   usageDaysDefault = USAGE_RETENTION_DAYS,
   dryRun = false,
   workspaceId = null,
+  // The solo engine: each board keeps its own config's keepVersions (soloKeep).
+  solo = false,
   now = () => new Date(),
 }) {
   const result = { workspaces: 0, boards: 0, files: 0, bytes: 0, usageRows: 0, dryRun }
@@ -71,7 +90,7 @@ export function runRetention({
     result.usageRows += transaction(db, () => createUsage(t, { now }).prune(workspace.retention_usage_days ?? usageDaysDefault, { dryRun }))
     for (const row of t.all('SELECT project_id, board_id FROM boards WHERE workspace_id = :ws ORDER BY project_id, board_id')) {
       if (!ID_RE.test(row.board_id)) continue
-      const removed = pruneBoard(db, t, dataDir, row.project_id, row.board_id, keep, dryRun)
+      const removed = pruneBoard(db, t, dataDir, row.project_id, row.board_id, solo ? soloKeep : keep, dryRun)
       if (removed.files) result.boards += 1
       result.files += removed.files
       result.bytes += removed.bytes
@@ -123,6 +142,8 @@ function pruneBoard(db, t, dataDir, projectId, boardId, keep, dryRun) {
     })
     if (!row) return { files: 0, bytes: 0 }
     const config = boardConfig(dataDir, t.workspaceId, projectId, row)
+    if (typeof keep === 'function') keep = keep(config)
+    if (keep === null) return { files: 0, bytes: 0 }
     const referenced = referencedVersions(t, projectId, boardId)
     const names = planBoardRetention(listVersions(config, boardId), referenced, keep)
     const dir = path.join(config.outputDir, boardId, 'versions')
@@ -152,11 +173,21 @@ function pruneBoard(db, t, dataDir, projectId, boardId, keep, dryRun) {
 }
 
 // The in-process job: at start, then every `hours`. Returns stop().
-export function startRetention({ db, dataDir, hours = RETENTION_EVERY_HOURS, keepDefault = RETENTION_DEFAULT, log = () => {} }) {
+// `solo`: the solo engine (see the top): keepVersions per board, and no run
+// at its very first start.
+export function startRetention({
+  db,
+  dataDir,
+  hours = RETENTION_EVERY_HOURS,
+  keepDefault = RETENTION_DEFAULT,
+  solo = false,
+  now = () => new Date(),
+  log = () => {},
+}) {
   if (!hours) return () => {}
   const run = () => {
     try {
-      const result = runRetention({ db, dataDir, keepDefault })
+      const result = runRetention({ db, dataDir, keepDefault, solo })
       if (result.usageRows) log(`retention: removed ${result.usageRows} old usage records`)
       if (result.files)
         log(`retention: removed ${result.files} old version files (${(result.bytes / 1048576).toFixed(1)} MB) from ${result.boards} boards`)
@@ -164,7 +195,18 @@ export function startRetention({ db, dataDir, hours = RETENTION_EVERY_HOURS, kee
       log(`retention: ${error.message}`)
     }
   }
-  run()
+  // The solo engine's first start skips this run (the state row says it happened).
+  let runNow = true
+  if (solo) {
+    try {
+      runNow = Boolean(getState(db, SOLO_STATE))
+      if (!runNow) setState(db, SOLO_STATE, { firstStart: now().toISOString() }, now())
+    } catch (error) {
+      runNow = false
+      log(`retention: ${error.message}`)
+    }
+  }
+  if (runNow) run()
   const timer = setInterval(run, hours * 3_600_000)
   timer.unref()
   return () => clearInterval(timer)

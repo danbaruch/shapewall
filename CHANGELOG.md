@@ -16,7 +16,9 @@ account), and invite people when you are ready with `shapewall serve --team`. Th
   `.shapewall/backup-1x-<time>/` first, then comments, replies, reactions, images, drawings and chat threads become engine
   rows, captures, versions, variants, environments, diffs, journeys and checks move as files, and a `serve --accounts` owner
   becomes the engine's owner with their passkeys and recovery codes. Agent settings and `events.jsonl` stay where they are.
-  `shapewall migrate --dry-run` shows the plan and writes nothing.
+  `shapewall migrate --dry-run` shows the plan and writes nothing. `serve` checks its flags and that the port is free
+  before it migrates anything. Version history keeps the project's `keepVersions` (5 by default) on the engine, as in 1.x,
+  and the first start after a migration prunes none of it. `watch --no-claim` works on the engine.
 - **Rollback.** `shapewall migrate --rollback` puts the 1.x board back from the backup, checked byte for byte; anything made
   on the engine since goes aside into `<backup>/replaced-<time>/`, never deleted.
 - **Staying on 1.x.** Roll back, then run `npx shapewall@1 serve` pinned. Or keep the 1.x board server on 2.x with

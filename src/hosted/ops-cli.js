@@ -30,6 +30,12 @@ export async function serveEngine(flags, out, options = {}) {
   return run(flags, out, options)
 }
 
+// What `serve` checks before it migrates (src/hosted/solo/serve.js preflightEngine).
+export async function preflightEngine(flags) {
+  const { preflightEngine: check } = await import('./solo/serve.js')
+  return check(flags)
+}
+
 // The solo engine for one command (2.0.0, R5c: `comments`, `watch` and
 // `mcp` in a project the engine holds while no `serve` runs): the same
 // start as `serve`, on a free loopback port, without the project's agent,

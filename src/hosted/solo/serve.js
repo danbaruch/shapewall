@@ -186,6 +186,29 @@ function showLink(flags, env) {
   return Boolean(process.stdout.isTTY) && env.TERM !== 'dumb'
 }
 
+// The cheap checks `serve` makes before it moves any 1.x data into the engine (IC4 B7): the flags, the port number,
+// and that the port can be listened on now, so a start that cannot listen stops before it migrates anything. Not
+// while the engine already runs for this folder (a second `serve --open` only signs a browser in there).
+export async function preflightEngine(flags) {
+  const problem = engineFlagProblem({ ...flags, engine: 'hosted' })
+  if (problem) throw new Error(problem)
+  const port = flags.port === undefined ? DEFAULT_PORT : Number(flags.port)
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port must be a port number')
+  if (port === 0) return
+  const { createServer } = await import('node:net')
+  await new Promise((resolve, reject) => {
+    const probe = createServer()
+    probe.once('error', (error) =>
+      reject(
+        error.code === 'EADDRINUSE'
+          ? new Error(`Port ${port} is in use. Pick another with --port. Nothing was changed.`, { cause: error })
+          : new Error(`Cannot listen on 127.0.0.1:${port} (${error.code || error.message}). Nothing was changed.`, { cause: error }),
+      ),
+    )
+    probe.listen({ host: '127.0.0.1', port, exclusive: true }, () => probe.close(resolve))
+  })
+}
+
 export async function serveEngine(flags, out, options = {}) {
   const { env = process.env, start = null, spawnImpl = undefined, agentSpawn = null } = options
   const problem = engineFlagProblem(flags)

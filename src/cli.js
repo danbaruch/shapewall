@@ -67,6 +67,7 @@ const COMMANDS = {
     await serveCommand(flags, out, {
       version: VERSION,
       startEngine: async (...args) => (await import('./hosted/ops-cli.js')).serveEngine(...args),
+      preflight: async (...args) => (await import('./hosted/ops-cli.js')).preflightEngine(...args),
     })
     return null
   },

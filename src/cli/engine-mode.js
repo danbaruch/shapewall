@@ -69,7 +69,9 @@ export async function engineMode(command, flags, { env = process.env, err = () =
     // No config here: the command says what is missing itself.
     return null
   }
-  const which = command === 'watch' ? 'watch' : 'cli'
+  // watch --no-claim only looks (src/remote/remote-watch.js): the command line's read token, which sees every open
+  // comment, not the claiming watch token, which sees only the comments its agent may take.
+  const which = command === 'watch' && !flags['no-claim'] ? 'watch' : 'cli'
   let target = engineTarget(config, { which })
   let stop = null
   // Not running, and the engine holds the project: this command starts it (never for an agent's own process).
