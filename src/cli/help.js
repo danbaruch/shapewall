@@ -111,7 +111,7 @@ export const SECTIONS = {
       --engine legacy       the 1.x board server (deprecated, removed in 3.0; also $SHAPEWALL_ENGINE=legacy);
                             --host, --lan, --tailscale, --accounts, --agent-acp and the other 1.x-only flags pick it too`,
   devices: `  devices list              paired devices and pending requests for this project [--json]
-                            (deprecated: use shapewall serve --team instead, see shapewall serve --help)
+                            (deprecated: invite people with serve's team mode on your tailnet instead)
   devices approve CODE      approve after matching the code on your device
   devices deny CODE         deny a pending request
   devices revoke ID|--all   revoke a device or all devices immediately`,
@@ -328,7 +328,6 @@ export const SECTIONS = {
   export: `  export                    static read-only copy of the boards, for any static web server
                             (view it with "npx serve shapewall-export"; opening index.html from disk does not work)
       --include-checks      explicitly include private diagnostic reports
-      --include-guests      also include share link guests' comments and images (untrusted; off by default)
       --out DIR             default shapewall-export
       --no-comments         leave comments (their text, authors and replies) out
       --browser-comments    visitors may comment; their comments stay in their own browser
