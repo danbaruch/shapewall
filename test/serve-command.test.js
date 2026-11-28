@@ -138,6 +138,43 @@ test('serveCommand: starts the engine on a new project, refuses on a migration s
   assert.equal(started.length, 1, 'the engine did not start')
 })
 
+test('serveCommand checks the port before it migrates: a taken port leaves the 1.x project as it was (IC4 B7)', async () => {
+  const { preflightEngine } = await import('../src/hosted/solo/serve.js')
+  const net = await import('node:net')
+  const config = project('serve-port-first')
+  await comment(config)
+  const holder = net.createServer()
+  await new Promise((resolve) => holder.listen({ host: '127.0.0.1', port: 0 }, resolve))
+  const port = holder.address().port
+  const started = []
+  const startEngine = async () => {
+    started.push(true)
+    return 'handle'
+  }
+  try {
+    await assert.rejects(
+      serveCommand({ config: config.file, port: String(port) }, () => {}, { env: ENV, startEngine, preflight: preflightEngine }),
+      new RegExp(`Port ${port} is in use\\. Pick another with --port\\. Nothing was changed\\.`),
+    )
+    assert.equal(started.length, 0)
+    assert.equal(fs.existsSync(path.join(config.outputDir, MIGRATED)), false, 'not migrated')
+    assert.equal(fs.existsSync(engineDir(config.outputDir)), false, 'no engine folder')
+    assert.ok(!fs.readdirSync(config.outputDir).some((name) => name.startsWith('backup-1x-')), 'no backup')
+    // Other cheap checks run first too: a refused flag or a bad port number.
+    await assert.rejects(preflightEngine({ port: 'abc' }), /--port must be a port number/)
+    await assert.rejects(preflightEngine({ 'trust-proxy': true }), /--trust-proxy is not for the solo engine/)
+  } finally {
+    await new Promise((resolve) => holder.close(resolve))
+  }
+  // The port free again: the same start migrates, then starts the engine.
+  assert.equal(
+    await serveCommand({ config: config.file, port: String(port) }, () => {}, { env: ENV, startEngine, preflight: preflightEngine }),
+    'handle',
+  )
+  assert.ok(fs.existsSync(path.join(config.outputDir, MIGRATED)))
+  assert.equal(started.length, 1)
+})
+
 test('the 1.x comment and chat writers refuse a board the engine holds (409 board_migrated)', async () => {
   const config = project('guard-writers')
   await comment(config, 'before the move')

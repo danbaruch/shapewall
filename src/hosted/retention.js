@@ -203,7 +203,7 @@ export function startRetention({
       if (!runNow) setState(db, SOLO_STATE, { firstStart: now().toISOString() }, now())
     } catch (error) {
       runNow = false
-      log(`retention: `)
+      log(`retention: ${error.message}`)
     }
   }
   if (runNow) run()
