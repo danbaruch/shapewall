@@ -917,10 +917,14 @@ The exit code is 0 when it is done or there is nothing to do, 1 when it refused 
 - **What moves.** Captures, versions, variants, environments, diffs and journeys move as files into `.shapewall/.engine/`.
   Comments (with replies, reactions, images and drawings) and chat threads become engine rows with their numbers, and a
   `serve --accounts` owner becomes the engine's owner with their passkeys and recovery codes. On a plain local board (no
-  `serve --accounts`) every comment that is not an agent's or a share guest's becomes the owner's, vouched for, so agents get
-  it as 1.x `watch` did. With `serve --accounts`, only comments the board stamped as the owner's become the owner's; others
-  signed with the owner's name come in as imported text (not sent to agents until the owner sends them), and other names
-  stay labels.
+  `serve --accounts`) every comment that is not an agent's or a share guest's becomes the owner's. With `serve --accounts`,
+  only comments the board stamped as the owner's become the owner's; others signed with the owner's name come in as
+  imported text, and other names stay labels. None is vouched for (B-20): 1.x never recorded who wrote a comment (a LAN
+  visitor on 1.1.0, an agent, a comments.json from a cloned repository), so every migrated comment is marked as brought in
+  (`imported_at`), has no dispatch hash and is not approved to run. `serve` prints how many wait, the board shows a banner
+  for admins, and **Send to agents** there (or `shapewall comments approve --imported`, which the engine takes only from
+  this machine's `cli.token`, never an agent's token) vouches for each with the dispatch hash of the text shown. On the
+  token API such a comment has `byOwner: false` until it is sent.
 - **What does not.** Agent settings and keys stay on the machine (the engine reads Settings > Agent as before). Sign-in
   sessions and paired devices do not move: sign in and pair again. `events.jsonl` stays where it is, and the engine keeps
   writing it. The dry run lists every item that would not come along.

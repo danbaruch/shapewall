@@ -50,13 +50,17 @@ export function boardJobBusyMessage(kind, boardId = null) {
 export function acquireBoardJob(config, boardId, kind) {
   if (!BOARD_JOB_KINDS.includes(kind)) throw new Error(`unknown board job ${kind}`)
   const file = boardJobFile(config, boardId)
+  // Re-check 2: a swap running now is refused before anything is made, so no
+  // folder or lock of ours appears between the swap's two renames.
+  const swapping = () => isLockLive(readLock(boardSwapFile(config, boardId)))
+  if (swapping()) return { ok: false, holder: 'push' }
   const made = !fs.existsSync(path.dirname(file))
   fs.mkdirSync(path.dirname(file), { recursive: true })
   if (acquireLock(file, { kind })) {
     // B-17: a push swapping the folder holds the lock beside it. Checked with
     // our lock held: a swap that started first wins, and the folder this
     // call made (in the moment between the swap's two renames) goes again.
-    if (isLockLive(readLock(boardSwapFile(config, boardId)))) {
+    if (swapping()) {
       releaseLock(file)
       if (made)
         try {

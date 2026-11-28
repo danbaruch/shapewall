@@ -16,7 +16,8 @@ import { mountCaptureRoutes } from './board-capture.js'
 import { mountCheckRoutes } from './board-checks.js'
 import { mountCompareRoutes } from './board-compare.js'
 import { mountJourneyRoutes } from './board-journeys.js'
-import { agentPolicy } from './agent-policy.js'
+import { agentPolicy, dispatchHash } from './agent-policy.js'
+import { sendImported, waitingImported } from './imported-ok.js'
 import { hostedBoardView, sendPng } from './board-context.js'
 import { mountChatRoutes } from './chat-routes.js'
 import { guestView, rowToComment } from './comments.js'
@@ -201,6 +202,58 @@ export function mountBoardRoutes(
         return current
       })
       res.json({ comment: dispatchView(req.t, req.project.id, ctx.board.id, rowToComment(ctx.comments.get(row.number))) })
+    }),
+  )
+
+  // B-20: "Send to agents" on the board's banner for the comments brought in
+  // from 1.x that wait for the owner's OK. The body lists each comment the
+  // board showed with its dispatchHash; each is vouched for and approved to
+  // run as "Send to agent" with an admin's approval is, so only admins (on the
+  // solo engine, its owner), with the same step-up. One edited since stays.
+  // What the banner lists: each waiting comment in full, with the hash the
+  // send must carry back. Admins only (the people who may send them); others
+  // see no banner.
+  boardApi.get(
+    '/boards/:bid/waiting-ok',
+    handle((req, res) => {
+      const ctx = boardContext(req.t, req.project, req.params.bid)
+      if (!roleAtLeast(req.role, 'admin')) return res.json({ comments: [] })
+      const rows = waitingImported(req.t, req.project.id, ctx.board.id)
+      res.set('Cache-Control', 'no-store').json({
+        comments: rows.map((row) => {
+          const comment = rowToComment(row)
+          return {
+            id: comment.id,
+            author: comment.author || null,
+            body: comment.body,
+            pageId: comment.pageId,
+            dispatchHash: dispatchHash(row),
+          }
+        }),
+      })
+    }),
+  )
+  boardApi.post(
+    '/boards/:bid/waiting-ok/send',
+    handle((req, res) => {
+      const ctx = boardContext(req.t, req.project, req.params.bid)
+      if (!roleAtLeast(req.role, 'admin')) throw new HttpError(403, 'forbidden', 'Only trusted admins send imported comments to agents.')
+      stepUpOrThrow(req, 'cards')
+      const result = transaction(db, () =>
+        sendImported({
+          t: req.t,
+          policy: policyFor(req.t),
+          agents: agentsFor(req.t),
+          project: req.project.id,
+          board: ctx.board.id,
+          user: req.user.id,
+          role: req.role,
+          items: req.body?.comments,
+        }),
+      )
+      for (const number of result.sent)
+        auditOf(req, 'comment_vouched', `${ctx.board.id}#${number}`, { project: req.project.id, approve: true, via: 'imported' })
+      res.json(result)
     }),
   )
 

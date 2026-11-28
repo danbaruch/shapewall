@@ -20,6 +20,7 @@ import { createRemote, pushDefinition, pushEnvironmentFiles, pushFiles, readCapt
 import { soloHost } from './loopback-pin.js'
 import { safeOut, terminalSafe } from './terminal.js'
 import { boardHome } from '../cli/board-home.js'
+import { runByAgent } from '../agent-run.js'
 
 export async function push(flags, print) {
   // Names and URLs here come from the server: cleaned before printing.
@@ -312,10 +313,76 @@ export async function remoteComments(positional, flags, print, err = () => {}) {
     out(flags.json ? mutationJson(boardId, result) : `#${result.comment.id} agent status: ${result.comment.agentStatus || 'none'}`)
     return
   }
+  if (action === 'approve') return approveImported(remote, boardId, flags, out, { engine })
   // The selectors of a page's latest capture: on the solo engine, from its own board folder.
   if (action === 'selectors' && engine) {
     const local = await engineBoard(flags, boardId)
     return listSelectors(local.config, local.board, flags, out)
   }
-  throw new Error(`unknown comments action "${action}" (list, resolve, reopen, reply, status)`)
+  throw new Error(`unknown comments action "${action}" (list, resolve, reopen, reply, status, approve --imported)`)
+}
+
+// `comments approve --imported [--yes]` (B-20): the comments brought in from
+// 1.x wait for the owner's OK before agents get them, since 1.x never
+// recorded who wrote them. This lists them in full, asks, and sends exactly
+// those (each with the hash of the text shown; one edited meanwhile stays).
+// The owner's own terminal only: refused in a command an agent started, and
+// without a terminal --yes is needed. The engine takes it only from this
+// machine's command-line token.
+export async function approveImported(
+  remote,
+  boardId,
+  flags,
+  out,
+  { engine, env = process.env, interactive = Boolean(process.stdin.isTTY), ask = askYesNo } = {},
+) {
+  if (!flags.imported) throw new Error('usage: shapewall comments approve --imported [--board ID] [--yes]')
+  if (!engine) throw new Error("comments approve --imported works on this project's solo engine only.")
+  if (env.SHAPEWALL_NO_ENGINE === '1' || runByAgent(env))
+    throw new Error('comments approve --imported is for the owner at their own terminal, not for a command an agent started.')
+  const { comments } = await remote.waitingOk(boardId)
+  if (!comments.length) {
+    out(flags.json ? JSON.stringify({ board: boardId, sent: [], changed: [], skipped: [] }) : 'No 1.x comments wait for your OK.')
+    return
+  }
+  if (!flags.json) {
+    out(`${comments.length} comment${comments.length === 1 ? '' : 's'} from 1.x wait for your OK before agents get them. Read each one:`)
+    for (const item of comments) {
+      out('')
+      out(`#${item.id} on ${item.pageId}${item.author ? `, signed "${item.author}"` : ''}:`)
+      for (const line of String(item.body).split('\n')) out(`  ${line}`)
+    }
+    out('')
+  }
+  if (!flags.yes) {
+    if (!interactive) throw new Error('Run it in a terminal to answer, or add --yes after reading the list (comments approve --imported).')
+    const yes = await ask(`Send these ${comments.length} to agents, as if you wrote them? [y/N] `)
+    if (!yes) {
+      out('Nothing sent.')
+      return
+    }
+  }
+  const items = comments.map((item) => ({ number: Number(item.id), dispatchHash: item.dispatchHash }))
+  const result = { sent: [], changed: [], skipped: [] }
+  for (let start = 0; start < items.length; start += 200) {
+    const part = await remote.sendWaitingOk(boardId, items.slice(start, start + 200))
+    for (const key of Object.keys(result)) result[key].push(...(part[key] || []))
+  }
+  if (flags.json) out(JSON.stringify({ board: boardId, ...result }))
+  else {
+    out(`Sent ${result.sent.length} to agents.`)
+    if (result.changed.length)
+      out(`Not sent, changed since this list: ${result.changed.map((n) => `#${n}`).join(', ')}. Run it again to read them.`)
+    if (result.skipped.length) out(`No longer waiting: ${result.skipped.map((n) => `#${n}`).join(', ')}.`)
+  }
+}
+
+async function askYesNo(question) {
+  const { createInterface } = await import('node:readline/promises')
+  const rl = createInterface({ input: process.stdin, output: process.stderr })
+  try {
+    return /^y(es)?$/i.test((await rl.question(question)).trim())
+  } finally {
+    rl.close()
+  }
 }

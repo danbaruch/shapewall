@@ -23,7 +23,9 @@ import {
   variantsWithFiles,
   versionTime,
 } from '../store.js'
-import { agentPolicy, trustedMember } from './agent-policy.js'
+import { agentPolicy, dispatchHash as dispatchHashOf, trustedMember } from './agent-policy.js'
+import { sendImported, waitingImported } from './imported-ok.js'
+import { machineTokenId } from './solo/machine-tokens.js'
 import { COMMENT_ROUTING } from './agents.js'
 import { mountHostedApprovals } from './agent-approvals.js'
 import { mountAgentLink, requireNoRunningFix } from './agent-link.js'
@@ -240,6 +242,8 @@ export function mountTokenApi({
           byOwner:
             !comment.authorAgent &&
             !comment.authorGuest &&
+            // B-20: a 1.x comment is not the owner's text until the owner sent it (1.x never recorded who wrote it).
+            !comment.waitsForOk &&
             Boolean(req.token.createdBy) &&
             comment[COMMENT_AUTHOR]?.user === req.token.createdBy,
         }
@@ -1007,6 +1011,62 @@ export function mountTokenApi({
       if (result.merged)
         auditOf(req, 'comment_resolved', `${ctx.board.id}#${result.comment.id}`, { project: req.project.id, via: 'github' })
       res.json({ board: boardRef(ctx.board), comment: v1Item(req, ctx, result.comment), changed: result.changed, merged: result.merged })
+    }),
+  )
+  // B-20: the 1.x comments that wait for the owner's OK, and the one-step
+  // send of `shapewall comments approve --imported`. The solo engine only, and
+  // only this machine's command-line token (cli.token): never an agent's
+  // (watch.token, agent.token, a connected agent), which must not vouch for
+  // text, and never the team listener (team.js keeps machine tokens off it).
+  // Each comment is sent with the dispatch hash of the text the command
+  // showed the owner; one edited since is left waiting.
+  const cliOnly = (req, res, next) =>
+    solo && req.token.id === machineTokenId(dataDir, 'cli') && !req.token.scopes.includes('claim')
+      ? next()
+      : fail(res, 403, 'owner_command_line', "Only the owner's own command line on this machine sends 1.x comments to agents.")
+  v1.get(
+    '/boards/:bid/waiting-ok',
+    soloOnly,
+    cliOnly,
+    v1Board((req, res, ctx) => {
+      const rows = waitingImported(req.t, req.project.id, ctx.board.id)
+      res.json({
+        board: boardRef(ctx.board),
+        comments: rows.map((row) => {
+          const comment = rowToComment(row)
+          return {
+            id: comment.id,
+            author: comment.author || null,
+            body: comment.body,
+            pageId: comment.pageId,
+            createdAt: comment.createdAt,
+            dispatchHash: dispatchHashOf(row),
+          }
+        }),
+      })
+    }),
+  )
+  v1.post(
+    '/boards/:bid/waiting-ok/send',
+    soloOnly,
+    cliOnly,
+    v1Json,
+    v1Board((req, res, ctx) => {
+      const result = transaction(db, () =>
+        sendImported({
+          t: req.t,
+          policy: policyFor(req.t),
+          agents: agentsFor(req.t),
+          project: req.project.id,
+          board: ctx.board.id,
+          user: req.token.createdBy,
+          role: 'owner',
+          items: req.body?.comments,
+        }),
+      )
+      for (const number of result.sent)
+        auditOf(req, 'comment_vouched', `${ctx.board.id}#${number}`, { project: req.project.id, approve: true, via: 'imported' })
+      res.json({ board: boardRef(ctx.board), ...result })
     }),
   )
   v1.use(v1Json)

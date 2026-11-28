@@ -451,7 +451,9 @@ export function printPlan(plan, out, { dryRun }) {
       `  comments: ${plural(c.comments, 'comment')}, ${plural(c.replies, 'reply', 'replies')}, ${plural(c.reactions, 'reaction')}, ${plural(c.images, 'image')}, ${plural(c.drawings, 'drawing')}`,
     )
     if (c.ownerLocal)
-      out(`    the owner's: ${c.ownerLocal} typed on this local board (no accounts, so the owner's: agents get them as before)`)
+      out(
+        `    the owner's: ${c.ownerLocal} typed on this local board (no accounts, so the owner's; they wait for your OK before agents get them)`,
+      )
     if (c.ownerStamped || c.ownerByName)
       out(
         `    the owner's: ${c.ownerStamped} stamped by the board (become the owner's); ${c.ownerByName} with the owner's name only (kept as imported text, not the owner's); ${c.labels} other name(s) stay labels`,

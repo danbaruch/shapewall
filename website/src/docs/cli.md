@@ -400,7 +400,13 @@ shapewall comments reopen ID [--author NAME] [--json]
 shapewall comments reply ID --body TEXT [--author NAME] [--json]
 shapewall comments status ID queued|working|done|needs-human|clear [--note TEXT] [--author NAME] [--json]
 shapewall comments delete ID [--yes] [--json]
+shapewall comments approve --imported [--yes] [--json]
 ```
+
+`comments approve --imported` (solo engine): the comments a migration brought in from a 1.x board wait for your OK before agents
+get them, since 1.x never recorded who wrote a comment. It prints each one in full, asks, and sends exactly those to agents, as
+**Send to agents** on the board's banner does. A comment changed since the list was printed is not sent. It works only from your
+own terminal: a command an agent started is refused, and without a terminal it needs `--yes`.
 
 Prints comments as a work list. Plain text is for pasting into a chat; `--json` is for agents, with the page, viewport, selector,
 element text, position, file paths, replies, mentions and agent status of each comment. `--page ID` keeps one page and its variants;
@@ -837,6 +843,8 @@ Commands
   comments status ID S      agent status: queued, working, done, needs-human or clear   [--note TEXT] [--author NAME] [--json]
   comments delete ID        delete a comment, its replies and its images for good; asks first
                             [--yes (do not ask; needed without a terminal)] [--json]
+  comments approve --imported  send the comments brought in from 1.x to agents, after reading them; asks first
+                            (solo engine; your own terminal only) [--yes (needed without a terminal)] [--json]
       --board ID            board (default: the first); --remote URL for a hosted board (see push)
   events                    comment events from every process (the shared log); never claims anything
       --follow              keep printing new events until Ctrl+C

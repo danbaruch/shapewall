@@ -73,6 +73,7 @@ import { useLiveFrames } from './hooks/useLiveFrames'
 import { useCommentModeKeys, useJourneyCycleKey } from './hooks/useShortcuts'
 import { useJourneyActions } from './hooks/useJourneyActions'
 import { useCommentActions } from './hooks/useCommentActions'
+import ImportedOk, { useImportedOk } from './ImportedOk'
 import { useBoardData } from './hooks/useBoardData'
 import { useBoardEvents } from './hooks/useBoardEvents'
 // Only once there is someone to follow: its own chunk.
@@ -1020,6 +1021,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     filter,
     allowed,
   })
+  // B-20: comments a migration brought in from 1.x that wait for the owner's OK (admins only).
+  const importedOk = useImportedOk({ boardId, enabled: hostedMember && ['admin', 'owner'].includes(info?.role) })
   const commentMedia = useMemo(
     () => ({
       attach: canComment && !STATIC && !info?.guest,
@@ -2065,6 +2068,20 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                 ) : null}
                 {drawingOn ? null : (
                   <CanvasNotes
+                    lead={
+                      importedOk.comments.length ? (
+                        <ImportedOk
+                          boardId={boardId}
+                          comments={importedOk.comments}
+                          reload={importedOk.reload}
+                          wide={wide}
+                          onSent={() => {
+                            commentsQuery.refetch()
+                            agentsQuery.refetch()
+                          }}
+                        />
+                      ) : null
+                    }
                     wide={wide}
                     commentMode={commentMode}
                     canComment={canComment}

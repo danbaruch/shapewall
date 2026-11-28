@@ -215,6 +215,11 @@ export function createRemote({
       call('POST', one(boardId, id, '/github/issue', guests), { json: { issue } }),
     githubPull: (boardId, id, pull, { via = 'manual', guests = false } = {}) =>
       call('POST', one(boardId, id, '/github/pulls', guests), { json: { pull, via } }),
+    // B-20, the solo engine and this machine's command line only: the 1.x comments that wait for the owner's OK
+    // ({ comments: [{ id, author, body, pageId, createdAt, dispatchHash }] }), and sending those the owner was shown
+    // ([{ number, dispatchHash }] -> { sent, changed, skipped }).
+    waitingOk: (boardId, { signal } = {}) => call('GET', `${board(boardId)}/waiting-ok`, { signal }),
+    sendWaitingOk: (boardId, comments) => call('POST', `${board(boardId)}/waiting-ok/send`, { json: { comments } }),
     startPush: (definition) => call('POST', '/api/v1/pushes', { json: definition }),
     // A push of only these pages and viewports ({ <page>: [<viewport>] }) to a board already pushed.
     startPagePush: (boardId, pages) => call('POST', '/api/v1/pushes', { json: { mode: 'pages', board: boardId, pages } }),

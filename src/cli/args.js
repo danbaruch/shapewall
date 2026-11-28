@@ -182,6 +182,7 @@ export const COMMAND_FLAGS = {
     'author',
     'board',
     'yes',
+    'imported',
     ...REMOTE_FLAGS,
   ],
   events: ['follow', 'since', 'limit', 'json', 'board'],

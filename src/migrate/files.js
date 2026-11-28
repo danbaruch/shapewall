@@ -311,6 +311,20 @@ export function writeBackup(outputDir, { stamp, boards, engineDir, marker, versi
   return { dir, record }
 }
 
+// A rollback's replaced-<time>-<pid> folder inside the backup (re-check 2):
+// made by this restore, never one that was there (a link planted under that
+// name would redirect what is set aside), so a plain mkdir, then lstat.
+function makeAside(aside) {
+  try {
+    fs.mkdirSync(aside, { mode: 0o700 })
+  } catch (error) {
+    if (error.code === 'EEXIST') throw new Error(`${aside} already exists; the rollback stops and leaves it as it is`, { cause: error })
+    throw error
+  }
+  const stat = fs.lstatSync(aside)
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${aside} is not a plain folder; the rollback stops`)
+}
+
 // The event log (events.jsonl) as it is: its size and the digest of its
 // bytes, or null when there is none (or it is not a plain file).
 function eventLogMark(outputDir) {
@@ -331,7 +345,7 @@ function eventLogMark(outputDir) {
 // comment under an id 1.x hands out again. Only when the log still starts
 // with exactly the bytes it had (no rotation, no edit); otherwise it stays
 // as it is, and the result says so. Returns 'moved', 'unchanged' or 'kept'.
-function restoreEventLog(outputDir, record, aside) {
+export function restoreEventLog(outputDir, record, aside, ensureAside, { beforeCut = null } = {}) {
   const mark = record.events
   if (!mark || !Number.isSafeInteger(mark.size) || typeof mark.sha256 !== 'string') return 'unchanged'
   const file = path.join(outputDir, EVENT_LOG)
@@ -355,8 +369,12 @@ function restoreEventLog(outputDir, record, aside) {
     }
     const head = bytes.subarray(0, mark.size)
     if (createHash('sha256').update(head).digest('hex') !== mark.sha256) return 'kept'
-    fs.mkdirSync(aside, { recursive: true, mode: 0o700 })
+    ensureAside()
     writeAtomic(path.join(aside, EVENT_LOG), bytes.subarray(mark.size, read), { mode: 0o600 })
+    // Re-check 2: a line appended since it was read would be cut and not
+    // copied; the log is cut only while it is exactly what was copied.
+    beforeCut?.()
+    if (fs.fstatSync(fd).size !== read) return 'kept'
     fs.ftruncateSync(fd, mark.size)
     return 'moved'
   } finally {
@@ -425,9 +443,16 @@ export function restoreBackup(outputDir, dir, { engineDir, marker }) {
     walk(top)
   }
   const aside = path.join(dir, `replaced-${stampOf()}-${process.pid}`)
+  let asideMade = false
+  const ensureAside = () => {
+    if (asideMade) return plain(aside, aside)
+    makeAside(aside)
+    asideMade = true
+  }
   const setAside = (from, name) => {
     plain(from, from)
     if (!fs.existsSync(from)) return
+    ensureAside()
     fs.mkdirSync(path.dirname(path.join(aside, name)), { recursive: true, mode: 0o700 })
     moveEntry(from, path.join(aside, name))
   }
@@ -484,7 +509,7 @@ export function restoreBackup(outputDir, dir, { engineDir, marker }) {
   const now = digestOf(outputDir, record.boards)
   const changed = record.boards.filter((board) => JSON.stringify(now[board]) !== JSON.stringify(record.digest?.[board]))
   if (changed.length) throw new Error(`the restored ${changed.join(', ')} does not match the backup byte for byte`)
-  const events = restoreEventLog(outputDir, record, aside)
+  const events = restoreEventLog(outputDir, record, aside, ensureAside)
   writeAtomic(path.join(dir, 'RESTORED'), `${new Date().toISOString()}\n`)
   return { ...record, eventLog: events }
 }

@@ -23,7 +23,6 @@ import { slugFor } from '../projects.js'
 import { ID_PATTERNS } from '../../remote/ids.js'
 import { pushDefinition } from '../../remote/remote.js'
 import { cleanGithub } from '../../store.js'
-import { dispatchHash } from '../agent-policy.js'
 import { newId } from '../../shared/account-tokens.js'
 import { ENGINE_DB, engineDbFile, engineDir } from '../../migrate/files.js'
 
@@ -332,9 +331,15 @@ function writeComment(t, ids, boardId, comment, schema, at) {
     extra.push('github')
     params.github = JSON.stringify(cleanGithub(comment.github))
   }
+  // B-20: every comment the migration writes is marked as brought in
+  // (imported_at), and none is vouched for (no dispatch hash, not approved to
+  // run): 1.x never recorded who wrote a comment, so the owner sends them to
+  // agents after reading them (src/hosted/imported-ok.js).
+  extra.push('imported_at')
+  params.imported_at = at
   if (byName) {
-    extra.push('imported_by', 'imported_at')
-    Object.assign(params, { imported_by: ids.ownerId, imported_at: at })
+    extra.push('imported_by')
+    Object.assign(params, { imported_by: ids.ownerId })
     if (schema.commentPolicy) {
       extra.push('imported')
       params.imported = 1
@@ -351,20 +356,6 @@ function writeComment(t, ids, boardId, comment, schema, at) {
        :drawing${values})`,
     params,
   )
-  // IC4 B2: the owner's own comment is vouched for by the owner, as one the
-  // owner types on the engine is (agent-policy.js autoVouch: the owner's own
-  // comment, approved to run), so agents get it as 1.x watch did.
-  if (comment.by === 'owner' && schema.commentPolicy) {
-    const key = { project: ids.projectId, board: boardId, number: comment.number }
-    const row = t.get(
-      'SELECT * FROM comments WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND number = :number',
-      key,
-    )
-    t.run(
-      'UPDATE comments SET dispatch_hash = :hash, dispatch_by = :user, dispatch_at = :at, run_approved = 1 WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND number = :number',
-      { ...key, hash: dispatchHash(row), user: ids.ownerId, at },
-    )
-  }
   for (const file of comment.files)
     t.run(
       `INSERT INTO comment_files (workspace_id, project_id, board_id, file, comment_number, reply_id, name, media_type, bytes, width, height, data, created_at)
