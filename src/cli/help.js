@@ -133,6 +133,8 @@ export const SECTIONS = {
   comments status ID S      agent status: ${AGENT_STATUSES.join(', ')} or clear   [--note TEXT] [--author NAME] [--json]
   comments delete ID        delete a comment, its replies and its images for good; asks first
                             [--yes (do not ask; needed without a terminal)] [--json]
+  comments approve --imported  send the comments brought in from 1.x to agents, after reading them; asks first
+                            (solo engine; your own terminal only) [--yes (needed without a terminal)] [--json]
       --board ID            board (default: the first); --remote URL for a hosted board (see push)`,
   events: `  events                    comment events from every process (the shared log); never claims anything
       --follow              keep printing new events until Ctrl+C

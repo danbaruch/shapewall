@@ -58,6 +58,8 @@ import { mountSoloTeamRoutes } from './team-routes.js'
 import { mountSoloUpdate } from './update.js'
 import { mintMachineToken, retireMachineTokens } from './machine-tokens.js'
 import { engineProof } from '../../engine-target.js'
+import { countWaitingImported } from '../imported-ok.js'
+import { tenant } from '../tenancy.js'
 
 function mountOwner(app, deps, closers) {
   const solo = deps.solo
@@ -112,7 +114,15 @@ function mountOwner(app, deps, closers) {
       if (!/^[A-Za-z0-9_-]{16,64}$/.test(challenge)) return res.status(400).json({ error: { code: 'bad_challenge' } })
       res.set('Cache-Control', 'no-store').json({ proof: engineProof(solo.proofKey, challenge) })
     })
-  app.locals.solo = { owner, boardUrl, boards, tokenFiles }
+  // B-20: how many comments brought in from 1.x wait for the owner's OK (serve says so at start).
+  const waitingOk = () => {
+    try {
+      return countWaitingImported(tenant(deps.db, owner.workspaceId), owner.projectId)
+    } catch {
+      return 0
+    }
+  }
+  app.locals.solo = { owner, boardUrl, boards, tokenFiles, waitingOk }
   return { ...deps, solo: { ...solo, workspaceId: owner.workspaceId, projectId: owner.projectId, boardUrl } }
 }
 

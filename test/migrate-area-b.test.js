@@ -1,7 +1,7 @@
 // Regression tests for the Area B findings of the 2.0 security review
 // (migrate, rollback and the engine-folder guards): B-1, B-2, B-4, B-5, B-6,
 // B-10, B-11. Each started as a repro that showed the defect.
-import { after, test } from 'node:test'
+import { after, mock, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -14,7 +14,8 @@ import { acquireLock, releaseLock } from '../src/lock.js'
 import { acquireBoardJob, readBoardJob } from '../src/board-job.js'
 import { assertMigrationAllows, ROLLING_BACK } from '../src/engine-folder.js'
 import { holders, migrateCommand, TOMBSTONE_NOTE } from '../src/migrate/index.js'
-import { JOURNAL, MARKER, engineDbFile, treeDigest, writeAtomic } from '../src/migrate/files.js'
+import { JOURNAL, MARKER, engineDbFile, restoreEventLog, stampOf, treeDigest, writeAtomic } from '../src/migrate/files.js'
+import { createHash } from 'node:crypto'
 
 quietSqliteWarning()
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -587,4 +588,86 @@ test('IC4 B4: rollback removes the empty remote/<engine project>/<board>/agent f
   assert.equal((await run(q, { rollback: true })).code, 0)
   assert.equal(fs.existsSync(path.join(q.out, 'remote', qid, 'site', 'agent', 'state.json')), true)
   assert.equal(fs.existsSync(path.join(q.out, 'remote', PR, 'site', 'agent')), true)
+})
+
+// Re-check 2 (B-17 residual): a board job is refused while a swap runs before
+// it makes anything, so no folder or lock of its own appears between the
+// swap's two renames.
+test('re-check 2: a board job is refused during a swap before it makes the board folder or its lock', () => {
+  const dir = tempDir('board-job-swap')
+  made.push(dir)
+  const config = { outputDir: dir }
+  const swap = path.join(dir, 'site.swap.lock')
+  assert.equal(acquireLock(swap, { kind: 'push' }), true)
+  // Every folder and file the call makes, even one it removes again.
+  const touched = []
+  const mkdir = mock.method(fs, 'mkdirSync', function (target, ...rest) {
+    touched.push(String(target))
+    return mkdir.mock.original.call(this, target, ...rest)
+  })
+  try {
+    const job = acquireBoardJob(config, 'site', 'capture')
+    assert.deepEqual(job, { ok: false, holder: 'push' })
+    assert.deepEqual(touched, [], 'nothing was made, not even for a moment')
+    assert.equal(fs.existsSync(path.join(dir, 'site')), false, 'no board folder was made')
+  } finally {
+    mkdir.mock.restore()
+    releaseLock(swap)
+  }
+  const job = acquireBoardJob(config, 'site', 'capture')
+  assert.equal(job.ok, true)
+  job.release()
+})
+
+// Re-check 2: a line appended to events.jsonl after the rollback read it
+// would be cut and not copied; the log is cut only while it is exactly what
+// was copied, else it stays as it is.
+test('re-check 2: restoreEventLog does not cut a line appended after it read the log', () => {
+  const dir = tempDir('event-log-race')
+  made.push(dir)
+  const log = path.join(dir, 'events.jsonl')
+  const head = '{"type":"comment.created","commentId":1}\n'
+  fs.writeFileSync(log, head)
+  const record = { events: { size: Buffer.byteLength(head), sha256: createHash('sha256').update(head).digest('hex') } }
+  fs.appendFileSync(log, '{"type":"comment.created","commentId":2}\n')
+  const aside = path.join(dir, 'replaced-x')
+  const late = '{"type":"comment.created","commentId":3}\n'
+  const result = restoreEventLog(dir, record, aside, () => fs.mkdirSync(aside), { beforeCut: () => fs.appendFileSync(log, late) })
+  assert.equal(result, 'kept')
+  assert.match(fs.readFileSync(log, 'utf8'), /"commentId":3/, 'the late line is still in the log')
+  // Without a late line it is cut.
+  const again = restoreEventLog(
+    dir,
+    {
+      events: {
+        size: fs.statSync(log).size - Buffer.byteLength(late),
+        sha256: createHash('sha256')
+          .update(fs.readFileSync(log).subarray(0, fs.statSync(log).size - Buffer.byteLength(late)))
+          .digest('hex'),
+      },
+    },
+    path.join(dir, 'replaced-y'),
+    () => fs.mkdirSync(path.join(dir, 'replaced-y')),
+  )
+  assert.equal(again, 'moved')
+  assert.doesNotMatch(fs.readFileSync(log, 'utf8'), /"commentId":3/)
+})
+
+// Re-check 2: the replaced-<time>-<pid> folder is made by the rollback itself;
+// a link planted under that name stops it, and nothing goes through the link.
+test('re-check 2: a link planted as the replaced-* folder stops the rollback; nothing is set aside through it', async () => {
+  const p = project()
+  await withEnvironmentColumn(p.out)
+  const done = await run(p, { json: true })
+  assert.equal(done.code, 0)
+  const backup = path.join(p.out, done.json.backup)
+  const outside = tempDir('planted-target')
+  made.push(outside)
+  const now = Date.now()
+  for (let s = 0; s < 6; s += 1) {
+    const stamp = stampOf(new Date(now + s * 1000))
+    fs.symlinkSync(outside, path.join(backup, `replaced-${stamp}-${process.pid}`))
+  }
+  await assert.rejects(run(p, { rollback: true }), /replaced-\d{8}T\d{6}Z-\d+ already exists; the rollback stops/)
+  assert.deepEqual(fs.readdirSync(outside), [], 'nothing went through the link')
 })

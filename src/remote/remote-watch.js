@@ -65,7 +65,8 @@ export async function watchRemote({
   // The local project's output folder (its config's outputDir), else .shapewall here.
   outputDir = null,
   // false (`watch --no-claim`, on this project's solo engine): only looks, as the local watch does. Every open
-  // comment is printed or run once per process (again when reopened), and no agent status or reply is written.
+  // comment agents may get (dispatchable: what a claiming watch would take) is printed or run once per process
+  // (again when reopened), and no agent status or reply is written.
   claim = true,
 }) {
   if (!ID_PATTERNS.project.test(String(projectId || ''))) throw new Error('the server sent an invalid project id')
@@ -279,11 +280,15 @@ export async function watchRemote({
     }
   }
 
-  // --no-claim: every open comment once per process (again when reopened), as id:reopenCount, claiming nothing.
+  // --no-claim: every open comment agents may get, once per process (again when reopened), as id:reopenCount,
+  // claiming nothing. Only a dispatchable one, as a claiming watch: never a 1.x comment that waits for the owner's
+  // OK (B-20), a guest's or a member's that nobody sent, or one the owner has not approved to run. One that becomes
+  // dispatchable later (the owner sent it) is handed out then.
   const handed = new Set()
   const handedKey = (item) => `${item.id}:${item.reopenCount || 0}`
   const look = async () => {
     const candidates = (await list())
+      .filter((item) => item.dispatchable === true)
       .filter((item) => validCommentId(item.id) && item.id > baseline && !running.has(item.id) && !handed.has(handedKey(item)))
       .sort((a, b) => a.id - b.id)
     for (const item of candidates) {

@@ -86,12 +86,17 @@ and `shapewall comments` fails with "Not a regular capture file." Nothing is los
 - **Paired devices** do not move. Other people, and your other devices, reach the engine through team mode
   (`shapewall serve --team`, or **Invite people** on the console's Members page): the same board on your tailnet with
   tailnet sign-in. See [team mode](hosted.md#inviting-people-team-mode).
-- **Authorship.** On a 1.x board an author was a typed name. On the engine your comments are the owner account's. A
-  plain local 1.x board (no `serve --accounts`) had one person behind it: you, at this machine or on a device you paired.
-  So in the move every comment there becomes the owner's, sent to agents as `watch` did on 1.x; only comments marked as an
-  agent's or a share guest's are not. With `serve --accounts`, other people could comment, so only comments the 1.x board
-  stamped as the owner's become the owner's; others signed with your name come in as imported text, and every other name
-  stays a label. Those are not sent to agents until you send them from the board. The dry run counts each kind. The `author` of the MCP tools `reply_to_comment` and `add_comment`, and
+- **Authorship.** On a 1.x board an author was a typed name. On the engine your comments are the owner account's. On a
+  plain local 1.x board (no `serve --accounts`) every comment that is not marked as an agent's or a share guest's becomes
+  the owner's. With `serve --accounts`, only comments the 1.x board stamped as the owner's become the owner's; others signed
+  with your name come in as imported text, and every other name stays a label. The dry run counts each kind.
+- **1.x comments wait for your OK.** 1.x never recorded who wrote a comment: on 1.1.0 `serve --host 0.0.0.0` anyone on the
+  network could post, an agent's `shapewall comments add` was not marked, and a `.shapewall/` folder can come with a cloned
+  repository. So no comment the migration brings in goes to agents by itself. `serve` says how many wait ("N comments from
+  1.x wait for your OK before agents get them"), and the board shows the same banner. **Review and send** on the banner lists
+  each one in full, and **Send to agents** sends exactly those, as if you wrote them; `shapewall comments approve
+--imported` does the same from your own terminal. A comment changed after you read the list is not sent. Until you send
+  them, the MCP tools and `comments --json` do not mark them as yours (`byOwner` is false). The `author` of the MCP tools `reply_to_comment` and `add_comment`, and
   `comments reply --author` and `comments add --author`, still label an agent's text, which stays marked as an agent's.
 - **The board's agent** runs as a connected agent of the engine (`shapewall agent connect --as local`), with the settings
   you had. It acts only when asked, as on a 1.x board.
@@ -101,7 +106,8 @@ and `shapewall comments` fails with "Not a regular capture file." Nothing is los
   `capture`, `links`, `push`, `journeys`, `variant` and `checks` work on the engine's board folders, running or not.
   `github issue`, `link` and `sync` work on the engine's comments, with this machine's GitHub token, which never goes to the
   engine. The GitHub webhook stays the 1.x server's: on the engine, `shapewall github sync` picks up merged pull requests.
-  `watch --no-claim` looks at the engine's open comments without taking any, as on a 1.x board.
+  `watch --no-claim` looks at the engine's open comments without taking any, as on a 1.x board, but only those agents may get: not
+  the 1.x comments that wait for your OK, nor a guest's or a member's that nobody sent.
 - **Version history** keeps the project's `keepVersions` (shapewall.config.json, 5 by default) per page and viewport, as
   in 1.x, plus every older version a comment points at. The first start after a migration prunes nothing, so the versions
   that moved arrive as they were; later starts trim to `keepVersions`, as the next 1.x capture would have.

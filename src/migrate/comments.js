@@ -7,12 +7,12 @@
 // engine's comment_files table (their bytes, under the same file name).
 //
 // Authors (IC4 B2): on a plain local board (no 1.x accounts, `localOnly`),
-// everyone who could type a comment was the owner, at this machine or on a
-// device the owner paired, and no released 1.x build stamped byOwner: every
-// person's comment there (not an agent's or a share guest's, not stamped
-// byOwner: false) becomes the owner's, so the engine sends it to agents as
-// 1.x watch did. With 1.x accounts (serve --accounts), other people could
-// comment, and the rule below holds.
+// every comment not marked as an agent's or a share guest's (and not stamped
+// byOwner: false) becomes the owner's. With 1.x accounts (serve --accounts),
+// the rule below holds. Either way none is sent to agents (B-20): 1.x never
+// recorded who wrote a comment (a LAN visitor, an agent, a comments.json that
+// came with a cloned repository), so each waits for the owner's OK
+// (`shapewall comments approve --imported`, or the board's button).
 // A local board's comments carry free names. Only a comment the
 // board stamped byOwner: true becomes the owner's account (author_user_id),
 // the same rule the local agent uses (watch-capabilities.js ownersComment).

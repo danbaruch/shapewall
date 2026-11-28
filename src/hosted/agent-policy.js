@@ -120,6 +120,20 @@ export function trustedMember(t, policy, user) {
   // User handles are account data, looked up by caller through the injected account query.
   return policy.trustedRoles.includes(member.role) || policy.trustedHandles.includes(t.handleFor?.(user))
 }
+// B-20: a comment brought in by an import (`shapewall migrate`, a hosted
+// import) that nobody vouched for yet and that a person could send: it waits
+// for the owner's OK (src/hosted/imported-ok.js).
+export const isWaitingImported = (row) =>
+  Boolean(
+    row &&
+    row.imported_at &&
+    !row.dispatch_hash &&
+    row.status === 'open' &&
+    !['agent', 'guest'].includes(row.import_author_kind) &&
+    !row.author_share_id &&
+    !row.author_token_id &&
+    (row.author_user_id || row.imported || row.imported_by),
+  )
 export function createAgentPolicy(t, { handleFor = () => null, now = () => new Date() } = {}) {
   const trusted = (policy, user) => trustedMember({ ...t, handleFor }, policy, user)
   function state(project, board, row) {
@@ -134,6 +148,7 @@ export function createAgentPolicy(t, { handleFor = () => null, now = () => new D
     return {
       dispatchable: Boolean(vouched && mentions && row.run_approved && row.status === 'open'),
       needsRunApproval: Boolean(vouched && !row.run_approved),
+      waitsForOk: isWaitingImported(row),
       vouchedBy: vouched ? handleFor(row.dispatch_by) : null,
     }
   }

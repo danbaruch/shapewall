@@ -70,6 +70,8 @@ export function CanvasNotes({
   dismissTip,
   modes,
   comparePair,
+  // A note that goes first in the stack (the 1.x comments waiting for the owner's OK, ImportedOk.jsx).
+  lead = null,
 }) {
   const modeLabel = (id) => modes.find((item) => item.id === id)?.label || id
   const touchInput = useTouchInput()
@@ -89,6 +91,7 @@ export function CanvasNotes({
     : `Pinch to zoom. Tap a page for its actions${canComment && !comparePair ? ': Comment is first. Or use the comment tool below' : ''}.`
   return (
     <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex flex-col items-center gap-1.5 px-2" data-sw-canvas-notes="true">
+      {lead}
       {showLinks && !activePage && !shownSteps && countLinks(data?.links, presentPages, hiddenLinkTargets) > IDLE_LINKS_MAX ? (
         <p
           className="w-max max-w-full rounded-full bg-surface px-3 py-1 text-xs font-medium text-muted shadow-pop"

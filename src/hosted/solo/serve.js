@@ -42,6 +42,7 @@ import { verifyEngine } from '../../engine-target.js'
 import { terminalSafe } from '../../remote/terminal.js'
 import { OPEN_KEY_FILE, soloHostName, soloHostSuffix } from './signin.js'
 import { teamPortProblem } from './team.js'
+import { waitingOkLine } from '../imported-ok.js'
 
 export const ENGINES = ['hosted']
 
@@ -325,7 +326,7 @@ export async function serveEngine(flags, out, options = {}) {
     }
   }
   holder.stop = handle.stop
-  const { boardUrl, tokenFiles = {} } = handle.app.locals.solo
+  const { boardUrl, tokenFiles = {}, waitingOk } = handle.app.locals.solo
   // serve.json (0600): where the engine answers and which 0600 file holds the command line's token, so
   // `comments`, `watch`, `mcp` and `export` in this folder read the engine and not the 1.x JSON files (G15,
   // src/engine-target.js). The token itself is never in it.
@@ -344,6 +345,8 @@ export async function serveEngine(flags, out, options = {}) {
   )
   out(`Shapewall is serving ${config.boards.length} board${config.boards.length === 1 ? '' : 's'} at ${boardUrl} (the solo engine)`)
   out(`Data: ${dir} (never commit it)`)
+  const waiting = waitingOkLine(waitingOk?.() || 0)
+  if (waiting) out(waiting)
   // The address goes in the environment, not on the agent's command line: any local user can read a process's
   // arguments (ps), and the name's random part is one of the layers that keep the cookie in (rev54 N3).
   out(`Agents: SHAPEWALL_REMOTE=${handle.origin} shapewall agent connect`)

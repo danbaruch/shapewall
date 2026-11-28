@@ -78,6 +78,7 @@ import { useBoardData } from './hooks/useBoardData'
 import { useBoardEvents } from './hooks/useBoardEvents'
 // Only once there is someone to follow: its own chunk.
 const FollowAgent = lazy(() => import('./FollowAgent'))
+const ImportedOk = lazy(() => import('./ImportedOk'))
 import { useJourneyState } from './hooks/useJourneyState'
 import { LANDED_MS, useFlyToPending, usePhoneStartView, useRefitOnChange } from './hooks/useCameraMoves'
 import { useCommentLink } from './hooks/useCommentLink'
@@ -1025,6 +1026,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     filter,
     allowed,
   })
+  // B-20: comments a migration brought in from 1.x that wait for the owner's OK (admins only).
   const commentMedia = useMemo(
     () => ({
       attach: canComment && !STATIC && !info?.guest,
@@ -2070,6 +2072,20 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                 ) : null}
                 {drawingOn ? null : (
                   <CanvasNotes
+                    lead={
+                      hostedMember && ['admin', 'owner'].includes(info?.role) ? (
+                        <Suspense fallback={null}>
+                          <ImportedOk
+                            boardId={boardId}
+                            wide={wide}
+                            onSent={() => {
+                              commentsQuery.refetch()
+                              agentsQuery.refetch()
+                            }}
+                          />
+                        </Suspense>
+                      ) : null
+                    }
                     wide={wide}
                     commentMode={commentMode}
                     canComment={canComment}

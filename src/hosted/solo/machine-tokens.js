@@ -60,6 +60,12 @@ export const MACHINE_TOKENS = {
 // listener refuses (src/hosted/solo/team.js), since those tokens are this machine's alone.
 export const machineTokenIds = (dir) => Object.values(readIds(dir)).filter((id) => typeof id === 'string')
 
+// The row id of one machine token ('cli', 'watch' or 'agent'), or null.
+export const machineTokenId = (dir, which) => {
+  const id = readIds(dir)[which]
+  return typeof id === 'string' ? id : null
+}
+
 function readIds(dir) {
   try {
     const data = JSON.parse(fs.readFileSync(path.join(dir, IDS_FILE), 'utf8'))
