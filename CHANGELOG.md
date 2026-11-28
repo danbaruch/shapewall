@@ -81,6 +81,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
   members cannot invite, nobody becomes a second owner, and members cannot make or remove projects or workspaces there.
   Turning it off removes the `tailscale serve` entry and signs out every tailnet session. Team mode never uses Funnel; a
   board on the public internet still needs a team server on your own domain and its checklist.
+- 2.0 final security review: the team listener's refusals are Express routes inside the team app, so `/API/...` and other
+  spellings are refused as `/api/...` is (invites, workspaces, projects, deletes, this machine's tokens); members, admins
+  included, cannot turn on share links, make one, or manage the engine's own agents or the project's default agent there.
+  `--read-only` and `--no-chat` now hold on the team listener, and by any letter case on the owner's. The engine that
+  `comments`, `watch` and `mcp` start never turns team mode on or runs `tailscale`. A `tailscale serve` entry a crash left
+  behind is removed at the next start (documented residual risk until then). Team starts and stops run one at a time, and a
+  start whose setting cannot be saved is taken back. The project the engine serves cannot be deleted. `serve --team` and
+  `serve --open` against a running engine check its proof before sending its key, and clean what they print.
+  `/solo/whoami` answers the engine's own name only. The engine's own agent takes work from its owner only unless the
+  owner saves `--audience server`; a batch of fixes stays with the agent it was confirmed with; members' running turns
+  stop when team mode goes off or they are removed; the agent's Read deny rules name a linked `.shapewall`,
+  `.shapewall-auth` or storageState by both paths.
 
 ## 1.5.0 - 2026-11-27
 

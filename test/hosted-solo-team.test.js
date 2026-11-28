@@ -352,8 +352,7 @@ test('teamGuard refuses what the engine keeps for its owner, whatever the letter
   try {
     const port = server.address().port
     const answer = async (method, url, body) => (await request(port, method, url, body === undefined ? {} : { body })).status
-    for (const prefix of ['/api', '/API', '/Api'])
-      assert.equal(await answer('POST', prefix + '/workspaces/ws_1/invites'), 403, prefix)
+    for (const prefix of ['/api', '/API', '/Api']) assert.equal(await answer('POST', prefix + '/workspaces/ws_1/invites'), 403, prefix)
     assert.equal(await answer('POST', '/api/Workspaces/ws_1/INVITES/'), 403)
     assert.equal(await answer('POST', '/api/workspaces'), 403)
     assert.equal(await answer('POST', '/API/WORKSPACES'), 403)

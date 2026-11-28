@@ -107,12 +107,9 @@ export function teamPortProblem(value) {
 // way the routes it guards are: case-insensitive, an optional trailing slash, the same parameters (rev 2.0 final
 // review A-1: a hand-written match on the raw path let /API/... through to the console's routes).
 
-const ONLY_OWNER_INVITES =
-  'Only the owner invites people to this board, from the machine that runs it (the console there, Invite people).'
-const ONLY_OWNER_SHARES =
-  'Only the owner opens this board to people outside it (share links), from the machine that runs it.'
-const ONLY_OWNER_AGENTS =
-  'The agents of the machine that runs this board are its owner\u2019s: they are managed from that machine only.'
+const ONLY_OWNER_INVITES = 'Only the owner invites people to this board, from the machine that runs it (the console there, Invite people).'
+const ONLY_OWNER_SHARES = 'Only the owner opens this board to people outside it (share links), from the machine that runs it.'
+const ONLY_OWNER_AGENTS = 'The agents of the machine that runs this board are its owner\u2019s: they are managed from that machine only.'
 
 const refuse = (res, status, code, message) => {
   res.writeHead(status, {
@@ -148,9 +145,12 @@ export function teamGuard({ db, dataDir }) {
     const row = db.prepare('SELECT token_id FROM agents WHERE id = ?').get(String(req.params.aid || ''))
     return Boolean(row && ids.includes(row.token_id))
   }
-  const agentPaths = [ws + `/projects/:pid/agents/:aid`, ws + `/projects/:pid/agents/:aid/audience`, ws + `/projects/:pid/agents/:aid/approval`]
-  const refuseMachineAgent = (req, res, next) =>
-    machineAgent(req) ? refuse(res, 403, 'owner_agents', ONLY_OWNER_AGENTS) : next()
+  const agentPaths = [
+    ws + `/projects/:pid/agents/:aid`,
+    ws + `/projects/:pid/agents/:aid/audience`,
+    ws + `/projects/:pid/agents/:aid/approval`,
+  ]
+  const refuseMachineAgent = (req, res, next) => (machineAgent(req) ? refuse(res, 403, 'owner_agents', ONLY_OWNER_AGENTS) : next())
   guard.patch(agentPaths, refuseMachineAgent)
   guard.put(agentPaths, refuseMachineAgent)
   guard.delete(agentPaths, refuseMachineAgent)
@@ -299,7 +299,11 @@ export async function sweepStaleServe(dataDir, { run, ownPort = null } = {}) {
   const off = await (run || ts.runCommand)('tailscale', ['serve', '--https=' + record.httpsPort, 'off']).catch(() => ({ code: 1 }))
   if (off.code === 0) {
     dropServeRecord(dataDir)
-    return 'Removed a tailscale serve entry team mode left behind on port ' + record.httpsPort + ' (it pointed at a port this engine no longer holds).'
+    return (
+      'Removed a tailscale serve entry team mode left behind on port ' +
+      record.httpsPort +
+      ' (it pointed at a port this engine no longer holds).'
+    )
   }
   return (
     'A tailscale serve entry team mode left behind still points at a port this engine no longer holds. Remove it: tailscale serve --https=' +
@@ -532,8 +536,7 @@ export function createSoloTeam({
   }
 
   // Engine start: an entry a crashed start left behind goes before anything else (A-4). -> null or a line.
-  const sweep = () =>
-    serial(async () => (headless || state ? null : sweepStaleServe(dataDir, tailscale.run ? { run: tailscale.run } : {})))
+  const sweep = () => serial(async () => (headless || state ? null : sweepStaleServe(dataDir, tailscale.run ? { run: tailscale.run } : {})))
 
   return {
     start,

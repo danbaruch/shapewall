@@ -418,8 +418,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
     handle(async (req, res) => {
       // The solo engine's own project stays (2.0 final review A-6): its binding goes with it, and the engine would
       // not start on its folder again.
-      if (deletesSoloBinding(db, { projectId: req.project.id }))
-        throw new HttpError(409, 'solo_project', SOLO_BOUND_DELETE_MESSAGE.project)
+      if (deletesSoloBinding(db, { projectId: req.project.id })) throw new HttpError(409, 'solo_project', SOLO_BOUND_DELETE_MESSAGE.project)
       await req.app.locals.soloCapture?.cancel(req.project.id)
       await req.app.locals.soloChecks?.cancel(req.project.id)
       req.projects.remove(req.project.id)

@@ -332,3 +332,53 @@ test('solo: when the agent disconnects mid-batch, the batch stops with the reaso
     ['skipped', 'skipped'],
   )
 })
+
+test('solo: a batch stays with the agent it started with when the default agent changes (C-2)', async () => {
+  const solo = await startSolo('solo-batch-pinned')
+  await connect(solo)
+  const first = await comment(solo, 'First ' + fixScript([['edit', 'index.html', 'Hello', 'One']]))
+  const second = await comment(solo, 'Second ' + fixScript([['edit', 'styles.css', 'blue', 'green']]))
+  const started = await solo.browser.post(batchUrl(solo), { commentIds: [first.id, second.id] })
+  assert.equal(started.status, 200, started.text)
+  const card = async (number) =>
+    until(async () => {
+      const batch = await batchNow(solo)
+      return batch?.state === 'waiting' && batch.waiting?.commentId === number ? batch.waiting : null
+    }, 'the card of #' + number)
+  const allow = async (number, waiting) => {
+    const allowed = await solo.browser.post(
+      solo.base + '/agent/boards/sample/threads/comment-' + number + '/permissions/' + waiting.card.id,
+      { optionId: 'allow', hash: waiting.card.hash },
+    )
+    assert.equal(allowed.status, 200, allowed.text)
+  }
+  const firstCard = await card(first.id)
+  // Meanwhile the project's default is set to another agent row of this project (the engine's watch agent). The
+  // batch's next fix still goes to the agent it was confirmed with (its id is pinned, chat-routes.js batchRequest).
+  const { workspaceId, projectId } = solo.owner
+  const linked = solo.hosted.db
+    .prepare('SELECT agent_id FROM chat_turns WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 1')
+    .get(workspaceId)
+  const other = solo.hosted.db.prepare('SELECT id FROM agents WHERE project_id = ? AND id != ?').get(projectId, linked.agent_id)
+  assert.ok(other, 'a second agent row')
+  const changed = await solo.browser.call('PUT', '/api/workspaces/' + workspaceId + '/projects/' + projectId + '/default-agent', {
+    body: { agentId: other.id },
+  })
+  assert.equal(changed.status, 200, changed.text)
+  await allow(first.id, firstCard)
+  await allow(second.id, await card(second.id))
+  const finished = await until(async () => {
+    const batch = await batchNow(solo)
+    return batch && !['running', 'waiting'].includes(batch.state) ? batch : null
+  }, 'the batch to finish')
+  assert.equal(finished.state, 'done', JSON.stringify(finished))
+  assert.deepEqual(
+    finished.items.map((item) => item.state),
+    ['fixed', 'fixed'],
+  )
+  const turns = solo.hosted.db.prepare("SELECT DISTINCT agent_id FROM chat_turns WHERE kind = 'fix'").all()
+  assert.deepEqual(
+    turns.map((row) => row.agent_id),
+    [linked.agent_id],
+  )
+})

@@ -106,7 +106,16 @@ async function proveRunning(running) {
     throw new Error(
       `The solo engine for this project (pid ${running.pid}) left no way to check it is the one answering. Restart it with this version of Shapewall.`,
     )
-  await verifyEngine({ origin: running.origin || `http://127.0.0.1:${running.port}`, proof, pid: running.pid })
+  // The port proven is the port the key goes to: serve.json's origin and port must agree.
+  let origin = null
+  try {
+    origin = new URL(String(running.origin))
+  } catch {
+    origin = null
+  }
+  if (!origin || Number(origin.port) !== running.port)
+    throw new Error(`The solo engine for this project (pid ${running.pid}) left a serve.json that does not read. Restart it.`)
+  await verifyEngine({ origin: origin.origin, proof, pid: running.pid })
 }
 
 // `serve --team [off]` while the engine runs: it switches there (POST /solo/team-switch, this start's key).
