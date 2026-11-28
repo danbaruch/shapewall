@@ -49,7 +49,11 @@ npx shapewall migrate --rollback             # put the 1.x board back
 
 `--rollback` restores every board from the backups the runs recorded, checked byte for byte, and the engine folder as it was
 before the run. Nothing is deleted on the way: what is there now, including anything made on the engine since the move, goes
-aside into `<backup>/replaced-<time>/`. Rollback is part of the Apache 2.0 core and never needs the engine.
+aside into `<backup>/replaced-<time>/`. After a migration that was stopped midway, `--rollback` puts back only that run (earlier
+finished runs stay on the engine); `--rollback --all` puts back every run. A rollback that is itself stopped midway leaves
+`.shapewall/ROLLING-BACK`, and nothing starts until `shapewall migrate --rollback` runs again and finishes it. A moved board's
+1.x folder keeps only a note, so an older Shapewall started there stops with an error instead of opening an empty board.
+Rollback is part of the Apache 2.0 core and never needs the engine.
 
 ## Staying on 1.x
 
