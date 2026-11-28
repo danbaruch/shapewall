@@ -30,7 +30,8 @@ async function fixture(name) {
   fs.mkdirSync(dir, { recursive: true })
   // Eight older versions of one page and viewport, as a 1.x board brings them.
   for (let i = 1; i <= 8; i += 1)
-    for (const suffix of ['png', 'thumb.png', 'html']) fs.writeFileSync(path.join(dir, `home.desktop.2026110${i}T100000000Z-ab12.${suffix}`), 'x')
+    for (const suffix of ['png', 'thumb.png', 'html'])
+      fs.writeFileSync(path.join(dir, `home.desktop.2026110${i}T100000000Z-ab12.${suffix}`), 'x')
   const setKeep = (keep) => {
     const row = hosted.db.prepare('SELECT definition FROM boards WHERE workspace_id = ?').get(ws)
     const definition = JSON.parse(row.definition)

@@ -203,7 +203,10 @@ test('watch --no-claim on the engine hands out every open comment once and claim
   const looked = await cli(['watch', '--once', '--no-claim', '--config', file])
   assert.equal(looked.code, 0, looked.err)
   assert.doesNotMatch(looked.err, /not with --remote/)
-  const handed = looked.out.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+  const handed = looked.out
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
   assert.deepEqual(
     handed.map((item) => item.comment.body),
     ['Bigger logo'],
