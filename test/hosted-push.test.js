@@ -457,3 +457,9 @@ test('a preexisting restored push cannot recreate its missing staging folder by 
   await assert.rejects(remote.commitPush(started.id, { manifest: {}, variants: [] }), (error) => error.code === 'push_incomplete')
   assert.equal(fs.existsSync(staged), false)
 })
+
+test('the export comments route is the solo engine only: a team server answers 404', async () => {
+  const answer = await tokenCall(hosted, token, 'GET', '/api/v1/boards/sample/export/comments')
+  assert.equal(answer.status, 404)
+  assert.equal(answer.json?.error?.message, 'Not on this server.', 'the route itself refuses (not a missing route)')
+})

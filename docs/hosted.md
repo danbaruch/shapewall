@@ -734,9 +734,12 @@ existing project's `.shapewall/` moves into it with [`shapewall migrate`](#movin
   Agents never read `.shapewall/.engine/`: Shapewall's own file reads refuse it, and a Claude Code agent gets a deny rule for
   it in its session settings. `comments delete` is not on the engine yet; `comments add` takes `--page`, `--body`,
   `--viewport`, `--author` and `--selector` (pinned from the engine's latest capture), and `comments selectors` reads the
-  engine's captures. `shapewall export` reads the 1.x comment files, so once the engine holds the project it is refused unless
-  `--no-comments`. With the engine stopped, these commands refuse and say to start `shapewall serve` once the engine holds
-  the project (`SHAPEWALL_ENGINE=legacy` reads the 1.x files), and refuse a board `shapewall migrate` moved. An explicit `--remote` (or
+  engine's captures. `shapewall export` takes the engine's comments and images through the token API
+  (`/api/v1/boards/<id>/export/comments`, as a public viewer sees them: guests show as "Guest"). With no engine running,
+  `comments`, `watch`, `mcp` and `export` start it for themselves (on a free loopback port, without the project's agent,
+  serve.lock keeping a second one off the data) and stop it when they end; a command an agent started never does, and
+  refuses instead (`SHAPEWALL_ENGINE=legacy` reads the 1.x files). A board `shapewall migrate` moved is never read from the
+  1.x files. An explicit `--remote` (or
   `SHAPEWALL_REMOTE`) always wins. `shapewall events` reads `.shapewall/events.jsonl`, which the engine writes, and `ci` does
   not read comments, so neither changes.
 - **The board's own agent.** The engine runs this project's agent the way any machine runs one for a team server: a child
@@ -1328,7 +1331,7 @@ API, `more` counts the rest; a current capture's URL answers `409 capture_moved`
 with `read` can list and fetch every kept version of every page: old captures are as readable as the current ones, so give a
 read token only to someone who may see the board's history. A claim token (a connected agent's) is the exception: it lists and
 fetches only the current captures and the versions the comments dispatched to it were made on,
-`GET /api/v1/boards/:board/comments?status=open|resolved|all&page=&mention=&environment=&guests=1`, `GET /api/v1/boards/:board/comments/:id`,
+`GET /api/v1/boards/:board/comments?status=open|resolved|all&page=&mention=&environment=&guests=1`, `GET /api/v1/boards/:board/comments/:id`, `GET /api/v1/boards/:board/export/comments` (scope `read`, the solo engine only: every comment as a public viewer of the board sees it, in the board's comment shape, for `shapewall export`; share link guests only with `?guests=1`),
 `GET /api/v1/boards/:board/files/:kind/:file` (and `files/envs/:env/:file` for another environment's screenshot or element map), `POST /api/v1/boards/:board/comments` (scope `reply`: `{ page, body, viewport?, x?, y?,
 anchor? }`, the pin in percent of the page, near the top-left corner by default; no images, drawing or author name; audited as
 `token_commented`), `POST .../comments/:id/replies`, `POST .../comments/:id/agent-status`

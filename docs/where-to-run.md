@@ -53,11 +53,15 @@ the engine cannot take yet) stops `serve` with the reason, and nothing changes.
 Once a board has moved, the 1.x writers refuse it: a `shapewall mcp`, `watch` or starter agent started before the move, and the 1.x
 server. Once the engine holds the project (after the move, or in a project whose first board was the engine's):
 
-- `comments`, `watch` and `mcp` go to the engine while it runs. With it stopped they stop and say to start `shapewall serve`;
-  the 1.x files are not the board.
+- `comments`, `watch`, `mcp` and `export` go to the engine. When no `shapewall serve` runs, they start the engine for
+  themselves, on this machine only and without the project's agent, and stop it when they end, so an agent's `shapewall mcp`
+  works with or without `serve` running. A running engine is used, never a second one on the same data.
 - `capture`, `links`, `push`, `journeys`, `variant` and `checks` work on the engine's board folders
   (`.shapewall/.engine/files/`), running or not.
-- `export` needs `--no-comments` (it exports the engine's captures); `share --remote` and `github` refuse an engine board for now.
+- `export` writes the engine's comments and their images (through its token API) next to its captures; `--no-comments` exports
+  the captures only.
+- `github` refuses an engine board for now (the engine does not keep issue and pull request links yet). `share --remote` refuses
+  one too: `shapewall serve --team` moves a solo board to a team server.
 - `comments add --selector` and `comments selectors` read the engine's latest captures.
 
 `SHAPEWALL_ENGINE=legacy` puts every command back on the 1.x files (deprecated).

@@ -180,6 +180,9 @@ export function createRemote({
     // A page's capture history, newest first (current and kept versions).
     pageVersions: (boardId, pageId, { viewport = null, signal } = {}) =>
       call('GET', `${board(boardId)}/pages/${enc(pageId)}/versions${viewport ? `?viewport=${enc(viewport)}` : ''}`, { signal }),
+    // The board's comments as a static export shows them, and one of their images (shapewall export, R5c).
+    exportComments: (boardId, { signal } = {}) => call('GET', `${board(boardId)}/export/comments?guests=1`, { signal }),
+    commentFile: (boardId, name, { signal } = {}) => call('GET', `${board(boardId)}/comment-files/${enc(name)}?guests=1`, { signal }),
     // Guest comments (share links) only with `guests: true`.
     comments: (boardId, { status = 'open', page = null, mention = null, guests = false, environment = null, signal } = {}) => {
       const query = new URLSearchParams({ status })

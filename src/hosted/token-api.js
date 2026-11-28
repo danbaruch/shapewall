@@ -28,6 +28,7 @@ import { COMMENT_ROUTING } from './agents.js'
 import { mountHostedApprovals } from './agent-approvals.js'
 import { mountAgentLink, requireNoRunningFix } from './agent-link.js'
 import { sendPng } from './board-context.js'
+import { publicView } from './guest-view.js'
 import { markupName } from '../comment-media.js'
 import { commentListsFile, createMarkupCache, readCommentFile, renderMarkupPng, sendImage } from './comment-files.js'
 import { COMMENT_AUTHOR, REPLY_AUTHOR, cleanAuthor, rowToComment, validateOnlyFrom } from './comments.js'
@@ -656,6 +657,26 @@ export function mountTokenApi({
         board: boardRef(ctx.board),
         comment: remoteItem(req, ctx, contextFor(ctx), dispatchView(req.t, req.project.id, ctx.board.id, rowToComment(row))),
       })
+    }),
+  )
+  // The solo engine only. Every comment of the board as a public viewer of it sees them (guests
+  // shown as "Guest", no share or account ids), in the board's own comment
+  // shape: what `shapewall export` writes into a static board (2.0.0, R5c:
+  // export of a project the solo engine holds). Images by name, read through
+  // /comment-files/<name>?guests=1.
+  v1.get(
+    '/boards/:bid/export/comments',
+    scope('read'),
+    v1Board((req, res, ctx) => {
+      // The solo engine only: a team server's guests stay behind ?guests=1 on /comments.
+      if (!solo) return fail(res, 404, 'not_found', 'Not on this server.')
+      // Share link guests' text (untrusted, from outside) only with ?guests=1, as on /comments.
+      const guests = req.query.guests === '1'
+      const comments = ctx.comments
+        .list({})
+        .filter((comment) => guests || !comment.authorGuest)
+        .map((comment) => publicView(guests ? comment : { ...comment, replies: comment.replies.filter((reply) => !reply.guest) }))
+      res.json({ board: boardRef(ctx.board), comments })
     }),
   )
   // Another environment's capture (a comment left there in compare mode):

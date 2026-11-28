@@ -2,6 +2,7 @@ import { portablePagePath } from './portable-path.js'
 import { portableLinks, portableManifest } from './portable-capture.js'
 import { joinUrl } from './config.js'
 import { scrubUrl } from './error-scrub.js'
+import { COMMENT_FILE_RE } from './comment-fields.js'
 // Static, read-only export of every board: the built client plus JSON and
 // capture files, for any static host (or a folder you zip and send). The
 // client sees <meta name="shapewall-static"> and reads data/ instead of /api.
@@ -59,7 +60,17 @@ if (location.protocol === 'file:') {
 // does not have; they are left out unless visitors may comment.
 export async function exportStatic(
   config,
-  { out, clientDir = CLIENT_DIR, includeComments = true, includeChecks = false, browserComments = false, noindex = false } = {},
+  {
+    out,
+    clientDir = CLIENT_DIR,
+    includeComments = true,
+    includeChecks = false,
+    browserComments = false,
+    noindex = false,
+    // Where the comments come from when they are not the 1.x files (the solo engine, R5c):
+    // { list(boardId) -> comments, file(boardId, name) -> bytes }.
+    commentSource = null,
+  } = {},
 ) {
   if (!fs.existsSync(path.join(clientDir, 'index.html'))) throw new Error('The client is not built. Run "npm run build" first.')
   const target = path.resolve(out)
@@ -94,6 +105,8 @@ export async function exportStatic(
   let comments = 0
   for (const board of config.boards) {
     const view = boardView(config, board)
+    const sourced = includeComments && commentSource ? await commentSource.list(board.id) : null
+    if (sourced) view.commentCounts = countsOf(sourced)
     view.board.siteUrl = board.publicUrl ? scrubUrl(board.publicUrl) : null
     for (const page of view.board.pages) {
       page.path = portablePagePath(page.path)
@@ -110,7 +123,7 @@ export async function exportStatic(
     fs.writeFileSync(path.join(data, 'boards', `${board.id}.json`), JSON.stringify(view))
     const dir = path.join(data, 'boards', board.id)
     fs.mkdirSync(dir, { recursive: true })
-    const boardComments = includeComments ? listComments(config, board.id) : []
+    const boardComments = sourced || (includeComments ? listComments(config, board.id) : [])
     comments += boardComments.length
     fs.writeFileSync(path.join(dir, 'comments.json'), JSON.stringify({ comments: boardComments }))
     if (includeChecks) {
@@ -138,7 +151,8 @@ export async function exportStatic(
       files += copyMatching(config.outputDir, path.join(source, 'versions'), path.join(dir, 'versions'), (name) => name.endsWith('.png'))
     // Images on the exported comments and their replies (not markup PNGs,
     // which are for agents, nor files of deleted comments).
-    if (includeComments) {
+    if (sourced) files += await writeSourcedImages(commentSource, board.id, sourced, path.join(dir, 'comment-files'))
+    else if (includeComments) {
       const kept = new Set()
       for (const comment of listComments(config, board.id))
         for (const item of [comment, ...comment.replies]) for (const image of item.images || []) kept.add(image.file)
@@ -147,6 +161,32 @@ export async function exportStatic(
     files += await exportCompare(config, board, dir)
   }
   return { out: target, boards: config.boards.length, files, comments }
+}
+
+// Comment counts per page, as store.js commentCounts gives them for the 1.x files.
+function countsOf(comments) {
+  const counts = {}
+  for (const comment of comments) {
+    counts[comment.pageId] = counts[comment.pageId] || { open: 0, resolved: 0 }
+    counts[comment.pageId][comment.status] = (counts[comment.pageId][comment.status] || 0) + 1
+  }
+  return counts
+}
+
+// The images the sourced comments and replies list, under the names they list (checked like a stored file name).
+async function writeSourcedImages(commentSource, boardId, comments, folder) {
+  const names = new Set()
+  for (const comment of comments)
+    for (const item of [comment, ...(comment.replies || [])])
+      for (const image of item.images || []) if (COMMENT_FILE_RE.test(String(image?.file || ''))) names.add(image.file)
+  if (!names.size) return 0
+  fs.mkdirSync(folder, { recursive: true })
+  let written = 0
+  for (const name of names) {
+    fs.writeFileSync(path.join(folder, name), await commentSource.file(boardId, name))
+    written += 1
+  }
+  return written
 }
 
 // Every ordered pair of captured environments: their screenshots (and

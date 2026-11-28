@@ -30,6 +30,19 @@ export async function serveEngine(flags, out, options = {}) {
   return run(flags, out, options)
 }
 
+// The solo engine for one command (2.0.0, R5c: `comments`, `watch` and
+// `mcp` in a project the engine holds while no `serve` runs): the same
+// start as `serve`, on a free loopback port, without the project's agent,
+// and without exiting this process when it stops. -> the handle (stop()).
+export async function startEngineHeadless(config, { env = process.env } = {}) {
+  const { startHosted } = await import('./server.js')
+  return serveEngine({ engine: 'hosted', config: config.file, port: 0, 'no-chat': true }, () => {}, {
+    // A copy: `mcp` marks its own process.env as an agent's afterwards, which is not the engine's.
+    env: { ...env },
+    start: (options) => startHosted({ ...options, exitOnStop: false }),
+  })
+}
+
 export async function hostedCommand(positional, flags, out, err = out) {
   const [sub, ...rest] = positional
   if (sub === 'setup') return setup(flags, out)
